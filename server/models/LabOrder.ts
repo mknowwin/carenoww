@@ -11,6 +11,8 @@ export interface ILabOrder extends Document {
   result: string | null;
   priority: "Routine" | "Urgent" | "STAT";
   doctor: string;
+  appointmentId?: string;
+  notes?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +29,8 @@ const LabOrderSchema = new Schema<ILabOrder>(
     result: { type: String, default: null },
     priority: { type: String, enum: ["Routine", "Urgent", "STAT"], default: "Routine" },
     doctor: { type: String, default: "" },
+    appointmentId: { type: String, default: "" },
+    notes: { type: String, default: "" },
   },
   { timestamps: true }
 );

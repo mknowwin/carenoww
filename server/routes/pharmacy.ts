@@ -8,7 +8,7 @@ router.use(authMiddleware);
 
 async function nextRxId(tenantId: string): Promise<string> {
   const count = await PharmacyOrder.countDocuments({ tenantId });
-  return `RX-${String(count + 1).padStart(3, "0")}`;
+  return `RX-${String(count + 1).padStart(4, "0")}`;
 }
 
 // ── Pharmacy Orders ───────────────────────────────────────────────────────────
@@ -16,9 +16,10 @@ async function nextRxId(tenantId: string): Promise<string> {
 // GET /api/pharmacy/orders
 router.get("/orders", async (req: AuthRequest, res) => {
   try {
-    const { status, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const { status, patientId, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
-    if (status) query.status = status;
+    if (status)    query.status    = status;
+    if (patientId) query.patientId = patientId;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [orders, total] = await Promise.all([
@@ -32,7 +33,7 @@ router.get("/orders", async (req: AuthRequest, res) => {
 });
 
 // POST /api/pharmacy/orders
-router.post("/orders", requireRole("admin", "doctor", "pharmacist", "nurse"), async (req: AuthRequest, res) => {
+router.post("/orders", requireRole("admin", "doctor", "pharmacist", "nurse", "receptionist"), async (req: AuthRequest, res) => {
   try {
     const rxId = await nextRxId(req.user!.tenantId);
     const order = await PharmacyOrder.create({ ...req.body, tenantId: req.user!.tenantId, rxId });
@@ -43,12 +44,22 @@ router.post("/orders", requireRole("admin", "doctor", "pharmacist", "nurse"), as
   }
 });
 
-// PUT /api/pharmacy/orders/:id
+// PUT /api/pharmacy/orders/:id — update status / dispense
 router.put("/orders/:id", requireRole("admin", "pharmacist", "nurse"), async (req: AuthRequest, res) => {
   try {
+    const allowed = ["status", "dispensedBy", "dispensedAt", "notes"];
+    const update: any = {};
+    allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
+
+    // Auto-set dispense metadata when dispensing
+    if (update.status === "Dispensed" && !update.dispensedBy) {
+      update.dispensedBy = req.user!.name;
+      update.dispensedAt = new Date();
+    }
+
     const order = await PharmacyOrder.findOneAndUpdate(
       { _id: req.params.id, tenantId: req.user!.tenantId },
-      { $set: req.body },
+      { $set: update },
       { new: true }
     );
     if (!order) return res.status(404).json({ error: "Order not found" });
@@ -63,7 +74,10 @@ router.put("/orders/:id", requireRole("admin", "pharmacist", "nurse"), async (re
 // GET /api/pharmacy/inventory
 router.get("/inventory", async (req: AuthRequest, res) => {
   try {
-    const inventory = await DrugInventory.find({ tenantId: req.user!.tenantId }).sort({ name: 1 });
+    const { search } = req.query as Record<string, string>;
+    const query: any = { tenantId: req.user!.tenantId };
+    if (search) query.name = { $regex: search, $options: "i" };
+    const inventory = await DrugInventory.find(query).sort({ name: 1 });
     res.json(inventory);
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -84,18 +98,20 @@ router.post("/inventory", requireRole("admin", "pharmacist"), async (req: AuthRe
 // PUT /api/pharmacy/inventory/:id
 router.put("/inventory/:id", requireRole("admin", "pharmacist"), async (req: AuthRequest, res) => {
   try {
-    // Auto-compute status from stock vs reorderLevel
     const updates = { ...req.body };
-    if (updates.stock !== undefined && updates.reorderLevel !== undefined) {
-      const ratio = updates.stock / updates.reorderLevel;
-      updates.status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
-    }
+    const current = await DrugInventory.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
+    if (!current) return res.status(404).json({ error: "Drug not found" });
+
+    const stock        = updates.stock        ?? current.stock;
+    const reorderLevel = updates.reorderLevel ?? current.reorderLevel;
+    const ratio = reorderLevel > 0 ? stock / reorderLevel : 2;
+    updates.status = ratio <= 0 ? "Critical" : ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
+
     const drug = await DrugInventory.findOneAndUpdate(
       { _id: req.params.id, tenantId: req.user!.tenantId },
       { $set: updates },
       { new: true }
     );
-    if (!drug) return res.status(404).json({ error: "Drug not found" });
     res.json(drug);
   } catch {
     res.status(500).json({ error: "Internal server error" });

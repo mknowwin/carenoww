@@ -2,10 +2,19 @@ import { Router } from "express";
 import Patient from "../models/Patient.js";
 import Appointment from "../models/Appointment.js";
 import BillingRecord from "../models/BillingRecord.js";
-import BedOccupancy from "../models/BedOccupancy.js";
+import IPDAdmission from "../models/IPDAdmission.js";
 import DrugInventory from "../models/DrugInventory.js";
 import LabOrder from "../models/LabOrder.js";
 import { authMiddleware, AuthRequest } from "../middleware/auth.js";
+
+const WARD_CAPACITY: Record<string, number> = {
+  "General Ward": 80,
+  "ICU":          20,
+  "Private Ward": 30,
+  "Semi-Private": 20,
+  "Obs/Gyn":      15,
+  "Pediatric":    20,
+};
 
 const router = Router();
 router.use(authMiddleware);
@@ -26,11 +35,11 @@ router.get("/metrics", async (req: AuthRequest, res) => {
       criticalAlerts,
     ] = await Promise.all([
       Patient.countDocuments({ tenantId, isActive: true }),
-      Patient.countDocuments({ tenantId, status: "OPD", isActive: true }),
-      Patient.countDocuments({ tenantId, status: "IPD", isActive: true }),
-      Patient.countDocuments({ tenantId, status: "ICU", isActive: true }),
+      Appointment.countDocuments({ tenantId, date: today, status: { $in: ["Confirmed", "Waiting", "In Consult"] } }),
+      IPDAdmission.countDocuments({ tenantId, status: "Active" }),
+      IPDAdmission.countDocuments({ tenantId, status: "Active", ward: "ICU" }),
       Appointment.countDocuments({ tenantId, date: today }),
-      BillingRecord.countDocuments({ tenantId, status: "Pending" }),
+      BillingRecord.countDocuments({ tenantId, status: { $in: ["Pending", "Partial"] } }),
       Patient.countDocuments({ tenantId, riskLevel: "Critical", isActive: true }),
     ]);
 
@@ -40,10 +49,10 @@ router.get("/metrics", async (req: AuthRequest, res) => {
       { $group: { _id: null, total: { $sum: "$paid" } } },
     ]);
 
-    // Bed occupancy rate
-    const beds = await BedOccupancy.find({ tenantId });
-    const totalBeds = beds.reduce((s, b) => s + b.total, 0);
-    const occupiedBeds = beds.reduce((s, b) => s + b.occupied, 0);
+    // Bed occupancy rate from live IPD admissions
+    const activeAdmissions = await IPDAdmission.find({ tenantId, status: "Active" });
+    const totalBeds    = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
+    const occupiedBeds = activeAdmissions.length;
     const bedOccupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
 
     res.json({
@@ -66,27 +75,21 @@ router.get("/metrics", async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/dashboard/bed-occupancy
+// GET /api/dashboard/bed-occupancy — derived from live IPD admissions
 router.get("/bed-occupancy", async (req: AuthRequest, res) => {
   try {
-    const beds = await BedOccupancy.find({ tenantId: req.user!.tenantId });
-    res.json(beds);
-  } catch {
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+    const tenantId = req.user!.tenantId;
+    const active = await IPDAdmission.find({ tenantId, status: "Active" });
+    const wardCounts: Record<string, number> = {};
+    active.forEach((a) => { wardCounts[a.ward] = (wardCounts[a.ward] || 0) + 1; });
 
-// PUT /api/dashboard/bed-occupancy/:ward
-router.put("/bed-occupancy/:ward", async (req: AuthRequest, res) => {
-  try {
-    const { total, occupied } = req.body;
-    const available = total - occupied;
-    const bed = await BedOccupancy.findOneAndUpdate(
-      { tenantId: req.user!.tenantId, ward: req.params.ward },
-      { total, occupied, available },
-      { new: true, upsert: true }
-    );
-    res.json(bed);
+    const result = Object.entries(WARD_CAPACITY).map(([ward, total]) => ({
+      ward,
+      total,
+      occupied:  wardCounts[ward] || 0,
+      available: total - (wardCounts[ward] || 0),
+    }));
+    res.json(result);
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -146,19 +149,50 @@ router.get("/ai-alerts", async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/dashboard/revenue-trend
+// GET /api/dashboard/revenue-trend — real billing aggregation by month
 router.get("/revenue-trend", async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
-    // Last 7 months aggregated from billing
     const now = new Date();
-    const months = [];
+    const monthDefs = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push({ year: d.getFullYear(), month: d.getMonth() + 1, label: d.toLocaleString("default", { month: "short" }) });
+      monthDefs.push({
+        year:  d.getFullYear(),
+        month: d.getMonth() + 1,
+        label: d.toLocaleString("default", { month: "short" }),
+        start: new Date(d.getFullYear(), d.getMonth(), 1),
+        end:   new Date(d.getFullYear(), d.getMonth() + 1, 1),
+      });
     }
-    // Return placeholder trend (real aggregation would use $month/$year operators)
-    const trend = months.map((m) => ({ month: m.label, opd: 0, ipd: 0, pharmacy: 0 }));
+
+    const trend = await Promise.all(monthDefs.map(async (m) => {
+      const [opdRes, ipdRes, pharmRes, allRes] = await Promise.all([
+        BillingRecord.aggregate([
+          { $match: { tenantId, type: "OPD", createdAt: { $gte: m.start, $lt: m.end } } },
+          { $group: { _id: null, total: { $sum: "$paid" } } },
+        ]),
+        BillingRecord.aggregate([
+          { $match: { tenantId, type: "IPD", createdAt: { $gte: m.start, $lt: m.end } } },
+          { $group: { _id: null, total: { $sum: "$paid" } } },
+        ]),
+        BillingRecord.aggregate([
+          { $match: { tenantId, type: "Pharmacy", createdAt: { $gte: m.start, $lt: m.end } } },
+          { $group: { _id: null, total: { $sum: "$paid" } } },
+        ]),
+        BillingRecord.aggregate([
+          { $match: { tenantId, createdAt: { $gte: m.start, $lt: m.end } } },
+          { $group: { _id: null, total: { $sum: "$paid" } } },
+        ]),
+      ]);
+      const opd      = opdRes[0]?.total   || 0;
+      const ipd      = ipdRes[0]?.total   || 0;
+      const pharmacy = pharmRes[0]?.total  || 0;
+      const total    = allRes[0]?.total    || 0;
+      // Remaining goes to ipd bucket (Lab/Procedures etc.)
+      return { month: m.label, opd, ipd: ipd || Math.max(0, total - opd - pharmacy), pharmacy };
+    }));
+
     res.json(trend);
   } catch {
     res.status(500).json({ error: "Internal server error" });

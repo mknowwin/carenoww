@@ -9,8 +9,7 @@ import {
   User, Brain, AlertCircle, CheckCircle2, RefreshCw, Pencil, XCircle,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { appointments as apptApi } from "@/lib/api";
-import { APPOINTMENTS as APPTS_FALLBACK, DOCTORS } from "@/lib/mock-data";
+import { appointments as apptApi, users as usersApi } from "@/lib/api";
 import AppointmentModal from "@/components/modals/AppointmentModal";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -35,10 +34,19 @@ export default function AppointmentsPage() {
   const [editAppt, setEditAppt] = useState<any>(null);
   const [updating, setUpdating] = useState<string | null>(null);
 
+  const today = new Date().toISOString().split("T")[0];
+
   const { data: apiData } = useQuery({
     queryKey: ["appointments"],
     queryFn: () => apptApi.list(),
     retry: false,
+  });
+
+  const { data: doctorsData } = useQuery({
+    queryKey: ["doctors", today],
+    queryFn: () => usersApi.doctors({ date: today }),
+    retry: false,
+    refetchInterval: 30000,
   });
 
   // Always use _id (MongoDB ObjectId) for API calls, not the display id (aptId)
@@ -53,7 +61,7 @@ export default function AppointmentsPage() {
     }
   };
 
-  const APPOINTMENTS = (apiData?.appointments ?? APPTS_FALLBACK).map((a: any) => ({
+  const APPOINTMENTS = (apiData?.appointments ?? []).map((a: any) => ({
     ...a,
     id: a.aptId || a._id || a.id,
   }));
@@ -210,46 +218,74 @@ export default function AppointmentsPage() {
               <CardTitle className="text-sm font-semibold">Doctor Availability</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {DOCTORS.slice(0, 6).map((doc) => (
-                <div key={doc.id} className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-                    {doc.name.split(" ")[1]?.[0] ?? "D"}
+              {(!doctorsData || doctorsData.length === 0) && (
+                <p className="text-xs text-muted-foreground text-center py-3">
+                  No doctors configured. Add via Settings → Departments & Doctors.
+                </p>
+              )}
+              {(doctorsData ?? []).slice(0, 8).map((doc: any) => {
+                const initials = doc.name.split(" ").slice(-1)[0]?.[0] ?? "D";
+                const bookedToday = doc.bookedCount ?? 0;
+                const isAvail     = doc.isAvailable !== false;
+                return (
+                  <div key={doc._id} className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                      {initials}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium truncate">{doc.name}</div>
+                      <div className="text-xs text-muted-foreground">{doc.specialty || doc.department}</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <Badge className={`text-xs ${isAvail ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+                        {isAvail ? <CheckCircle2 className="h-2.5 w-2.5 mr-0.5 inline" /> : null}
+                        {isAvail ? "Available" : "Fully Booked"}
+                      </Badge>
+                      {bookedToday > 0 && (
+                        <div className="text-xs text-muted-foreground mt-0.5">{bookedToday} booked</div>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{doc.name}</div>
-                    <div className="text-xs text-muted-foreground">{doc.specialty}</div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <Badge className={`text-xs ${doc.status === "On Duty" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
-                      {doc.status === "On Duty" ? <CheckCircle2 className="h-2.5 w-2.5 mr-0.5 inline" /> : null}
-                      {doc.status}
-                    </Badge>
-                    {doc.status === "On Duty" && (
-                      <div className="text-xs text-muted-foreground mt-0.5">{doc.patients} pts</div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Slot Utilization</CardTitle>
+              <CardTitle className="text-sm font-semibold">Today's Slot Utilization</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {["Morning (8AM-12PM)", "Afternoon (12-4PM)", "Evening (4-8PM)"].map((slot, i) => {
-                const pct = [78, 62, 45][i];
-                return (
-                  <div key={slot}>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="text-muted-foreground">{slot}</span>
-                      <span className="font-medium">{pct}%</span>
+              {(() => {
+                const appts = apiData?.appointments ?? [];
+                const todayAppts = appts.filter((a: any) => a.date === today);
+                const slots = [
+                  { label: "Morning (8AM–12PM)",   hours: [8,9,10,11] },
+                  { label: "Afternoon (12PM–4PM)",  hours: [12,13,14,15] },
+                  { label: "Evening (4PM–8PM)",     hours: [16,17,18,19] },
+                ];
+                const totalDoctors = (doctorsData ?? []).length || 1;
+                return slots.map(({ label, hours }) => {
+                  const booked = todayAppts.filter((a: any) => {
+                    const h = parseInt(a.time?.split(":")?.[0] ?? "0");
+                    const isAM = a.time?.includes("AM");
+                    const isPM = a.time?.includes("PM");
+                    const h24 = isAM ? (h === 12 ? 0 : h) : isPM ? (h === 12 ? 12 : h + 12) : h;
+                    return hours.includes(h24);
+                  }).length;
+                  const maxSlots = hours.length * (60 / 15) * totalDoctors;
+                  const pct = Math.min(100, Math.round((booked / maxSlots) * 100));
+                  return (
+                    <div key={label}>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="font-medium">{pct}%</span>
+                      </div>
+                      <Progress value={pct} className="h-1.5" />
                     </div>
-                    <Progress value={pct} className="h-1.5" />
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </CardContent>
           </Card>
         </div>

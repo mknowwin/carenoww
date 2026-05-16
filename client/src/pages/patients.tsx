@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { patients as patientsApi } from "@/lib/api";
-import { PATIENTS as PATIENTS_FALLBACK } from "@/lib/mock-data";
 import { getInitials } from "@/lib/utils";
 import PatientModal from "@/components/modals/PatientModal";
 
@@ -66,7 +65,7 @@ export default function PatientsPage() {
     retry: false,
   });
 
-  const rawPatients = apiData?.patients ?? PATIENTS_FALLBACK;
+  const rawPatients = apiData?.patients ?? [];
   // Normalize: API returns { _id, uhid } but UI uses { id }
   const PATIENTS = rawPatients.map((p: any) => ({ ...p, id: p.uhid || p._id || p.id }));
 
@@ -86,7 +85,7 @@ export default function PatientsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold">Patient Registry</h2>
-          <p className="text-sm text-muted-foreground">{apiData?.total ?? PATIENTS.length} patients · AI deduplication active</p>
+          <p className="text-sm text-muted-foreground">{apiData?.total ?? 0} patients · AI deduplication active</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="gap-2">

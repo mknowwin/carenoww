@@ -74,6 +74,10 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res) => {
       role: user.role,
       department: user.department,
       organization: tenant?.name || "",
+      aiScribeEnabled:  user.aiScribeEnabled ?? false,
+      aiScribeProvider: user.aiScribeProvider ?? "deepgram",
+      aiScribeApiKey:   user.aiScribeApiKey ?? "",
+      aiScribeModel:    user.aiScribeModel ?? "nova-2-medical",
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
@@ -83,13 +87,24 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res) => {
 // PUT /api/auth/profile
 router.put("/profile", authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const { name, department } = req.body;
+    const { name, department, aiScribeEnabled, aiScribeProvider, aiScribeApiKey, aiScribeModel } = req.body;
     const updates: any = {};
     if (name) updates.name = name;
     if (department !== undefined) updates.department = department;
+    if (aiScribeEnabled !== undefined) updates.aiScribeEnabled = aiScribeEnabled;
+    if (aiScribeProvider !== undefined) updates.aiScribeProvider = aiScribeProvider;
+    if (aiScribeApiKey !== undefined) updates.aiScribeApiKey = aiScribeApiKey;
+    if (aiScribeModel !== undefined) updates.aiScribeModel = aiScribeModel;
     const user = await User.findByIdAndUpdate(req.user!.id, { $set: updates }, { new: true });
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json({ name: user.name, department: user.department });
+    res.json({
+      name: user.name,
+      department: user.department,
+      aiScribeEnabled:  user.aiScribeEnabled,
+      aiScribeProvider: user.aiScribeProvider,
+      aiScribeApiKey:   user.aiScribeApiKey,
+      aiScribeModel:    user.aiScribeModel,
+    });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

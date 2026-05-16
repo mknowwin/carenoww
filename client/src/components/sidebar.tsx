@@ -5,7 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   LayoutDashboard, Users, CalendarDays, Stethoscope, BedDouble,
   FlaskConical, Pill, CreditCard, BarChart3, Settings, ChevronLeft,
-  Activity, LogOut, Heart,
+  Activity, LogOut, Heart, UserCheck,
 } from "lucide-react";
 import { useAuth, UserRole } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -19,15 +19,16 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "/",             label: "Dashboard",    icon: LayoutDashboard, description: "Hospital overview & KPIs",    roles: ["admin","doctor","nurse","receptionist","finance"] },
-  { id: "/patients",     label: "Patients",     icon: Users,           description: "Patient registry & UHID",     roles: ["admin","doctor","nurse","receptionist"] },
-  { id: "/appointments", label: "Appointments", icon: CalendarDays,    description: "Scheduling & queue mgmt",     roles: ["admin","doctor","receptionist"] },
-  { id: "/opd",          label: "OPD / EMR",    icon: Stethoscope,     description: "Consultation & clinical notes",roles: ["admin","doctor","nurse"] },
-  { id: "/ipd",          label: "IPD & Wards",  icon: BedDouble,       description: "Inpatient ward management",   roles: ["admin","doctor","nurse"] },
-  { id: "/lab",          label: "Laboratory",   icon: FlaskConical,    description: "Tests, samples & reports",    roles: ["admin","doctor","nurse","lab_tech"] },
-  { id: "/pharmacy",     label: "Pharmacy",     icon: Pill,            description: "Dispensing & drug inventory", roles: ["admin","pharmacist","nurse"] },
-  { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",   roles: ["admin","finance","receptionist"] },
-  { id: "/analytics",    label: "Analytics",    icon: BarChart3,       description: "Clinical & business insights",roles: ["admin","finance"] },
+  { id: "/",             label: "Dashboard",    icon: LayoutDashboard, description: "Hospital overview & KPIs",      roles: ["admin","doctor","nurse","receptionist","finance"] },
+  { id: "/patients",     label: "Patients",     icon: Users,           description: "Patient registry & UHID",       roles: ["admin","doctor","nurse","receptionist"] },
+  { id: "/appointments", label: "Appointments", icon: CalendarDays,    description: "Scheduling & queue management", roles: ["admin","doctor","receptionist"] },
+  { id: "/reception",    label: "Reception",    icon: UserCheck,       description: "Check-in & token management",   roles: ["admin","receptionist","nurse"] },
+  { id: "/opd",          label: "OPD / Queue",  icon: Stethoscope,     description: "Consultation, queue & clinical notes", roles: ["admin","doctor","nurse"] },
+  { id: "/ipd",          label: "IPD & Wards",  icon: BedDouble,       description: "Inpatient ward management",     roles: ["admin","doctor","nurse"] },
+  { id: "/lab",          label: "Laboratory",   icon: FlaskConical,    description: "Tests, samples & reports",      roles: ["admin","doctor","nurse","lab_tech"] },
+  { id: "/pharmacy",     label: "Pharmacy",     icon: Pill,            description: "Dispensing & drug inventory",   roles: ["admin","pharmacist","nurse"] },
+  { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",     roles: ["admin","finance","receptionist"] },
+  { id: "/analytics",    label: "Analytics",    icon: BarChart3,       description: "Clinical & business insights",  roles: ["admin","finance"] },
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {

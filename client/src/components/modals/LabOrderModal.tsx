@@ -4,125 +4,147 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FlaskConical, Plus, X } from "lucide-react";
 import { lab as labApi } from "@/lib/api";
-import { useQueryClient } from "@tanstack/react-query";
-
-interface Props { open: boolean; onClose: () => void; existing?: any; }
 
 const COMMON_TESTS = [
-  "Complete Blood Count", "Lipid Profile", "Renal Function Tests", "Liver Function Tests",
-  "HbA1c", "Thyroid Function Tests", "Urine Routine", "Cardiac Troponin",
-  "Blood Culture", "X-Ray Chest", "ECG", "MRI Brain", "CT Scan Abdomen", "Ultrasound",
+  "CBC", "CRP", "ESR", "Blood Culture", "Urine R/E",
+  "Random Blood Sugar", "Fasting Blood Sugar", "HbA1c",
+  "Lipid Profile", "LFT", "RFT", "Thyroid Profile (TSH)",
+  "ECG", "Chest X-Ray", "USG Abdomen", "Urine Culture",
+  "PT/INR", "Serum Electrolytes", "Uric Acid", "Dengue NS1",
 ];
 
-// Module-scope — stable identity across re-renders
-function F({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  patientId: string;
+  patientName: string;
+  appointmentId?: string;
+  doctor?: string;
 }
 
-export default function LabOrderModal({ open, onClose, existing }: Props) {
-  const qc = useQueryClient();
-  const isEdit = !!(existing?._id);
+export default function LabOrderModal({ open, onClose, onSaved, patientId, patientName, appointmentId, doctor }: Props) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [custom,   setCustom]   = useState("");
+  const [priority, setPriority] = useState("Routine");
+  const [notes,    setNotes]    = useState("");
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState("");
 
-  const [form, setForm] = useState({
-    patientId:   existing?.patientId   ?? "",
-    patientName: existing?.patientName ?? "",
-    test:        existing?.test        ?? "",
-    priority:    existing?.priority    ?? "Routine",
-    doctor:      existing?.doctor      ?? "",
-    status:      existing?.status      ?? "Pending",
-    result:      existing?.result      ?? "",
-  });
+  const toggle = (test: string) => {
+    setSelected((prev) => prev.includes(test) ? prev.filter((t) => t !== test) : [...prev, test]);
+  };
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const addCustom = () => {
+    const t = custom.trim();
+    if (t && !selected.includes(t)) setSelected((p) => [...p, t]);
+    setCustom("");
+  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true); setError("");
+  const handleSave = async () => {
+    if (!selected.length) { setError("Select at least one test"); return; }
+    setSaving(true); setError("");
     try {
-      const payload = { ...form, result: form.result || null };
-      if (isEdit) {
-        await labApi.update(existing._id, payload);
-      } else {
-        await labApi.create(payload);
-      }
-      qc.invalidateQueries({ queryKey: ["lab-orders"] });
+      await labApi.create({
+        patientId, patientName,
+        appointmentId: appointmentId || "",
+        test:     selected.join(", "),
+        priority,
+        doctor:   doctor || "",
+        notes,
+      });
+      setSelected([]); setCustom(""); setNotes(""); setPriority("Routine");
+      onSaved();
       onClose();
-    } catch (err: any) {
-      setError(err.message || "Failed to save lab order");
-    } finally {
-      setLoading(false);
+    } catch (e: any) {
+      setError(e.message || "Failed to place order");
+      setSaving(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Update Lab Order" : "New Lab Order"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <FlaskConical className="h-4 w-4 text-blue-600" />
+            Lab Order — {patientName}
+          </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <F label="Patient UHID *">
-              <Input value={form.patientId} onChange={(e) => set("patientId", e.target.value)} placeholder="UHID-001" className="h-8 text-sm" required />
-            </F>
-            <F label="Patient Name *">
-              <Input value={form.patientName} onChange={(e) => set("patientName", e.target.value)} placeholder="Patient name" className="h-8 text-sm" required />
-            </F>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs mb-2 block">Common Tests</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {COMMON_TESTS.map((t) => (
+                <button key={t} onClick={() => toggle(t)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    selected.includes(t)
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-gray-700 border-gray-300 hover:border-blue-400"
+                  }`}>
+                  {t}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <F label="Test *">
-            <select value={form.test} onChange={(e) => set("test", e.target.value)}
-              className="w-full h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              required>
-              <option value="">Select test...</option>
-              {COMMON_TESTS.map((t) => <option key={t} value={t}>{t}</option>)}
-              <option value="__custom">Other (type below)</option>
-            </select>
-          </F>
-          {(form.test === "__custom" || !COMMON_TESTS.includes(form.test)) && form.test !== "" && (
-            <F label="Custom Test Name">
-              <Input value={form.test === "__custom" ? "" : form.test} onChange={(e) => set("test", e.target.value)} placeholder="Enter test name" className="h-8 text-sm" />
-            </F>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <F label="Priority">
-              <select value={form.priority} onChange={(e) => set("priority", e.target.value)}
-                className="w-full h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
-                {["Routine", "Urgent", "STAT"].map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </F>
-            <F label="Status">
-              <select value={form.status} onChange={(e) => set("status", e.target.value)}
-                className="w-full h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
-                {["Pending", "Collected", "Processing", "Completed", "Scheduled"].map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </F>
+          <div>
+            <Label className="text-xs">Add Custom Test</Label>
+            <div className="flex gap-2 mt-1">
+              <Input className="h-8 text-sm flex-1" placeholder="Type test name..."
+                value={custom} onChange={(e) => setCustom(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }} />
+              <Button variant="outline" size="sm" className="h-8 gap-1" onClick={addCustom}>
+                <Plus className="h-3.5 w-3.5" /> Add
+              </Button>
+            </div>
           </div>
 
-          <F label="Ordering Doctor">
-            <Input value={form.doctor} onChange={(e) => set("doctor", e.target.value)} placeholder="Dr. Name" className="h-8 text-sm" />
-          </F>
-
-          {(isEdit || form.status === "Completed") && (
-            <F label="Result">
-              <Textarea value={form.result} onChange={(e) => set("result", e.target.value)} placeholder="Enter test result..." className="text-sm min-h-[60px]" />
-            </F>
+          {selected.length > 0 && (
+            <div>
+              <Label className="text-xs">Selected ({selected.length})</Label>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {selected.map((t) => (
+                  <span key={t} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full border border-blue-200">
+                    {t}
+                    <button onClick={() => toggle(t)}><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            </div>
           )}
 
-          {error && <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{error}</p>}
+          <div>
+            <Label className="text-xs">Priority</Label>
+            <Select value={priority} onValueChange={setPriority}>
+              <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Routine">Routine</SelectItem>
+                <SelectItem value="Urgent">Urgent</SelectItem>
+                <SelectItem value="STAT">STAT (Immediate)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "Saving..." : isEdit ? "Update Order" : "Create Order"}
+          <div>
+            <Label className="text-xs">Clinical Notes</Label>
+            <Textarea className="mt-1 h-14 text-sm" placeholder="Clinical history, suspected diagnosis..."
+              value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button disabled={saving || !selected.length} onClick={handleSave}>
+              {saving ? "Ordering..." : `Order ${selected.length || ""} Test${selected.length !== 1 ? "s" : ""}`}
             </Button>
           </div>
-        </form>
+        </div>
       </DialogContent>
     </Dialog>
   );

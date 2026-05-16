@@ -14,6 +14,8 @@ import BillingPage from "./pages/billing";
 import AnalyticsPage from "./pages/analytics";
 import SettingsPage from "./pages/settings";
 import NotFound from "./pages/not-found";
+import ReceptionPage from "./pages/reception";
+import TokenDisplayPage from "./pages/token-display";
 // Superadmin pages
 import SuperAdminLoginPage from "./pages/superadmin/login";
 import SuperAdminDashboard from "./pages/superadmin/dashboard";
@@ -55,12 +57,13 @@ export default function App() {
 
   return (
     <Switch>
-      {/* ── Public routes ─────────────────────────────── */}
+      {/* ── Public routes (no auth) ───────────────── */}
       <Route path="/login">
         {user ? <Redirect to="/" /> : <LoginPage />}
       </Route>
+      <Route path="/display" component={TokenDisplayPage} />
 
-      {/* ── Superadmin routes ─────────────────────────── */}
+      {/* ── Superadmin routes ─────────────────────── */}
       <Route path="/superadmin/login">
         {superAdmin ? <Redirect to="/superadmin/dashboard" /> : <SuperAdminLoginPage />}
       </Route>
@@ -72,17 +75,19 @@ export default function App() {
         {superAdmin ? <Redirect to="/superadmin/dashboard" /> : <Redirect to="/superadmin/login" />}
       </Route>
 
-      {/* ── HMS protected routes ───────────────────────── */}
-      <Route path="/"             component={() => <ProtectedRoute component={DashboardPage} />} />
-      <Route path="/patients"     component={() => <ProtectedRoute component={PatientsPage} />} />
-      <Route path="/appointments" component={() => <ProtectedRoute component={AppointmentsPage} />} />
-      <Route path="/opd"          component={() => <ProtectedRoute component={OPDPage} />} />
-      <Route path="/ipd"          component={() => <ProtectedRoute component={IPDPage} />} />
-      <Route path="/pharmacy"     component={() => <ProtectedRoute component={PharmacyPage} />} />
-      <Route path="/lab"          component={() => <ProtectedRoute component={LabPage} />} />
-      <Route path="/billing"      component={() => <ProtectedRoute component={BillingPage} />} />
-      <Route path="/analytics"    component={() => <ProtectedRoute component={AnalyticsPage} />} />
-      <Route path="/settings"     component={() => <ProtectedRoute component={SettingsPage} />} />
+      {/* ── HMS protected routes ───────────────────── */}
+      <Route path="/"              component={() => <ProtectedRoute component={DashboardPage} />} />
+      <Route path="/patients"      component={() => <ProtectedRoute component={PatientsPage} />} />
+      <Route path="/appointments"  component={() => <ProtectedRoute component={AppointmentsPage} />} />
+      <Route path="/reception"     component={() => <ProtectedRoute component={ReceptionPage} />} />
+      <Route path="/doctor-queue"  component={() => <Redirect to="/opd" />} />
+      <Route path="/opd"           component={() => <ProtectedRoute component={OPDPage} />} />
+      <Route path="/ipd"           component={() => <ProtectedRoute component={IPDPage} />} />
+      <Route path="/pharmacy"      component={() => <ProtectedRoute component={PharmacyPage} />} />
+      <Route path="/lab"           component={() => <ProtectedRoute component={LabPage} />} />
+      <Route path="/billing"       component={() => <ProtectedRoute component={BillingPage} />} />
+      <Route path="/analytics"     component={() => <ProtectedRoute component={AnalyticsPage} />} />
+      <Route path="/settings"      component={() => <ProtectedRoute component={SettingsPage} />} />
       <Route component={NotFound} />
     </Switch>
   );

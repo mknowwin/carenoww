@@ -7,15 +7,23 @@ router.use(authMiddleware);
 
 async function nextBillId(tenantId: string): Promise<string> {
   const count = await BillingRecord.countDocuments({ tenantId });
-  return `BILL-${String(count + 1).padStart(3, "0")}`;
+  return `BILL-${String(count + 1).padStart(4, "0")}`;
 }
 
-// GET /api/billing
+function computeStatus(amount: number, paid: number): string {
+  if (paid >= amount) return "Paid";
+  if (paid > 0)       return "Partial";
+  return "Pending";
+}
+
+// ── GET /api/billing ──────────────────────────────────────────────────────────
 router.get("/", async (req: AuthRequest, res) => {
   try {
-    const { status, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const { status, patientId, type, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
-    if (status) query.status = status;
+    if (status)    query.status    = status;
+    if (patientId) query.patientId = patientId;
+    if (type)      query.type      = type;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [bills, total] = await Promise.all([
@@ -28,31 +36,7 @@ router.get("/", async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/billing
-router.post("/", requireRole("admin", "receptionist", "finance"), async (req: AuthRequest, res) => {
-  try {
-    const billId = await nextBillId(req.user!.tenantId);
-    const { amount, paid } = req.body;
-    const balance = (amount || 0) - (paid || 0);
-    let status = "Pending";
-    if (paid >= amount) status = "Paid";
-    else if (paid > 0) status = "Partial";
-
-    const bill = await BillingRecord.create({
-      ...req.body,
-      tenantId: req.user!.tenantId,
-      billId,
-      balance,
-      status,
-    });
-    res.status(201).json(bill);
-  } catch (err: any) {
-    if (err.name === "ValidationError") return res.status(400).json({ error: err.message });
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// GET /api/billing/:id
+// ── GET /api/billing/:id ──────────────────────────────────────────────────────
 router.get("/:id", async (req: AuthRequest, res) => {
   try {
     const bill = await BillingRecord.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
@@ -63,26 +47,89 @@ router.get("/:id", async (req: AuthRequest, res) => {
   }
 });
 
-// PUT /api/billing/:id
-router.put("/:id", requireRole("admin", "receptionist", "finance"), async (req: AuthRequest, res) => {
+// ── POST /api/billing ─────────────────────────────────────────────────────────
+router.post("/", requireRole("admin", "receptionist", "nurse", "finance"), async (req: AuthRequest, res) => {
   try {
-    const updates = { ...req.body };
-    if (updates.amount !== undefined || updates.paid !== undefined) {
-      const existing = await BillingRecord.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
-      if (!existing) return res.status(404).json({ error: "Bill not found" });
-      const amount = updates.amount ?? existing.amount;
-      const paid = updates.paid ?? existing.paid;
-      updates.balance = amount - paid;
-      if (paid >= amount) updates.status = "Paid";
-      else if (paid > 0) updates.status = "Partial";
-      else updates.status = "Pending";
+    const {
+      patientId, patientName, appointmentId, admissionId,
+      items = [], amount, paid = 0, discount = 0,
+      payer, paymentMode, type, notes,
+    } = req.body;
+
+    if (!patientId || !patientName) {
+      return res.status(400).json({ error: "patientId and patientName required" });
     }
+
+    // Compute amount from items if items provided and amount not explicitly set
+    let finalAmount = amount;
+    if (!finalAmount && items.length) {
+      finalAmount = items.reduce((s: number, it: any) => s + (it.total || it.unitPrice * (it.quantity || 1)), 0);
+      finalAmount = Math.max(0, finalAmount - (discount || 0));
+    }
+    if (!finalAmount) return res.status(400).json({ error: "amount or items[] required" });
+
+    const balance = finalAmount - paid;
+    const billId  = await nextBillId(req.user!.tenantId);
+
+    const bill = await BillingRecord.create({
+      tenantId:      req.user!.tenantId,
+      billId,
+      patientId,     patientName,
+      appointmentId: appointmentId || "",
+      admissionId:   admissionId   || "",
+      items,
+      amount:        finalAmount,
+      paid,
+      balance,
+      discount:      discount || 0,
+      status:        computeStatus(finalAmount, paid),
+      payer:         payer       || "Self",
+      paymentMode:   paymentMode || "Cash",
+      type:          type        || "OPD",
+      notes:         notes       || "",
+      createdBy:     req.user!.name,
+    });
+    res.status(201).json(bill);
+  } catch (err: any) {
+    if (err.code === 11000) return res.status(409).json({ error: "Bill ID conflict — retry" });
+    if (err.name === "ValidationError") return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── PUT /api/billing/:id — update payment / add items ─────────────────────────
+router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance"), async (req: AuthRequest, res) => {
+  try {
+    const existing = await BillingRecord.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
+    if (!existing) return res.status(404).json({ error: "Bill not found" });
+
+    const { items, paid, discount, paymentMode, payer, status, notes } = req.body;
+    const update: any = {};
+
+    if (items   !== undefined) update.items       = items;
+    if (paymentMode !== undefined) update.paymentMode = paymentMode;
+    if (payer   !== undefined) update.payer        = payer;
+    if (notes   !== undefined) update.notes        = notes;
+    if (status  !== undefined) update.status       = status;
+
+    const finalItems    = items   !== undefined ? items   : existing.items;
+    const finalDiscount = discount !== undefined ? discount : existing.discount;
+    const finalPaid     = paid    !== undefined ? paid    : existing.paid;
+    const finalAmount   = finalItems.length
+      ? Math.max(0, finalItems.reduce((s: number, it: any) => s + (it.total || it.unitPrice * (it.quantity || 1)), 0) - finalDiscount)
+      : existing.amount;
+
+    update.amount   = finalAmount;
+    update.paid     = finalPaid;
+    update.discount = finalDiscount;
+    update.balance  = finalAmount - finalPaid;
+    if (!status) update.status = computeStatus(finalAmount, finalPaid);
+
     const bill = await BillingRecord.findOneAndUpdate(
       { _id: req.params.id, tenantId: req.user!.tenantId },
-      { $set: updates },
+      { $set: update },
       { new: true }
     );
-    if (!bill) return res.status(404).json({ error: "Bill not found" });
     res.json(bill);
   } catch {
     res.status(500).json({ error: "Internal server error" });

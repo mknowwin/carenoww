@@ -99,6 +99,6 @@
 }
 
 @layer components {
-  .dashboard-bg { background: #f0f7f6; min-height: 100vh; }
+  .dashboard-bg { background: #f0f7f6; }
   .dark .dashboard-bg { background: hsl(200 20% 6%); }
 }

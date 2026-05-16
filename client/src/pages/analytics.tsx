@@ -13,7 +13,6 @@ import {
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { dashboard as dashApi } from "@/lib/api";
-import { REVENUE_TREND as REV_FB, DEPT_VOLUME as DEPT_FB, BED_OCCUPANCY as BED_FB, HOSPITAL_METRICS as METRICS_FB } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/utils";
 
 const PATIENT_TREND = [
@@ -43,10 +42,10 @@ export default function AnalyticsPage() {
   const { data: deptData }     = useQuery({ queryKey: ["dash-dept"],     queryFn: dashApi.deptVolume, retry: false });
   const { data: bedsData }     = useQuery({ queryKey: ["dash-beds"],     queryFn: dashApi.bedOccupancy, retry: false });
 
-  const HOSPITAL_METRICS = metricsData || METRICS_FB;
-  const REVENUE_TREND    = revenueData || REV_FB;
-  const DEPT_VOLUME      = deptData    || DEPT_FB;
-  const BED_OCCUPANCY    = bedsData    || BED_FB;
+  const HOSPITAL_METRICS = metricsData ?? { bedOccupancyRate: 0, avgLOS: 0, opdToday: 0, revenueMonth: 0 };
+  const REVENUE_TREND    = revenueData ?? [];
+  const DEPT_VOLUME      = deptData    ?? [];
+  const BED_OCCUPANCY    = bedsData    ?? [];
 
   const [nlQuery, setNlQuery] = useState("");
   const [nlResult, setNlResult] = useState<string | null>(null);

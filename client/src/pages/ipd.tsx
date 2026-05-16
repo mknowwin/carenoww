@@ -2,264 +2,406 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  BedDouble, Plus, AlertTriangle, Clock, CheckCircle2, Brain,
-  Activity, FileText, LogOut,
+  BedDouble, Plus, Clock, CheckCircle2, LogOut,
+  Activity, ChevronDown, ChevronUp, Stethoscope, ArrowLeftRight,
 } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { patients as patientsApi, dashboard as dashApi } from "@/lib/api";
-import { PATIENTS as PATIENTS_FB, BED_OCCUPANCY as BEDS_FB } from "@/lib/mock-data";
-import PatientModal from "@/components/modals/PatientModal";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { ipd as ipdApi } from "@/lib/api";
+import AdmitModal from "@/components/modals/AdmitModal";
+import DischargeModal from "@/components/modals/DischargeModal";
+import NursingRoundModal from "@/components/modals/NursingRoundModal";
 
-const NURSING_CHECKS = [
-  { patient: "Lakshmi Devi",  task: "Vitals 6AM",        done: true,  time: "06:00" },
-  { patient: "Lakshmi Devi",  task: "Medication Round",   done: true,  time: "08:00" },
-  { patient: "Preethi Raj",   task: "CTG Monitoring",     done: true,  time: "09:00" },
-  { patient: "Ramesh Babu",   task: "Wound Dressing",     done: false, time: "10:00" },
-  { patient: "Suresh Kumar",  task: "Dialysis Setup",     done: false, time: "10:30" },
-  { patient: "Preethi Raj",   task: "NST — Afternoon",    done: false, time: "14:00" },
-];
+const WARDS = ["General Ward", "ICU", "Private Ward", "Semi-Private", "Obs/Gyn", "Pediatric"];
 
-const WARD_SUMMARY = [
-  { ward: "Cardiology", floor: "3rd", beds: 20, occupied: 17, patients: ["Ramesh Babu", "Arjun Mehta (OPD)"] },
-  { ward: "Ortho",      floor: "2nd", beds: 15, occupied: 12, patients: ["Lakshmi Devi"] },
-  { ward: "Obs/Gyn",    floor: "4th", beds: 12, occupied: 8,  patients: ["Preethi Raj"] },
-  { ward: "Nephro",     floor: "3rd", beds: 10, occupied: 9,  patients: [] },
-  { ward: "ICU",        floor: "2nd", beds: 20, occupied: 17, patients: ["Suresh Kumar"] },
-];
+const WARD_COLORS: Record<string, string> = {
+  ICU:            "bg-red-50 border-red-200 text-red-700",
+  "General Ward": "bg-blue-50 border-blue-200 text-blue-700",
+  "Private Ward": "bg-purple-50 border-purple-200 text-purple-700",
+  "Semi-Private": "bg-teal-50 border-teal-200 text-teal-700",
+  "Obs/Gyn":      "bg-pink-50 border-pink-200 text-pink-700",
+  Pediatric:      "bg-amber-50 border-amber-200 text-amber-700",
+};
+const wardColor = (ward: string) => WARD_COLORS[ward] ?? "bg-gray-50 border-gray-200 text-gray-700";
+
+function daysSince(date: string | Date) {
+  return Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
+}
 
 export default function IPDPage() {
   const qc = useQueryClient();
-  const [admitModalOpen, setAdmitModalOpen] = useState(false);
-  const [discharging, setDischarging] = useState<string | null>(null);
+  const [admitOpen,        setAdmitOpen]        = useState(false);
+  const [dischargeTarget,  setDischargeTarget]  = useState<any>(null);
+  const [roundTarget,      setRoundTarget]      = useState<any>(null);
+  const [transferTarget,   setTransferTarget]   = useState<any>(null);
+  const [expandedId,       setExpandedId]       = useState<string | null>(null);
+  const [wardFilter,       setWardFilter]       = useState("All");
+  const [search,           setSearch]           = useState("");
+  const [activeTab,        setActiveTab]        = useState<"list" | "beds">("list");
 
-  const { data: pData }   = useQuery({ queryKey: ["patients-ipd"], queryFn: () => patientsApi.list({ status: "IPD",  limit: "100" }), retry: false });
-  const { data: icuData } = useQuery({ queryKey: ["patients-icu"], queryFn: () => patientsApi.list({ status: "ICU",  limit: "100" }), retry: false });
-  const { data: bedsData } = useQuery({ queryKey: ["bed-occupancy"], queryFn: dashApi.bedOccupancy, retry: false });
+  const { data: ipdData, isLoading } = useQuery({
+    queryKey: ["ipd"],
+    queryFn:  () => ipdApi.list({ status: "Active" }),
+    refetchInterval: 30000,
+  });
+  const { data: bedsData } = useQuery({
+    queryKey: ["ipd-beds"],
+    queryFn:  () => ipdApi.beds(),
+    refetchInterval: 30000,
+  });
+  const { data: dischargedData } = useQuery({
+    queryKey: ["ipd-discharged"],
+    queryFn:  () => ipdApi.list({ status: "Discharged" } as any),
+    staleTime: 60000,
+  });
 
-  const discharge = async (p: any) => {
-    if (!confirm(`Discharge ${p.name}?`)) return;
-    setDischarging(p.id);
-    try {
-      await patientsApi.update(p._id || p.id, { status: "Discharged" });
-      qc.invalidateQueries({ queryKey: ["patients-ipd"] });
-      qc.invalidateQueries({ queryKey: ["patients-icu"] });
-      qc.invalidateQueries({ queryKey: ["patients"] });
-    } finally {
-      setDischarging(null);
-    }
-  };
+  const admissions: any[] = ipdData?.admissions ?? [];
+  const discharged: any[] = dischargedData?.admissions ?? [];
+  const todayStr = new Date().toISOString().split("T")[0];
 
-  const ipdPatients: any[] = [
-    ...(pData?.patients ?? PATIENTS_FB.filter((p) => p.status === "IPD")),
-    ...(icuData?.patients ?? PATIENTS_FB.filter((p) => p.status === "ICU")),
-  ].map((p) => ({ ...p, id: p.uhid || p._id || p.id }));
+  const wards = ["All", ...Array.from(new Set<string>(admissions.map((a: any) => String(a.ward))))];
 
-  const BED_OCCUPANCY: any[] = bedsData ?? BEDS_FB;
+  const filtered = admissions.filter((a: any) => {
+    const q = search.toLowerCase();
+    const matchSearch = !q ||
+      a.patientName.toLowerCase().includes(q) ||
+      a.admissionId.toLowerCase().includes(q) ||
+      a.bedNumber.toLowerCase().includes(q);
+    return matchSearch && (wardFilter === "All" || a.ward === wardFilter);
+  });
+
+  const icu   = admissions.filter((a: any) => a.ward === "ICU").length;
+  const total = admissions.length;
+  const dischargedToday = discharged.filter((d: any) =>
+    d.dischargeDate && new Date(d.dischargeDate).toISOString().startsWith(todayStr)
+  ).length;
 
   return (
     <div className="space-y-4 animate-fadeIn">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold">IPD & Ward Management</h2>
-          <p className="text-sm text-muted-foreground">{(pData?.total ?? 0) + (icuData?.total ?? 0) || ipdPatients.length} inpatients active · AI Early Warning active</p>
+          <h2 className="text-lg font-bold">Inpatient (IPD)</h2>
+          <p className="text-sm text-muted-foreground">{total} active admissions · {icu} in ICU</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-2"><BedDouble className="h-4 w-4" /> Bed Transfer</Button>
-          <Button size="sm" className="gap-2" onClick={() => setAdmitModalOpen(true)}><Plus className="h-4 w-4" /> New Admission</Button>
-        </div>
+        <Button size="sm" className="gap-2" onClick={() => setAdmitOpen(true)}>
+          <Plus className="h-4 w-4" /> Admit Patient
+        </Button>
       </div>
 
-      {/* AI EWS Alert */}
-      <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 flex items-center gap-3">
-        <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 animate-pulse" />
-        <div className="flex-1">
-          <p className="text-sm text-red-700">
-            <span className="font-semibold">AI Early Warning Score — CRITICAL:</span> Suresh Kumar (ICU) — EWS 7, qSOFA 3. Sepsis signature detected. Immediate physician review required.
-          </p>
-        </div>
-        <Button size="sm" variant="destructive" className="shrink-0">Review Now</Button>
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Total Admitted",   value: total,          color: "text-blue-600",   bg: "bg-blue-50" },
+          { label: "ICU",              value: icu,            color: "text-red-600",    bg: "bg-red-50" },
+          { label: "Discharged Today", value: dischargedToday, color: "text-teal-600",  bg: "bg-teal-50" },
+          { label: "Wards Active",     value: Object.keys(bedsData ?? {}).length, color: "text-purple-600", bg: "bg-purple-50" },
+        ].map((s) => (
+          <Card key={s.label}>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className={`w-10 h-10 ${s.bg} rounded-xl flex items-center justify-center`}>
+                <span className={`text-lg font-bold ${s.color}`}>{s.value}</span>
+              </div>
+              <span className="text-sm font-medium">{s.label}</span>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Bed overview */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {BED_OCCUPANCY.map((ward: any) => {
-          const pct = Math.round((ward.occupied / ward.total) * 100);
-          const isRed = pct >= 90;
-          return (
-            <Card key={ward.ward} className={isRed ? "border-red-200 bg-red-50" : ""}>
-              <CardContent className="p-3 text-center">
-                <div className={`text-2xl font-bold ${isRed ? "text-red-600" : "text-foreground"}`}>{ward.available}</div>
-                <div className="text-xs text-muted-foreground">Available</div>
-                <div className="text-xs font-medium mt-1">{ward.ward}</div>
-                <Progress value={pct} className="h-1 mt-2" />
-                <div className="text-xs text-muted-foreground mt-1">{ward.occupied}/{ward.total}</div>
-              </CardContent>
-            </Card>
-          );
-        })}
+      {/* Tab toggle */}
+      <div className="flex gap-2 border-b pb-2">
+        {(["list", "beds"] as const).map((t) => (
+          <button key={t} onClick={() => setActiveTab(t)}
+            className={`text-sm px-3 py-1 rounded-md capitalize transition-colors ${
+              activeTab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            {t === "list" ? "Patient List" : "Bed Map"}
+          </button>
+        ))}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        {/* Inpatient list */}
-        <div className="lg:col-span-2 space-y-3">
-          <h3 className="text-sm font-semibold">Active Inpatients</h3>
-          {ipdPatients.map((p: any) => {
-            const isICU = p.status === "ICU";
-            const daysSince = Math.floor((Date.now() - new Date(p.admittedOn).getTime()) / (1000*60*60*24));
-            return (
-              <Card key={p.id} className={`${isICU ? "border-red-200" : ""}`}>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
-                      isICU ? "bg-red-100 text-red-700" : "bg-teal-50 text-teal-700"
-                    }`}>
-                      {p.name.split(" ").map((n: string) => n[0]).join("").slice(0,2)}
+      {activeTab === "list" && (
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-3">
+            {/* Filters */}
+            <div className="flex flex-wrap gap-2">
+              <Input placeholder="Search patient, bed, ADM-ID..." className="h-9 flex-1 min-w-40"
+                value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div className="flex gap-1.5 flex-wrap">
+                {wards.map((w) => (
+                  <Button key={w} variant={wardFilter === w ? "default" : "outline"} size="sm" className="h-9"
+                    onClick={() => setWardFilter(w)}>{w}</Button>
+                ))}
+              </div>
+            </div>
+
+            {isLoading && <p className="text-sm text-muted-foreground text-center py-8">Loading admissions...</p>}
+            {!isLoading && filtered.length === 0 && (
+              <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">No active admissions</CardContent></Card>
+            )}
+
+            {filtered.map((adm: any) => {
+              const days = daysSince(adm.admissionDate);
+              const open = expandedId === adm._id;
+              return (
+                <Card key={adm._id} className="hover:shadow-sm transition-shadow">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
+                        <BedDouble className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm">{adm.patientName}</span>
+                          <Badge className="text-xs font-mono bg-blue-50 text-blue-700">{adm.admissionId}</Badge>
+                          <Badge className={`text-xs border ${wardColor(adm.ward)}`}>{adm.ward}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Bed {adm.bedNumber} · {adm.department} · {adm.admittingDoctor}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">Dx: {adm.provisionalDiagnosis}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" /> Day {days + 1}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{new Date(adm.admissionDate).toLocaleDateString("en-IN")}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-1.5 mt-3 flex-wrap">
+                      <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
+                        onClick={() => setExpandedId(open ? null : adm._id)}>
+                        <Activity className="h-3 w-3" />
+                        {open ? <><ChevronUp className="h-3 w-3" /> Hide</> : <><ChevronDown className="h-3 w-3" /> Rounds</>}
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
+                        onClick={() => setRoundTarget(adm)}>
+                        <Stethoscope className="h-3 w-3" /> Add Round
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 gap-1"
+                        onClick={() => setTransferTarget(adm)}>
+                        <ArrowLeftRight className="h-3 w-3" /> Transfer
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 gap-1"
+                        onClick={() => setDischargeTarget(adm)}>
+                        <LogOut className="h-3 w-3" /> Discharge
+                      </Button>
+                    </div>
+
+                    {open && <RoundsPanel admissionId={adm._id} />}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Right: Recent discharges */}
+          <div className="space-y-3">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold">Recent Discharges</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {discharged.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-3">No discharged patients</p>
+                )}
+                {discharged.slice(0, 10).map((d: any) => (
+                  <div key={d._id} className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-teal-50 flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-teal-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm">{p.name}</span>
-                        <span className="text-xs font-mono text-muted-foreground">{p.id}</span>
-                        <Badge className={`text-xs ${isICU ? "bg-red-100 text-red-700" : "bg-teal-100 text-teal-700"}`}>
-                          {p.status}
-                        </Badge>
-                        {p.riskLevel === "Critical" && (
-                          <Badge className="text-xs bg-red-100 text-red-700">
-                            <AlertTriangle className="h-2.5 w-2.5 mr-1" />Critical
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
-                        <span>{p.age}y · {p.gender === "M" ? "Male" : "Female"}</span>
-                        <span>{p.department}</span>
-                        <span>Dr: {p.doctor.replace("Dr. ","")}</span>
-                        <span className="flex items-center gap-0.5">
-                          <Clock className="h-3 w-3" /> Day {daysSince}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">{p.diagnosis}</div>
+                      <p className="text-xs font-medium truncate">{d.patientName}</p>
+                      <p className="text-xs text-muted-foreground">{d.ward} · {d.discharge?.condition ?? "—"}</p>
                     </div>
-                    <div className="shrink-0">
-                      <div className="text-xs text-muted-foreground">{p.insurance}</div>
-                      <div className="flex gap-1.5 mt-2 flex-wrap justify-end">
-                        <Button size="sm" variant="outline" className="h-7 text-xs">
-                          <FileText className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
-                          disabled={discharging === p.id}
-                          onClick={() => discharge(p)}
-                        >
-                          <LogOut className="h-3 w-3 mr-1" />
-                          {discharging === p.id ? "..." : "Discharge"}
-                        </Button>
-                      </div>
-                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {d.dischargeDate ? new Date(d.dischargeDate).toLocaleDateString("en-IN") : "—"}
+                    </span>
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "beds" && <BedMapView bedsData={bedsData ?? {}} />}
+
+      <AdmitModal open={admitOpen} onClose={() => setAdmitOpen(false)}
+        onAdmitted={() => {
+          qc.invalidateQueries({ queryKey: ["ipd"] });
+          qc.invalidateQueries({ queryKey: ["ipd-beds"] });
+        }} />
+
+      {dischargeTarget && (
+        <DischargeModal admission={dischargeTarget}
+          onClose={() => setDischargeTarget(null)}
+          onDischarged={() => {
+            setDischargeTarget(null);
+            qc.invalidateQueries({ queryKey: ["ipd"] });
+            qc.invalidateQueries({ queryKey: ["ipd-beds"] });
+            qc.invalidateQueries({ queryKey: ["ipd-discharged"] });
+          }} />
+      )}
+
+      {roundTarget && (
+        <NursingRoundModal admission={roundTarget}
+          onClose={() => setRoundTarget(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["ipd-rounds", roundTarget._id] });
+          }} />
+      )}
+
+      {transferTarget && (
+        <TransferModal
+          admission={transferTarget}
+          onClose={() => setTransferTarget(null)}
+          onTransferred={() => {
+            setTransferTarget(null);
+            qc.invalidateQueries({ queryKey: ["ipd"] });
+            qc.invalidateQueries({ queryKey: ["ipd-beds"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Transfer Modal ────────────────────────────────────────────────────────────
+function TransferModal({ admission, onClose, onTransferred }: { admission: any; onClose: () => void; onTransferred: () => void }) {
+  const [ward,    setWard]    = useState(admission.ward);
+  const [bed,     setBed]     = useState(admission.bedNumber);
+  const [reason,  setReason]  = useState("");
+  const [error,   setError]   = useState("");
+
+  const mut = useMutation({
+    mutationFn: () => ipdApi.transfer(admission._id, { ward, bedNumber: bed, reason }),
+    onSuccess:  onTransferred,
+    onError:    (e: any) => setError(e.message || "Transfer failed"),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div>
+          <h3 className="text-base font-bold">Transfer Patient</h3>
+          <p className="text-sm text-muted-foreground mt-0.5">{admission.patientName} · {admission.admissionId}</p>
+          <p className="text-xs text-muted-foreground">Current: {admission.ward} — Bed {admission.bedNumber}</p>
         </div>
 
-        {/* Right panels */}
         <div className="space-y-3">
-          {/* Nursing tasks */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold">Nursing Round Tasks</CardTitle>
-                <Badge className="text-xs bg-amber-50 text-amber-700">
-                  {NURSING_CHECKS.filter((n) => !n.done).length} pending
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {NURSING_CHECKS.map((check, i) => (
-                <div key={i} className="flex items-center gap-2.5">
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
-                    check.done ? "bg-green-100" : "bg-amber-100"
-                  }`}>
-                    {check.done
-                      ? <CheckCircle2 className="h-3 w-3 text-green-600" />
-                      : <Clock className="h-3 w-3 text-amber-600" />
-                    }
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{check.task}</div>
-                    <div className="text-xs text-muted-foreground truncate">{check.patient}</div>
-                  </div>
-                  <div className="text-xs text-muted-foreground">{check.time}</div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <div>
+            <Label className="text-xs">New Ward</Label>
+            <select
+              className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+              value={ward}
+              onChange={(e) => setWard(e.target.value)}
+            >
+              {WARDS.map((w) => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label className="text-xs">New Bed Number</Label>
+            <Input className="mt-1 h-9" placeholder="e.g. B-205" value={bed} onChange={(e) => setBed(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs">Reason (optional)</Label>
+            <Input className="mt-1 h-9" placeholder="e.g. Condition improved, moved from ICU" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </div>
+        </div>
 
-          {/* Ward summary */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Ward Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {WARD_SUMMARY.map((w) => {
-                const pct = Math.round((w.occupied / w.beds) * 100);
-                return (
-                  <div key={w.ward} className="flex items-center gap-2">
-                    <div className="text-xs font-medium w-20 shrink-0">{w.ward}</div>
-                    <div className="flex-1">
-                      <Progress value={pct} className="h-1.5" />
-                    </div>
-                    <div className="text-xs text-muted-foreground w-12 text-right">{w.occupied}/{w.beds}</div>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
-          {/* AI Discharge Readiness */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center gap-2">
-                <Brain className="h-4 w-4 text-primary" />
-                <CardTitle className="text-sm font-semibold">AI Discharge Readiness</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {[
-                { name: "Ramesh Babu",  ready: true,  note: "Clinically stable, post-angio day 5" },
-                { name: "Lakshmi Devi", ready: false, note: "Pain management ongoing" },
-                { name: "Preethi Raj",  ready: false, note: "36 weeks — monitoring" },
-              ].map((item, i) => (
-                <div key={i} className={`rounded-xl p-2.5 text-xs flex items-center gap-2 ${
-                  item.ready ? "bg-green-50 border border-green-100" : "bg-muted"
-                }`}>
-                  {item.ready
-                    ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
-                    : <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  }
-                  <div>
-                    <div className="font-medium">{item.name}</div>
-                    <div className="text-muted-foreground">{item.note}</div>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+        <div className="flex gap-2 pt-1">
+          <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button
+            className="flex-1 gap-2"
+            disabled={!ward || !bed || ward === admission.ward && bed === admission.bedNumber || mut.isPending}
+            onClick={() => { setError(""); mut.mutate(); }}
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+            {mut.isPending ? "Transferring..." : "Confirm Transfer"}
+          </Button>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* New Admission modal — pre-fills status to IPD */}
-      <PatientModal
-        open={admitModalOpen}
-        onClose={() => {
-          setAdmitModalOpen(false);
-          qc.invalidateQueries({ queryKey: ["patients-ipd"] });
-        }}
-        existing={{ status: "IPD" }}
-      />
+// ── Rounds panel (inline expand) ─────────────────────────────────────────────
+function RoundsPanel({ admissionId }: { admissionId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["ipd-rounds", admissionId],
+    queryFn:  () => ipdApi.get(admissionId),
+    staleTime: 10000,
+  });
+  const rounds: any[] = data?.rounds ?? [];
+  if (isLoading) return <p className="text-xs text-muted-foreground mt-2 pt-3 border-t">Loading rounds...</p>;
+  if (rounds.length === 0) return <p className="text-xs text-muted-foreground mt-2 pt-3 border-t">No nursing rounds recorded yet.</p>;
+  return (
+    <div className="mt-3 border-t pt-3 space-y-2">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nursing Rounds ({rounds.length})</p>
+      {[...rounds].reverse().slice(0, 5).map((r: any) => (
+        <div key={r._id} className="bg-muted/40 rounded-lg px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">{r.nurse}</span>
+            <span className="text-xs text-muted-foreground">
+              {new Date(r.roundedAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
+            </span>
+          </div>
+          <div className="flex gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+            {r.bp    && <span>BP: {r.bp}</span>}
+            {r.pulse ? <span>Pulse: {r.pulse}</span> : null}
+            {r.temp  ? <span>Temp: {r.temp}°F</span> : null}
+            {r.spo2  ? <span>SpO₂: {r.spo2}%</span> : null}
+            {r.weight ? <span>Wt: {r.weight}kg</span> : null}
+          </div>
+          {r.notes && <p className="text-xs mt-1 text-foreground">{r.notes}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Bed map view ──────────────────────────────────────────────────────────────
+function BedMapView({ bedsData }: { bedsData: Record<string, any[]> }) {
+  const wards = Object.keys(bedsData);
+  if (wards.length === 0) return (
+    <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">No active admissions to display on bed map</CardContent></Card>
+  );
+  return (
+    <div className="space-y-4">
+      {wards.map((ward) => {
+        const beds: any[] = bedsData[ward];
+        return (
+          <Card key={ward}>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold">{ward}</CardTitle>
+                <Badge className={`text-xs border ${wardColor(ward)}`}>{beds.length} occupied</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {beds.map((b: any) => (
+                  <div key={b._id} className="border rounded-lg p-2 bg-blue-50 border-blue-200">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-blue-700">{b.bedNumber}</span>
+                      <BedDouble className="h-3 w-3 text-blue-500" />
+                    </div>
+                    <p className="text-xs font-medium truncate">{b.patientName}</p>
+                    <p className="text-xs text-muted-foreground truncate">{b.diagnosis}</p>
+                    <p className="text-xs text-muted-foreground">Day {daysSince(b.since) + 1}</p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }

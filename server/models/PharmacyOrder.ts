@@ -12,6 +12,10 @@ export interface IPharmacyOrder extends Document {
   type: "OPD" | "IPD" | "ICU";
   doctor: string;
   time: string;
+  prescriptionId?: string;
+  dispensedBy?: string;
+  dispensedAt?: Date;
+  notes?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,8 +31,12 @@ const PharmacyOrderSchema = new Schema<IPharmacyOrder>(
     unit: { type: String, required: true },
     status: { type: String, enum: ["Pending", "Verified", "Dispensed"], default: "Pending" },
     type: { type: String, enum: ["OPD", "IPD", "ICU"], required: true },
-    doctor: { type: String, default: "" },
-    time: { type: String, default: "" },
+    doctor:         { type: String, default: "" },
+    time:           { type: String, default: "" },
+    prescriptionId: { type: String },
+    dispensedBy:    { type: String },
+    dispensedAt:    { type: Date },
+    notes:          { type: String },
   },
   { timestamps: true }
 );

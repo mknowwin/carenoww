@@ -14,11 +14,6 @@ import {
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { dashboard as dashApi, appointments as apptApi, patients as patientsApi } from "@/lib/api";
-import {
-  HOSPITAL_METRICS as METRICS_FALLBACK, REVENUE_TREND as REV_FALLBACK,
-  DEPT_VOLUME as DEPT_FALLBACK, BED_OCCUPANCY as BED_FALLBACK,
-  APPOINTMENTS as APPT_FALLBACK, AI_ALERTS as ALERTS_FALLBACK, PATIENTS as PATIENTS_FALLBACK,
-} from "@/lib/mock-data";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatCurrency } from "@/lib/utils";
 
@@ -42,13 +37,17 @@ export default function DashboardPage() {
   const { data: apptData }     = useQuery({ queryKey: ["appointments"],        queryFn: () => apptApi.list({ date: new Date().toISOString().split("T")[0] }), retry: false });
   const { data: highRiskData } = useQuery({ queryKey: ["patients-highrisk"],   queryFn: () => patientsApi.list({ riskLevel: "Critical", limit: "10" }), retry: false });
 
-  const m = metricsData || METRICS_FALLBACK;
-  const REVENUE_TREND = revenueData || REV_FALLBACK;
-  const DEPT_VOLUME   = deptData    || DEPT_FALLBACK;
-  const BED_OCCUPANCY = bedData     || BED_FALLBACK;
-  const AI_ALERTS     = alertsData  || ALERTS_FALLBACK;
-  const todayAppts    = (apptData?.appointments ?? APPT_FALLBACK).slice(0, 5);
-  const criticalPatients = (highRiskData?.patients ?? PATIENTS_FALLBACK.filter((p) => p.riskLevel === "Critical" || p.riskLevel === "High")).slice(0, 4);
+  const m = metricsData ?? {
+    totalPatients: 0, opdToday: 0, ipdCurrent: 0, icuCurrent: 0,
+    appointmentsToday: 0, pendingClaims: 0, criticalAlerts: 0,
+    bedOccupancyRate: 0, revenueToday: 0, revenueMonth: 0, surgeriesThisWeek: 0, avgLOS: 0,
+  };
+  const REVENUE_TREND = revenueData  ?? [];
+  const DEPT_VOLUME   = deptData     ?? [];
+  const BED_OCCUPANCY = bedData      ?? [];
+  const AI_ALERTS     = alertsData   ?? [];
+  const todayAppts       = (apptData?.appointments     ?? []).slice(0, 5);
+  const criticalPatients = (highRiskData?.patients     ?? []).slice(0, 4);
 
   const stats = [
     { label: "OPD Today",       value: m.opdToday,             icon: Users,       change: "+12 vs yesterday",  color: "text-teal-600",   bg: "bg-teal-50",   suffix: "" },

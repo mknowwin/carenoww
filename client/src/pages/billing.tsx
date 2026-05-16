@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { billing as billingApi } from "@/lib/api";
-import { BILLING_RECORDS as RECORDS_FB, HOSPITAL_METRICS } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/utils";
 import BillingModal from "@/components/modals/BillingModal";
 
@@ -23,11 +22,13 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function BillingPage() {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editBill, setEditBill] = useState<any>(null);
-  const [paying, setPaying] = useState<string | null>(null);
+  const [search,      setSearch]      = useState("");
+  const [statusFilter,setStatusFilter]= useState("All");
+  const [modalOpen,   setModalOpen]   = useState(false);
+  const [editBill,    setEditBill]    = useState<any>(null);
+  const [payOnly,     setPayOnly]     = useState(false);
+  const [paying,      setPaying]      = useState<string | null>(null);
+  const [expandedId,  setExpandedId]  = useState<string | null>(null);
 
   const markPaid = async (bill: any) => {
     if (!confirm(`Mark bill ${bill.id} as fully paid (₹${bill.amount.toLocaleString()})?`)) return;
@@ -40,8 +41,8 @@ export default function BillingPage() {
     }
   };
 
-  const { data: apiData } = useQuery({ queryKey: ["billing"], queryFn: () => billingApi.list(), retry: false });
-  const BILLING_RECORDS: any[] = (apiData?.bills ?? RECORDS_FB).map((b: any) => ({
+  const { data: apiData } = useQuery({ queryKey: ["billing"], queryFn: () => billingApi.list(), retry: false, refetchInterval: 30000 });
+  const BILLING_RECORDS: any[] = (apiData?.bills ?? []).map((b: any) => ({
     ...b, id: b.billId || b._id || b.id,
   }));
 
@@ -63,7 +64,7 @@ export default function BillingPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold">Billing & Revenue Cycle</h2>
-          <p className="text-sm text-muted-foreground">AI Claims Scrubbing active · {HOSPITAL_METRICS.pendingClaims} claims pending</p>
+          <p className="text-sm text-muted-foreground">AI Claims Scrubbing active · {BILLING_RECORDS.filter((b: any) => b.status === "Pending").length} claims pending</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="gap-2"><FileText className="h-4 w-4" /> Insurance Portal</Button>
@@ -122,69 +123,102 @@ export default function BillingPage() {
             </div>
           </div>
 
-          {filtered.map((bill) => (
-            <Card key={bill.id}>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center shrink-0">
-                    <CreditCard className="h-5 w-5 text-teal-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-sm">{bill.patientName}</span>
-                      <span className="text-xs font-mono text-muted-foreground">{bill.id}</span>
-                      <Badge className={`text-xs ${STATUS_COLORS[bill.status] ?? "bg-gray-100"}`}>{bill.status}</Badge>
-                      <Badge className="text-xs bg-muted text-muted-foreground">{bill.type}</Badge>
+          {filtered.map((bill) => {
+            const isOpen = expandedId === bill.id;
+            return (
+              <Card key={bill.id} className="hover:shadow-sm transition-shadow">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center shrink-0">
+                      <CreditCard className="h-5 w-5 text-teal-600" />
                     </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {bill.date} · {bill.payer}
-                    </div>
-                    <div className="flex items-center gap-4 mt-2">
-                      <div>
-                        <div className="text-xs text-muted-foreground">Total</div>
-                        <div className="text-sm font-semibold">{formatCurrency(bill.amount)}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{bill.patientName}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{bill.id}</span>
+                        <Badge className={`text-xs ${STATUS_COLORS[bill.status] ?? "bg-gray-100"}`}>{bill.status}</Badge>
+                        <Badge className="text-xs bg-muted text-muted-foreground">{bill.type || "OPD"}</Badge>
                       </div>
-                      <div>
-                        <div className="text-xs text-muted-foreground">Paid</div>
-                        <div className="text-sm font-semibold text-green-600">{formatCurrency(bill.paid)}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN") : bill.date} · {bill.payer} · {bill.paymentMode}
                       </div>
-                      {bill.balance > 0 && (
+                      <div className="flex items-center gap-4 mt-2 flex-wrap">
                         <div>
-                          <div className="text-xs text-muted-foreground">Balance</div>
-                          <div className="text-sm font-semibold text-amber-600">{formatCurrency(bill.balance)}</div>
+                          <div className="text-xs text-muted-foreground">Total</div>
+                          <div className="text-sm font-semibold">{formatCurrency(bill.amount)}</div>
                         </div>
+                        <div>
+                          <div className="text-xs text-muted-foreground">Paid</div>
+                          <div className="text-sm font-semibold text-green-600">{formatCurrency(bill.paid)}</div>
+                        </div>
+                        {bill.balance > 0 && (
+                          <div>
+                            <div className="text-xs text-muted-foreground">Balance</div>
+                            <div className="text-sm font-semibold text-amber-600">{formatCurrency(bill.balance)}</div>
+                          </div>
+                        )}
+                        {bill.amount > 0 && (
+                          <div className="flex-1 min-w-16">
+                            <Progress value={Math.min(100, Math.round(((bill.paid || 0) / bill.amount) * 100))} className="h-1.5 mt-3" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setExpandedId(isOpen ? null : bill.id)}>
+                        {isOpen ? "▲" : "▼"} Items
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setEditBill(bill); setPayOnly(false); setModalOpen(true); }}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      {(bill.status === "Pending" || bill.status === "Partial") && (
+                        <Button size="sm" variant="outline" className="h-7 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
+                          onClick={() => { setEditBill(bill); setPayOnly(true); setModalOpen(true); }}>
+                          Record Pay
+                        </Button>
                       )}
-                      {bill.balance > 0 && (
-                        <div className="flex-1">
-                          <Progress value={Math.round((bill.paid / bill.amount) * 100)} className="h-1.5 mt-3" />
-                        </div>
+                      {(bill.status === "Pending" || bill.status === "Partial") && (
+                        <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                          disabled={paying === bill.id}
+                          onClick={() => markPaid(bill)}>
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          {paying === bill.id ? "..." : "Full Pay"}
+                        </Button>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
-                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setEditBill(bill); setModalOpen(true); }}>
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-7 text-xs"><FileText className="h-3 w-3" /></Button>
-                    {bill.status === "Partial" && (
-                      <Button size="sm" variant="outline" className="h-7 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
-                        onClick={() => { setEditBill(bill); setModalOpen(true); }}>
-                        Part Pay
-                      </Button>
-                    )}
-                    {(bill.status === "Pending" || bill.status === "Partial") && (
-                      <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700"
-                        disabled={paying === bill.id}
-                        onClick={() => markPaid(bill)}>
-                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                        {paying === bill.id ? "..." : "Mark Paid"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+
+                  {/* Line items expand */}
+                  {isOpen && bill.items?.length > 0 && (
+                    <div className="mt-3 border-t pt-3">
+                      <div className="grid grid-cols-12 gap-1 text-xs font-semibold text-muted-foreground mb-1 px-1">
+                        <span className="col-span-5">Description</span>
+                        <span className="col-span-3">Category</span>
+                        <span className="col-span-1 text-center">Qty</span>
+                        <span className="col-span-1 text-right">Price</span>
+                        <span className="col-span-2 text-right">Total</span>
+                      </div>
+                      {bill.items.map((item: any, idx: number) => (
+                        <div key={idx} className="grid grid-cols-12 gap-1 text-xs py-1 px-1 even:bg-muted/30 rounded">
+                          <span className="col-span-5 font-medium">{item.description}</span>
+                          <span className="col-span-3 text-muted-foreground">{item.category}</span>
+                          <span className="col-span-1 text-center text-muted-foreground">{item.quantity}</span>
+                          <span className="col-span-1 text-right text-muted-foreground">₹{item.unitPrice?.toLocaleString()}</span>
+                          <span className="col-span-2 text-right font-medium">₹{item.total?.toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {bill.discount > 0 && (
+                        <div className="text-xs text-right text-amber-600 mt-1 px-1">Discount: -₹{bill.discount?.toLocaleString()}</div>
+                      )}
+                    </div>
+                  )}
+                  {isOpen && (!bill.items || bill.items.length === 0) && (
+                    <p className="text-xs text-muted-foreground mt-3 pt-3 border-t">No line items recorded.</p>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
         {/* Right panel */}
@@ -264,8 +298,9 @@ export default function BillingPage() {
 
       <BillingModal
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditBill(null); }}
+        onClose={() => { setModalOpen(false); setEditBill(null); setPayOnly(false); }}
         existing={editBill}
+        payOnly={payOnly}
       />
     </div>
   );
