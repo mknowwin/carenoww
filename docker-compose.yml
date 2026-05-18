@@ -8,8 +8,16 @@ services:
     restart: unless-stopped
     ports:
       - "5031:5031"
-    env_file:
-      - .env
+    environment:
+      PORT: "${PORT:-5031}"
+      NODE_ENV: "${NODE_ENV:-production}"
+      MONGODB_URI: "${MONGODB_URI}"
+      JWT_SECRET: "${JWT_SECRET}"
+      SUPERADMIN_JWT_SECRET: "${SUPERADMIN_JWT_SECRET}"
+      SUPERADMIN_EMAIL: "${SUPERADMIN_EMAIL}"
+      SUPERADMIN_PASSWORD: "${SUPERADMIN_PASSWORD}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-}"
     networks:
       - carenoww-net
 
