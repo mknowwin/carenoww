@@ -1,0 +1,18 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: carenoww-hms:latest
+    container_name: carenoww-app
+    restart: unless-stopped
+    ports:
+      - "5031:5031"
+    env_file:
+      - .env
+    networks:
+      - carenoww-net
+
+networks:
+  carenoww-net:
+    driver: bridge

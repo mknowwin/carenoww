@@ -26,7 +26,11 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3201;
 
 // ── Security ──────────────────────────────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: ["http://localhost:3200", "http://localhost:5173"], credentials: true }));
+
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+  : ["http://localhost:3200", "http://localhost:5173"];
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { error: "Too many login attempts" } });

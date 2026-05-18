@@ -1,32 +1,59 @@
-# Dependencies
+# ── Dependencies ──────────────────────────────────────────────────────────────
 node_modules/
 .pnp
 .pnp.js
 
-# Environment variables (NEVER commit these)
+# ── Environment variables (NEVER commit) ─────────────────────────────────────
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
 
-# Build output
+# ── Build output ──────────────────────────────────────────────────────────────
 dist/
 build/
 .vite/
+*.tsbuildinfo
 
-# Logs
+# ── Logs ──────────────────────────────────────────────────────────────────────
 logs/
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Editor
+# ── Editor ────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.project
+.classpath
+.settings/
 
-# TypeScript
-*.tsbuildinfo
+# ── Testing & coverage ────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── Uploads / local data ──────────────────────────────────────────────────────
+uploads/
+tmp/
+temp/
