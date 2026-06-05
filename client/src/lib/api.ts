@@ -36,12 +36,15 @@ const del  = <T>(path: string) => request<T>(path, { method: "DELETE" });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const auth = {
-  login:          (email: string, password: string) => post<{ token: string; user: any }>("/auth/login", { email, password }),
-  me:             () => get<any>("/auth/me"),
-  changePassword: (currentPassword: string, newPassword: string) =>
+  login:           (email: string, password: string) => post<{ token: string; user: any }>("/auth/login", { email, password }),
+  me:              () => get<any>("/auth/me"),
+  changePassword:  (currentPassword: string, newPassword: string) =>
     post<{ message: string }>("/auth/change-password", { currentPassword, newPassword }),
-  updateProfile:  (data: { name?: string; department?: string; aiScribeEnabled?: boolean; aiScribeProvider?: string; aiScribeApiKey?: string; aiScribeModel?: string }) =>
+  updateProfile:   (data: { name?: string; department?: string; aiScribeEnabled?: boolean; aiScribeProvider?: string; aiScribeApiKey?: string; aiScribeModel?: string }) =>
     put<any>("/auth/profile", data),
+  getClinicSettings: () => get<any>("/auth/clinic-settings"),
+  updateClinicSettings: (data: { name?: string; logoUrl?: string; clinicPhone?: string; clinicAddress?: string }) =>
+    put<any>("/auth/clinic-settings", data),
 };
 
 // ── Superadmin ────────────────────────────────────────────────────────────────
@@ -139,7 +142,10 @@ export const pharmacy = {
     update: (id: string, data: any) => put<any>(`/pharmacy/orders/${id}`, data),
   },
   inventory: {
-    list:   () => get<any>("/pharmacy/inventory"),
+    list:   (params?: Record<string, string>) => {
+      const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+      return get<any>(`/pharmacy/inventory${qs}`);
+    },
     create: (data: any)  => post<any>("/pharmacy/inventory", data),
     update: (id: string, data: any) => put<any>(`/pharmacy/inventory/${id}`, data),
   },

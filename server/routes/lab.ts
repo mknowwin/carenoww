@@ -11,7 +11,7 @@ async function nextLabId(tenantId: string): Promise<string> {
 }
 
 // ── GET /api/lab/orders ───────────────────────────────────────────────────────
-router.get("/orders", async (req: AuthRequest, res) => {
+router.get("/orders", requireRole("admin", "doctor", "nurse", "lab_tech"), async (req: AuthRequest, res) => {
   try {
     const { status, priority, patientId, appointmentId, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
@@ -32,7 +32,7 @@ router.get("/orders", async (req: AuthRequest, res) => {
 });
 
 // ── GET /api/lab/orders/:id ───────────────────────────────────────────────────
-router.get("/orders/:id", async (req: AuthRequest, res) => {
+router.get("/orders/:id", requireRole("admin", "doctor", "nurse", "lab_tech"), async (req: AuthRequest, res) => {
   try {
     const order = await LabOrder.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
     if (!order) return res.status(404).json({ error: "Lab order not found" });
@@ -45,7 +45,7 @@ router.get("/orders/:id", async (req: AuthRequest, res) => {
 // ── POST /api/lab/orders ──────────────────────────────────────────────────────
 router.post("/orders", requireRole("admin", "doctor", "nurse", "lab_tech", "receptionist"), async (req: AuthRequest, res) => {
   try {
-    const { patientId, patientName, test, priority, notes } = req.body;
+    const { patientId, patientName, test } = req.body;
     if (!patientId || !patientName || !test) {
       return res.status(400).json({ error: "patientId, patientName, test required" });
     }
@@ -55,6 +55,8 @@ router.post("/orders", requireRole("admin", "doctor", "nurse", "lab_tech", "rece
       tenantId: req.user!.tenantId,
       labId,
       doctor: req.body.doctor || req.user!.name,
+      parameters: req.body.parameters || [],
+      sampleDate: req.body.sampleDate || null,
     });
     res.status(201).json(order);
   } catch (err: any) {
@@ -66,12 +68,14 @@ router.post("/orders", requireRole("admin", "doctor", "nurse", "lab_tech", "rece
 // ── PUT /api/lab/orders/:id — update status / enter result ───────────────────
 router.put("/orders/:id", requireRole("admin", "doctor", "nurse", "lab_tech"), async (req: AuthRequest, res) => {
   try {
-    const allowed = ["status", "result", "priority", "notes"];
+    const allowed = ["status", "result", "priority", "notes", "parameters", "sampleDate", "reportedBy"];
     const update: any = {};
     allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
 
     // Auto-set status to Completed when result is entered
-    if (update.result && !update.status) update.status = "Completed";
+    if ((update.result || (update.parameters && update.parameters.length > 0)) && !update.status) {
+      update.status = "Completed";
+    }
 
     const order = await LabOrder.findOneAndUpdate(
       { _id: req.params.id, tenantId: req.user!.tenantId },

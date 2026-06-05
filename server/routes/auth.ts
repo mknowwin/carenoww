@@ -73,7 +73,11 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res) => {
       email: user.email,
       role: user.role,
       department: user.department,
-      organization: tenant?.name || "",
+      organization:   tenant?.name || "",
+      clinicLogoUrl:  tenant?.settings?.logoUrl || "",
+      clinicPhone:    tenant?.settings?.clinicPhone || tenant?.contact?.phone || "",
+      clinicAddress:  tenant?.settings?.clinicAddress || tenant?.contact?.address || "",
+      clinicCity:     tenant?.contact?.city || "",
       aiScribeEnabled:  user.aiScribeEnabled ?? false,
       aiScribeProvider: user.aiScribeProvider ?? "deepgram",
       aiScribeApiKey:   user.aiScribeApiKey ?? "",
@@ -105,6 +109,41 @@ router.put("/profile", authMiddleware, async (req: AuthRequest, res) => {
       aiScribeApiKey:   user.aiScribeApiKey,
       aiScribeModel:    user.aiScribeModel,
     });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/auth/clinic-settings
+router.get("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const tenant = await Tenant.findById(req.user!.tenantId);
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json({
+      name:         tenant.name,
+      logoUrl:      tenant.settings?.logoUrl || "",
+      clinicPhone:  tenant.settings?.clinicPhone || tenant.contact?.phone || "",
+      clinicAddress:tenant.settings?.clinicAddress || tenant.contact?.address || "",
+      clinicCity:   tenant.contact?.city || "",
+    });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PUT /api/auth/clinic-settings (admin only)
+router.put("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    if (req.user!.role !== "admin") return res.status(403).json({ error: "Admins only" });
+    const { name, logoUrl, clinicPhone, clinicAddress } = req.body;
+    const update: any = {};
+    if (name)          update["name"] = name;
+    if (logoUrl !== undefined) update["settings.logoUrl"] = logoUrl;
+    if (clinicPhone !== undefined) update["settings.clinicPhone"] = clinicPhone;
+    if (clinicAddress !== undefined) update["settings.clinicAddress"] = clinicAddress;
+    const tenant = await Tenant.findByIdAndUpdate(req.user!.tenantId, { $set: update }, { new: true });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json({ message: "Clinic settings saved", logoUrl: tenant.settings?.logoUrl || "" });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

@@ -21,6 +21,9 @@ export interface ITenant extends Document {
     maxUsers: number;
     maxPatients: number;
     modules: string[];
+    logoUrl: string;
+    clinicPhone: string;
+    clinicAddress: string;
   };
   subscription: {
     startedAt: Date;
@@ -47,9 +50,12 @@ const TenantSchema = new Schema<ITenant>(
       country: { type: String, default: "India" },
     },
     settings: {
-      maxUsers: { type: Number, default: 10 },
-      maxPatients: { type: Number, default: 1000 },
-      modules: { type: [String], default: ["dashboard", "patients", "appointments", "opd", "ipd", "lab", "pharmacy", "billing", "analytics"] },
+      maxUsers:      { type: Number, default: 10 },
+      maxPatients:   { type: Number, default: 1000 },
+      modules:       { type: [String], default: ["dashboard", "patients", "appointments", "opd", "ipd", "lab", "pharmacy", "billing", "analytics"] },
+      logoUrl:       { type: String, default: "" },
+      clinicPhone:   { type: String, default: "" },
+      clinicAddress: { type: String, default: "" },
     },
     subscription: {
       startedAt: { type: Date, default: Date.now },

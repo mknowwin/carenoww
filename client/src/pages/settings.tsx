@@ -10,7 +10,8 @@ import {
   Settings, User, Bell, Shield, Brain, Building2,
   Monitor, Globe, Key, Database, CheckCircle2, Users, Plus, Trash2,
   Stethoscope, ChevronDown, ChevronRight, Clock, CalendarDays, Pencil,
-  X, Loader2, UserPlus, Mic,
+  X, Loader2, UserPlus, Mic, FlaskConical, Pill, CreditCard, UserCheck, HeartPulse,
+  Upload, ImageIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { auth as authApi, users as usersApi } from "@/lib/api";
@@ -53,11 +54,12 @@ function DoctorForm({
   const isEdit = !!existing;
 
   const [form, setForm] = useState({
-    name:      existing?.name      ?? "",
-    email:     existing?.email     ?? "",
-    password:  "",
-    specialty: existing?.specialty ?? dept,
-    department:dept,
+    name:         existing?.name         ?? "",
+    email:        existing?.email        ?? "",
+    password:     "",
+    specialty:    existing?.specialty    ?? dept,
+    department:   dept,
+    consultingFee:existing?.consultingFee ?? 0,
     schedule: {
       days:            existing?.schedule?.days ?? ["Mon","Tue","Wed","Thu","Fri"],
       startTime:       existing?.schedule?.startTime ?? "09:00",
@@ -86,7 +88,7 @@ function DoctorForm({
     setLoading(true); setError("");
     try {
       if (isEdit) {
-        const payload: any = { specialty: form.specialty, schedule: form.schedule };
+        const payload: any = { specialty: form.specialty, schedule: form.schedule, consultingFee: form.consultingFee };
         if (form.password) payload.password = form.password;
         await usersApi.update(existing._id, payload);
       } else {
@@ -129,6 +131,12 @@ function DoctorForm({
           <Label className="text-xs">Specialty</Label>
           <Input value={form.specialty} onChange={(e) => setForm((f) => ({ ...f, specialty: e.target.value }))}
             placeholder={dept} className="h-8 text-sm" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Consulting Fee (₹)</Label>
+          <Input type="number" min={0} value={form.consultingFee || ""}
+            onChange={(e) => setForm((f) => ({ ...f, consultingFee: parseFloat(e.target.value) || 0 }))}
+            placeholder="e.g. 500" className="h-8 text-sm" />
         </div>
       </div>
 
@@ -447,6 +455,428 @@ function DepartmentsSection() {
   );
 }
 
+// ── Staff Role Config ─────────────────────────────────────────────────────────
+const STAFF_ROLES = [
+  { key: "nurse",        label: "Nurse",       plural: "Nurses",          icon: HeartPulse },
+  { key: "receptionist", label: "Receptionist",plural: "Reception",       icon: UserCheck  },
+  { key: "lab_tech",     label: "Lab Tech",    plural: "Lab Technicians", icon: FlaskConical },
+  { key: "pharmacist",   label: "Pharmacist",  plural: "Pharmacists",     icon: Pill       },
+  { key: "finance",      label: "Finance",     plural: "Finance Staff",   icon: CreditCard },
+] as const;
+
+type StaffRole = (typeof STAFF_ROLES)[number]["key"];
+
+// ── StaffSection ──────────────────────────────────────────────────────────────
+function StaffSection() {
+  const qc = useQueryClient();
+  const [activeTab, setActiveTab] = useState<StaffRole>("receptionist");
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", password: "", department: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const { data: usersData, isLoading } = useQuery({
+    queryKey: ["users"],
+    queryFn: usersApi.list,
+    retry: false,
+  });
+
+  const allUsers: any[] = usersData ?? [];
+  const current = STAFF_ROLES.find((r) => r.key === activeTab)!;
+  const roleUsers = allUsers.filter((u) => u.role === activeTab);
+
+  const switchTab = (tab: StaffRole) => {
+    setActiveTab(tab);
+    setAdding(false);
+    setError("");
+    setSuccess("");
+  };
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError(""); setSuccess("");
+    try {
+      await usersApi.create({ ...form, role: activeTab });
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setSuccess(`${current.label} "${form.name}" added successfully.`);
+      setForm({ name: "", email: "", password: "", department: "" });
+      setAdding(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to create user");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deactivate = async (id: string, name: string) => {
+    if (!confirm(`Deactivate ${name}?`)) return;
+    try {
+      await usersApi.deactivate(id);
+      qc.invalidateQueries({ queryKey: ["users"] });
+    } catch (err: any) {
+      alert(err.message || "Failed to deactivate");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary row */}
+      <div className="grid grid-cols-5 gap-2">
+        {STAFF_ROLES.map((r) => {
+          const count = allUsers.filter((u) => u.role === r.key).length;
+          const Icon = r.icon;
+          return (
+            <Card
+              key={r.key}
+              className={`cursor-pointer transition-all hover:shadow-sm ${activeTab === r.key ? "ring-2 ring-primary shadow-sm" : ""}`}
+              onClick={() => switchTab(r.key)}
+            >
+              <CardContent className="p-3 flex flex-col items-center gap-1.5 text-center">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${ROLE_COLORS[r.key]}`}>
+                  <Icon className="h-4 w-4" />
+                </div>
+                <span className="text-lg font-bold leading-tight">{count}</span>
+                <span className="text-[10px] text-muted-foreground leading-tight">{r.plural}</span>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Role tabs */}
+      <div className="flex gap-2 flex-wrap">
+        {STAFF_ROLES.map((r) => (
+          <button
+            key={r.key}
+            onClick={() => switchTab(r.key)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all ${
+              activeTab === r.key
+                ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+            }`}
+          >
+            {r.plural}
+          </button>
+        ))}
+      </div>
+
+      {/* Users for selected role */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <current.icon className="h-4 w-4" />
+              {current.plural}
+              <Badge className={`text-xs ${ROLE_COLORS[activeTab]}`}>{roleUsers.length}</Badge>
+            </CardTitle>
+            {!adding && (
+              <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setAdding(true)}>
+                <Plus className="h-3.5 w-3.5" /> Add {current.label}
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {/* Add form */}
+          {adding && (
+            <form onSubmit={handleAdd} className="bg-muted/30 border border-border rounded-xl p-4 space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                New {current.label}
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Full Name *</Label>
+                  <Input
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="Full name"
+                    className="h-8 text-sm"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Email *</Label>
+                  <Input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="user@hospital.com"
+                    className="h-8 text-sm"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Password *</Label>
+                  <Input
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    placeholder="Min 6 characters"
+                    className="h-8 text-sm"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Department</Label>
+                  <Input
+                    value={form.department}
+                    onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))}
+                    placeholder="e.g. Emergency, ICU"
+                    className="h-8 text-sm"
+                  />
+                </div>
+              </div>
+              {error && (
+                <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{error}</p>
+              )}
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={loading}>
+                  {loading
+                    ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Adding…</>
+                    : `Add ${current.label}`}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setAdding(false); setError(""); }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {success && (
+            <p className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg">{success}</p>
+          )}
+
+          {isLoading && (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+
+          {!isLoading && roleUsers.length === 0 && !adding && (
+            <div className="text-center py-10 space-y-2">
+              <current.icon className="h-8 w-8 text-muted-foreground/30 mx-auto" />
+              <p className="text-sm text-muted-foreground">
+                No {current.plural.toLowerCase()} added yet.
+              </p>
+              <Button size="sm" variant="outline" className="gap-1.5 mt-1" onClick={() => setAdding(true)}>
+                <Plus className="h-3.5 w-3.5" /> Add first {current.label}
+              </Button>
+            </div>
+          )}
+
+          {roleUsers.map((u: any) => (
+            <div
+              key={u._id}
+              className="flex items-center gap-3 p-3 rounded-xl border border-border bg-background hover:shadow-sm transition-shadow"
+            >
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${ROLE_COLORS[activeTab]}`}>
+                {u.name?.[0]?.toUpperCase() ?? "U"}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">{u.name}</p>
+                <p className="text-xs text-muted-foreground">{u.email}</p>
+                {u.department && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{u.department}</p>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                onClick={() => deactivate(u._id, u.name)}
+                title="Deactivate"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── HospitalSection ───────────────────────────────────────────────────────────
+function HospitalSection({ user }: { user: any }) {
+  const [clinicName,    setClinicName]    = useState((user as any)?.organization ?? "Carenow");
+  const [clinicPhone,   setClinicPhone]   = useState((user as any)?.clinicPhone  ?? "");
+  const [clinicAddress, setClinicAddress] = useState((user as any)?.clinicAddress ?? "");
+  const [logoUrl,       setLogoUrl]       = useState((user as any)?.clinicLogoUrl ?? "");
+  const [logoPreview,   setLogoPreview]   = useState((user as any)?.clinicLogoUrl ?? "");
+  const [saving,        setSaving]        = useState(false);
+  const [msg,           setMsg]           = useState("");
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setLogoUrl(dataUrl);
+      setLogoPreview(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const saveSettings = async () => {
+    setSaving(true); setMsg("");
+    try {
+      await authApi.updateClinicSettings({
+        name:         clinicName,
+        logoUrl:      logoUrl,
+        clinicPhone:  clinicPhone,
+        clinicAddress:clinicAddress,
+      });
+      // Update localStorage so print functions pick up new values immediately
+      try {
+        const stored = localStorage.getItem("carenoww_user");
+        if (stored) {
+          const u = JSON.parse(stored);
+          u.organization    = clinicName;
+          u.clinicLogoUrl   = logoUrl;
+          u.clinicPhone     = clinicPhone;
+          u.clinicAddress   = clinicAddress;
+          localStorage.setItem("carenoww_user", JSON.stringify(u));
+        }
+      } catch {}
+      setMsg("Clinic settings saved successfully.");
+    } catch (err: any) {
+      setMsg(err.message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Building2 className="h-4 w-4" /> Clinic Branding &amp; Info
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Logo upload */}
+          <div className="space-y-2">
+            <Label className="text-xs">Clinic Logo</Label>
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center bg-gray-50 shrink-0 overflow-hidden">
+                {logoPreview
+                  ? <img src={logoPreview} alt="logo" className="w-full h-full object-contain" />
+                  : <ImageIcon className="h-7 w-7 text-gray-300" />
+                }
+              </div>
+              <div className="space-y-1.5">
+                <label className="cursor-pointer">
+                  <div className="flex items-center gap-2 px-3 py-1.5 text-xs border border-input rounded-md hover:bg-accent transition-colors">
+                    <Upload className="h-3.5 w-3.5" />
+                    {logoPreview ? "Replace Logo" : "Upload Logo"}
+                  </div>
+                  <input type="file" accept="image/*" className="sr-only" onChange={handleLogoUpload} />
+                </label>
+                {logoPreview && (
+                  <button
+                    className="text-xs text-destructive hover:underline block"
+                    onClick={() => { setLogoUrl(""); setLogoPreview(""); }}
+                  >
+                    Remove logo
+                  </button>
+                )}
+                <p className="text-xs text-muted-foreground">PNG, JPG, or SVG. Max 2 MB. Appears on all printouts.</p>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Clinic details */}
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Clinic / Hospital Name *</Label>
+              <Input
+                value={clinicName}
+                onChange={(e) => setClinicName(e.target.value)}
+                placeholder="e.g. Carenow Clinic"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Phone Number</Label>
+              <Input
+                value={clinicPhone}
+                onChange={(e) => setClinicPhone(e.target.value)}
+                placeholder="+91-44-XXXX-XXXX"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label className="text-xs">Address (shown on printouts)</Label>
+              <Input
+                value={clinicAddress}
+                onChange={(e) => setClinicAddress(e.target.value)}
+                placeholder="Street, City — PIN  ·  www.yoursite.com"
+                className="h-9"
+              />
+            </div>
+          </div>
+
+          {msg && (
+            <p className={`text-xs px-3 py-2 rounded ${msg.includes("success") ? "bg-green-50 text-green-700" : "bg-destructive/10 text-destructive"}`}>
+              {msg}
+            </p>
+          )}
+
+          <Button size="sm" onClick={saveSettings} disabled={saving || user?.role !== "admin"}>
+            {saving ? "Saving..." : "Save Clinic Settings"}
+          </Button>
+          {user?.role !== "admin" && (
+            <p className="text-xs text-muted-foreground">Only administrators can update clinic branding.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Token Display */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Monitor className="h-4 w-4" /> Token Display Screen
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Open this URL on a TV or kiosk in your waiting area to show live token numbers.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              readOnly
+              className="h-8 text-xs font-mono bg-muted/30"
+              value={`${window.location.origin}/display?tid=${(user as any)?.tenantId ?? "YOUR_TENANT_ID"}`}
+            />
+            <Button size="sm" variant="outline" className="h-8 text-xs shrink-0"
+              onClick={() => navigator.clipboard.writeText(`${window.location.origin}/display?tid=${(user as any)?.tenantId ?? ""}`)}>
+              Copy
+            </Button>
+            <Button size="sm" className="h-8 text-xs shrink-0"
+              onClick={() => window.open(`/display?tid=${(user as any)?.tenantId ?? ""}`, "_blank")}>
+              Open
+            </Button>
+          </div>
+          <div className="bg-teal-50 rounded-xl p-3 flex items-center gap-2 text-xs text-teal-700">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            HIPAA Compliant · HL7 FHIR R4 Native · ABDM API-Ready
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── Main SettingsPage ─────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -500,10 +930,11 @@ export default function SettingsPage() {
     { id: "profile",     label: "Profile",              icon: User },
     { id: "hospital",    label: "Hospital",             icon: Building2 },
     ...(user?.role === "admin" ? [{ id: "departments", label: "Departments & Doctors", icon: Stethoscope }] : []),
+    ...(user?.role === "admin" ? [{ id: "staff",       label: "Staff Management",      icon: UserCheck   }] : []),
     { id: "notif",       label: "Notifications",        icon: Bell },
     { id: "ai",          label: "AI Features",          icon: Brain },
     { id: "security",    label: "Security",             icon: Shield },
-    ...(user?.role === "admin" ? [{ id: "users", label: "User Management", icon: Users }] : []),
+    ...(user?.role === "admin" ? [{ id: "users",       label: "All Users",             icon: Users       }] : []),
     { id: "system",      label: "System",               icon: Monitor },
   ];
   const [active, setActive] = useState("profile");
@@ -670,61 +1101,7 @@ export default function SettingsPage() {
           )}
 
           {/* ── Hospital ─────────────────────────────────────── */}
-          {active === "hospital" && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Building2 className="h-4 w-4" /> Hospital Configuration
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {[
-                    { label: "Hospital Name",    value: (user as any)?.organization ?? "Carenoww City Hospital" },
-                    { label: "Registration No.", value: "MCI-2019-TN-0421" },
-                    { label: "NABH Accredited",  value: "Yes (2023–2026)" },
-                    { label: "Total Beds",        value: "188" },
-                    { label: "Data Residency",    value: "AWS Mumbai (ap-south-1)" },
-                  ].map((f) => (
-                    <div key={f.label} className="space-y-1.5">
-                      <Label className="text-xs">{f.label}</Label>
-                      <Input defaultValue={f.value} className="h-9" />
-                    </div>
-                  ))}
-                </div>
-                {/* Token Display URL */}
-                <div className="border rounded-xl p-4 space-y-2 bg-violet-50 border-violet-200">
-                  <p className="text-xs font-semibold text-violet-800 flex items-center gap-1.5">
-                    <Monitor className="h-3.5 w-3.5" /> Token Display Screen (TV / Kiosk)
-                  </p>
-                  <p className="text-xs text-violet-700">
-                    Open this URL on a TV or kiosk in your waiting area to show live token numbers.
-                  </p>
-                  <div className="flex gap-2">
-                    <Input
-                      readOnly
-                      className="h-8 text-xs font-mono bg-white"
-                      value={`${window.location.origin}/display?tid=${(user as any)?.tenantId ?? "YOUR_TENANT_ID"}`}
-                    />
-                    <Button size="sm" variant="outline" className="h-8 text-xs shrink-0"
-                      onClick={() => navigator.clipboard.writeText(`${window.location.origin}/display?tid=${(user as any)?.tenantId ?? ""}`)}>
-                      Copy
-                    </Button>
-                    <Button size="sm" className="h-8 text-xs shrink-0"
-                      onClick={() => window.open(`/display?tid=${(user as any)?.tenantId ?? ""}`, "_blank")}>
-                      Open
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="bg-teal-50 rounded-xl p-3 flex items-center gap-2 text-xs text-teal-700">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  HIPAA Compliant · HL7 FHIR R4 Native · ABDM API-Ready · ISO 27001 Roadmap Q3 2026
-                </div>
-                <Button size="sm">Save Configuration</Button>
-              </CardContent>
-            </Card>
-          )}
+          {active === "hospital" && <HospitalSection user={user} />}
 
           {/* ── Departments & Doctors ─────────────────────────── */}
           {active === "departments" && user?.role === "admin" && (
@@ -738,6 +1115,19 @@ export default function SettingsPage() {
                 </div>
               </div>
               <DepartmentsSection />
+            </div>
+          )}
+
+          {/* ── Staff Management ─────────────────────────────── */}
+          {active === "staff" && user?.role === "admin" && (
+            <div className="space-y-2">
+              <div>
+                <h3 className="text-sm font-semibold">Staff Management</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Create and manage nursing, reception, lab, pharmacy, and finance staff. Each role gets access to the relevant modules only.
+                </p>
+              </div>
+              <StaffSection />
             </div>
           )}
 
