@@ -79,11 +79,11 @@ export async function seedTenant(tenantId: string) {
 
   // Seed Billing
   await BillingRecord.insertMany([
-    { tenantId: tid, billId: "BILL-001", patientId: "UHID-008", patientName: "Kavitha Murugan", date: new Date("2026-05-07"), amount: 42500, paid: 42500, balance: 0,     status: "Paid",    payer: "Cash",        type: "IPD Final"   },
+    { tenantId: tid, billId: "BILL-001", patientId: "UHID-008", patientName: "Kavitha Murugan", date: new Date("2026-05-07"), amount: 42500, paid: 42500, balance: 0,     status: "Paid",    payer: "Cash",        type: "IPD"   },
     { tenantId: tid, billId: "BILL-002", patientId: "UHID-001", patientName: "Arjun Mehta",     date: new Date("2026-05-07"), amount: 1800,  paid: 1800,  balance: 0,     status: "Paid",    payer: "Star Health", type: "OPD"         },
-    { tenantId: tid, billId: "BILL-003", patientId: "UHID-002", patientName: "Lakshmi Devi",    date: new Date("2026-05-06"), amount: 85000, paid: 40000, balance: 45000, status: "Partial", payer: "New India",   type: "IPD Advance" },
-    { tenantId: tid, billId: "BILL-004", patientId: "UHID-005", patientName: "Suresh Kumar",    date: new Date("2026-05-05"), amount: 28000, paid: 0,     balance: 28000, status: "Pending", payer: "TPA Corp",    type: "ICU Daily"   },
-    { tenantId: tid, billId: "BILL-005", patientId: "UHID-007", patientName: "Ramesh Babu",     date: new Date("2026-05-04"), amount: 95000, paid: 95000, balance: 0,     status: "Claimed", payer: "New India",   type: "OT Package"  },
+    { tenantId: tid, billId: "BILL-003", patientId: "UHID-002", patientName: "Lakshmi Devi",    date: new Date("2026-05-06"), amount: 85000, paid: 40000, balance: 45000, status: "Partial", payer: "New India",   type: "IPD" },
+    { tenantId: tid, billId: "BILL-004", patientId: "UHID-005", patientName: "Suresh Kumar",    date: new Date("2026-05-05"), amount: 28000, paid: 0,     balance: 28000, status: "Pending", payer: "TPA Corp",    type: "IPD"   },
+    { tenantId: tid, billId: "BILL-005", patientId: "UHID-007", patientName: "Ramesh Babu",     date: new Date("2026-05-04"), amount: 95000, paid: 95000, balance: 0,     status: "Claimed", payer: "New India",   type: "IPD"  },
   ]);
 
   // Seed Bed Occupancy

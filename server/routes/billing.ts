@@ -17,7 +17,7 @@ function computeStatus(amount: number, paid: number): string {
 }
 
 // ── GET /api/billing ──────────────────────────────────────────────────────────
-router.get("/", async (req: AuthRequest, res) => {
+router.get("/", requireRole("admin", "finance", "receptionist"), async (req: AuthRequest, res) => {
   try {
     const { status, patientId, type, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
@@ -37,7 +37,7 @@ router.get("/", async (req: AuthRequest, res) => {
 });
 
 // ── GET /api/billing/:id ──────────────────────────────────────────────────────
-router.get("/:id", async (req: AuthRequest, res) => {
+router.get("/:id", requireRole("admin", "finance", "receptionist"), async (req: AuthRequest, res) => {
   try {
     const bill = await BillingRecord.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
     if (!bill) return res.status(404).json({ error: "Bill not found" });

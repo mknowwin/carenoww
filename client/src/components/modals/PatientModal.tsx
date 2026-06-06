@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +67,26 @@ export default function PatientModal({ open, onClose, existing }: Props) {
     insurance:  existing?.insurance  ?? "None",
     riskLevel:  existing?.riskLevel  ?? "Low",
   });
+
+  useEffect(() => {
+    if (open) {
+      setForm({
+        name:       existing?.name       ?? "",
+        age:        existing?.age        ?? "",
+        gender:     existing?.gender     ?? "M",
+        bloodGroup: existing?.bloodGroup ?? "O+",
+        phone:      existing?.phone      ?? "",
+        address:    existing?.address    ?? "",
+        department: existing?.department ?? "Cardiology",
+        status:     existing?.status     ?? "OPD",
+        doctor:     existing?.doctor     ?? "",
+        diagnosis:  existing?.diagnosis  ?? "",
+        insurance:  existing?.insurance  ?? "None",
+        riskLevel:  existing?.riskLevel  ?? "Low",
+      });
+      setError("");
+    }
+  }, [open, existing]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");

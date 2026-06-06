@@ -26,6 +26,7 @@ export interface IUser extends Document {
   aiScribeProvider?: string;
   aiScribeApiKey?: string;
   aiScribeModel?: string;
+  consultingFee?: number;
 }
 
 const DoctorScheduleSchema = new Schema<IDoctorSchedule>(
@@ -61,6 +62,7 @@ const UserSchema = new Schema<IUser>(
     aiScribeProvider: { type: String,  default: "deepgram" },
     aiScribeApiKey:   { type: String,  default: "" },
     aiScribeModel:    { type: String,  default: "nova-2-medical" },
+    consultingFee:    { type: Number,  default: 0 },
   },
   { timestamps: true }
 );

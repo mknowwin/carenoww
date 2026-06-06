@@ -14,7 +14,7 @@ async function nextRxId(tenantId: string): Promise<string> {
 // ── Pharmacy Orders ───────────────────────────────────────────────────────────
 
 // GET /api/pharmacy/orders
-router.get("/orders", async (req: AuthRequest, res) => {
+router.get("/orders", requireRole("admin", "doctor", "pharmacist", "nurse"), async (req: AuthRequest, res) => {
   try {
     const { status, patientId, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
@@ -72,7 +72,7 @@ router.put("/orders/:id", requireRole("admin", "pharmacist", "nurse"), async (re
 // ── Drug Inventory ────────────────────────────────────────────────────────────
 
 // GET /api/pharmacy/inventory
-router.get("/inventory", async (req: AuthRequest, res) => {
+router.get("/inventory", requireRole("admin", "pharmacist", "nurse", "doctor"), async (req: AuthRequest, res) => {
   try {
     const { search } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };

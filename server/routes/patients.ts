@@ -14,7 +14,7 @@ async function nextUHID(tenantId: string): Promise<string> {
 }
 
 // GET /api/patients
-router.get("/", async (req: AuthRequest, res) => {
+router.get("/", requireRole("admin", "doctor", "nurse", "receptionist", "pharmacist", "lab_tech"), async (req: AuthRequest, res) => {
   try {
     const { status, riskLevel, search, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId, isActive: true };
@@ -46,7 +46,7 @@ router.post("/", requireRole("admin", "doctor", "receptionist", "nurse"), async 
 });
 
 // GET /api/patients/:id
-router.get("/:id", async (req: AuthRequest, res) => {
+router.get("/:id", requireRole("admin", "doctor", "nurse", "receptionist", "pharmacist", "lab_tech"), async (req: AuthRequest, res) => {
   try {
     const patient = await Patient.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
     if (!patient) return res.status(404).json({ error: "Patient not found" });

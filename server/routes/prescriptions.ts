@@ -17,7 +17,7 @@ async function nextPharmRxId(tenantId: string): Promise<string> {
 }
 
 // ── GET /api/prescriptions ────────────────────────────────────────────────────
-router.get("/", async (req: AuthRequest, res) => {
+router.get("/", requireRole("admin", "doctor", "nurse", "pharmacist"), async (req: AuthRequest, res) => {
   try {
     const { patientId, appointmentId, admissionId, status } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };

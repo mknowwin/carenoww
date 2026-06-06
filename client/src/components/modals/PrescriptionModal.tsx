@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,8 +81,10 @@ function DrugAutocomplete({
   const [open,        setOpen]        = useState(false);
   const [focused,     setFocused]     = useState(false);
   const [activeIdx,   setActiveIdx]   = useState(-1);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wrapRef     = useRef<HTMLDivElement>(null);
+  const [dropPos,     setDropPos]     = useState<{ top: number; left: number; width: number } | null>(null);
+  const debounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef     = useRef<HTMLInputElement>(null);
+  const dropdownRef  = useRef<HTMLDivElement>(null);
 
   const fetchSuggestions = useCallback((q: string) => {
     if (q.length < 2) { setSuggestions([]); setOpen(false); return; }
@@ -91,6 +94,10 @@ function DrugAutocomplete({
         const data = await pharmacyApi.inventory.list({ search: q });
         const items: InventoryDrug[] = (data ?? []).slice(0, 10);
         setSuggestions(items);
+        if (items.length > 0 && inputRef.current) {
+          const r = inputRef.current.getBoundingClientRect();
+          setDropPos({ top: r.bottom + 2, left: r.left, width: r.width });
+        }
         setOpen(items.length > 0);
         setActiveIdx(-1);
       } catch {
@@ -103,10 +110,11 @@ function DrugAutocomplete({
     if (focused) fetchSuggestions(value);
   }, [value, focused, fetchSuggestions]);
 
-  // Close on outside click
+  // Close on outside click — must check both input and portaled dropdown
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (!inputRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
         setOpen(false);
       }
     };
@@ -129,8 +137,9 @@ function DrugAutocomplete({
   };
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div className="relative">
       <Input
+        ref={inputRef}
         className="h-9 text-sm"
         placeholder={placeholder ?? "e.g. Paracetamol 500mg"}
         value={value}
@@ -140,8 +149,12 @@ function DrugAutocomplete({
         onKeyDown={handleKeyDown}
         autoComplete="off"
       />
-      {open && suggestions.length > 0 && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+      {open && suggestions.length > 0 && dropPos && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{ position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999 }}
+          className="bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden"
+        >
           <div className="px-2 py-1 border-b border-gray-100 flex items-center gap-1.5">
             <Package className="h-3 w-3 text-teal-600" />
             <span className="text-[10px] font-semibold text-teal-700 uppercase tracking-wide">Pharmacy Inventory</span>
@@ -163,7 +176,8 @@ function DrugAutocomplete({
               </li>
             ))}
           </ul>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
