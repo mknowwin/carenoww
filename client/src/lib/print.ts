@@ -7,6 +7,7 @@ export interface ClinicInfo {
   phone?: string;
   address?: string;
   city?: string;
+  gstNo?: string;
 }
 
 const DEFAULT_CLINIC: ClinicInfo = {
@@ -33,8 +34,9 @@ function getStoredClinic(): ClinicInfo {
   return DEFAULT_CLINIC;
 }
 
-function clinicHeader(clinic: ClinicInfo): string {
+function clinicHeader(clinic: ClinicInfo, docLabel?: string): string {
   const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join("  ·  ");
+  const gstLine = clinic.gstNo ? `GSTIN: ${clinic.gstNo}` : "";
   const logoHtml = clinic.logoUrl
     ? `<img src="${clinic.logoUrl}" alt="logo" style="height:56px;width:auto;object-fit:contain;margin-bottom:6px;" /><br/>`
     : "";
@@ -43,6 +45,8 @@ function clinicHeader(clinic: ClinicInfo): string {
     ${logoHtml}
     <div class="name">${clinic.name}</div>
     ${sub ? `<div class="sub">${sub}</div>` : ""}
+    ${gstLine ? `<div class="sub" style="color:#333;font-weight:600;">${gstLine}</div>` : ""}
+    ${docLabel ? `<div style="font-size:12px;font-weight:700;letter-spacing:.8px;margin-top:4px;text-transform:uppercase;">${docLabel}</div>` : ""}
   </div>`;
 }
 
@@ -137,24 +141,34 @@ ${body}
 
 // ── printBill ─────────────────────────────────────────────────────────────────
 export function printBill(bill: any, clinicOverride?: ClinicInfo) {
-  const clinic = clinicOverride ?? getStoredClinic();
-  const date    = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
-  const items   = (bill.items || []) as any[];
-  const subtotal= items.reduce((s, i) => s + (i.total || 0), 0);
-  const balance = (bill.amount || 0) - (bill.paid || 0);
+  const clinic   = clinicOverride ?? getStoredClinic();
+  const date     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+  const items    = (bill.items || []) as any[];
+  const subtotal = items.reduce((s, i) => s + (i.total || 0), 0);
+  const balance  = (bill.amount || 0) - (bill.paid || 0);
+
+  const hasGst = clinic.gstNo && (bill.totalCgst > 0 || bill.totalSgst > 0 || bill.totalIgst > 0);
+  const docLabel = hasGst ? "Tax Invoice" : undefined;
 
   const itemRows = items.map((item, idx) => `
     <tr>
       <td class="tc" style="width:36px;">${idx + 1}</td>
-      <td><strong>${item.description}</strong></td>
-      <td style="width:100px;">${item.category}</td>
-      <td class="tc" style="width:48px;">${item.quantity}</td>
-      <td class="tr" style="width:80px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
+      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
+      <td style="width:90px;">${item.category}</td>
+      <td class="tc" style="width:44px;">${item.quantity}</td>
+      <td class="tr" style="width:76px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
+      ${hasGst ? `<td class="tr" style="width:68px;">${item.taxRate ? `${item.taxRate}%` : "—"}</td>` : ""}
       <td class="tr" style="width:88px;font-weight:600;">₹${(item.total || 0).toLocaleString()}</td>
     </tr>`).join("");
 
+  const gstSummary = hasGst ? `
+    <tr><td>Taxable Amount</td><td class="tr">₹${(bill.taxableAmount || subtotal).toLocaleString()}</td></tr>
+    ${bill.totalCgst > 0 ? `<tr><td>CGST</td><td class="tr">₹${bill.totalCgst.toLocaleString()}</td></tr>` : ""}
+    ${bill.totalSgst > 0 ? `<tr><td>SGST</td><td class="tr">₹${bill.totalSgst.toLocaleString()}</td></tr>` : ""}
+    ${bill.totalIgst > 0 ? `<tr><td>IGST</td><td class="tr">₹${bill.totalIgst.toLocaleString()}</td></tr>` : ""}` : "";
+
   const body = `
-    ${clinicHeader(clinic)}
+    ${clinicHeader(clinic, docLabel)}
 
     <div class="doc-row">
       <div>
@@ -185,6 +199,7 @@ export function printBill(bill: any, clinicOverride?: ClinicInfo) {
           <th>Category</th>
           <th class="tc">Qty</th>
           <th class="tr">Rate</th>
+          ${hasGst ? `<th class="tr">GST%</th>` : ""}
           <th class="tr">Amount</th>
         </tr>
       </thead>
@@ -195,6 +210,7 @@ export function printBill(bill: any, clinicOverride?: ClinicInfo) {
       <table>
         <tr><td>Subtotal</td><td class="tr">₹${subtotal.toLocaleString()}</td></tr>
         ${bill.discount > 0 ? `<tr><td>Discount</td><td class="tr" style="color:#d97706;">−₹${bill.discount.toLocaleString()}</td></tr>` : ""}
+        ${gstSummary}
         <tr class="tot-row"><td>Total</td><td class="tr">₹${(bill.amount || 0).toLocaleString()}</td></tr>
         <tr class="paid-row"><td>Amount Paid</td><td class="tr">₹${(bill.paid || 0).toLocaleString()}</td></tr>
         ${balance > 0 ? `<tr class="bal-row"><td>Balance Due</td><td class="tr">₹${balance.toLocaleString()}</td></tr>` : ""}
@@ -207,9 +223,90 @@ export function printBill(bill: any, clinicOverride?: ClinicInfo) {
     <div class="footer">
       <p>Thank you for choosing ${clinic.name}. We wish you a speedy recovery!</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
+      ${hasGst ? `<p style="font-size:10px;">This is a computer-generated Tax Invoice. GSTIN: ${clinic.gstNo}</p>` : ""}
     </div>`;
 
   open(`Invoice ${bill.billId || bill.id}`, body);
+}
+
+// ── printDispenseSlip ─────────────────────────────────────────────────────────
+export function printDispenseSlip(order: any, clinicOverride?: ClinicInfo) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const date   = order.dispensedAt
+    ? new Date(order.dispensedAt).toLocaleString("en-IN", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    : new Date().toLocaleString("en-IN");
+
+  const items = (order.items || []) as any[];
+  const total = items.reduce((s: number, i: any) => s + ((i.quantity || 1) * (i.mrpPerUnit || 0)), 0);
+
+  const itemRows = items.map((item: any, idx: number) => `
+    <tr>
+      <td class="tc">${idx + 1}</td>
+      <td><strong>${item.drugName || "—"}</strong></td>
+      <td class="tc">${item.batchNo || "—"}</td>
+      <td class="tc">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>
+      <td class="tc">${item.quantity || 1}</td>
+      <td class="tr">₹${(item.mrpPerUnit || 0).toLocaleString()}</td>
+      <td class="tr"><strong>₹${((item.quantity || 1) * (item.mrpPerUnit || 0)).toLocaleString()}</strong></td>
+    </tr>`).join("");
+
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">DISPENSE SLIP</div>
+        <div style="margin-top:4px;"><span class="badge">${order.type || "OPD"}</span>
+        ${order.rxSource === "Paper" ? `<span class="badge" style="margin-left:4px;background:#fff8e1;color:#7c5c00;border-color:#f0c040;">Paper Rx</span>` : ""}
+        ${order.rxSource === "OTC"   ? `<span class="badge" style="margin-left:4px;background:#e8f0fe;color:#1a3c8e;border-color:#aec3d7;">OTC</span>`   : ""}
+        </div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:16px;font-weight:800;font-family:monospace;">${order.rxId || "—"}</div>
+        <div>Dispensed: ${date}</div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-item"><label>Patient Name</label><span>${order.patientName || "—"}</span></div>
+      <div class="meta-item"><label>UHID</label><span>${order.patientId || "—"}</span></div>
+      ${order.doctor ? `<div class="meta-item"><label>Doctor</label><span>${order.doctor}</span></div>` : ""}
+      <div class="meta-item"><label>Dispensed By</label><span>${order.dispensedBy || "—"}</span></div>
+      ${order.paperRxNote ? `<div class="meta-item" style="grid-column:1/-1"><label>Rx Note</label><span>${order.paperRxNote}</span></div>` : ""}
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="tc">#</th>
+          <th>Drug Name</th>
+          <th class="tc">Batch No</th>
+          <th class="tc">Expiry</th>
+          <th class="tc">Qty</th>
+          <th class="tr">MRP/Unit</th>
+          <th class="tr">Total MRP</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    <div class="summary">
+      <table>
+        <tr class="tot-row"><td>Total MRP</td><td class="tr">₹${total.toLocaleString()}</td></tr>
+      </table>
+    </div>
+
+    <div class="notes" style="margin-top:14px;">
+      <strong>Important</strong>
+      Please keep this slip as proof of dispensing. Store medicines as per label instructions.
+    </div>
+
+    <div class="footer">
+      <p>${clinic.name} — Pharmacy Dispense Slip &nbsp;·&nbsp; ${date}</p>
+      ${clinic.phone ? `<p>${clinic.phone}</p>` : ""}
+    </div>`;
+
+  open(`Dispense Slip — ${order.rxId || order.patientName || ""}`, body);
 }
 
 // ── printPrescription ─────────────────────────────────────────────────────────

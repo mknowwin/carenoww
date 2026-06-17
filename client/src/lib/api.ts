@@ -43,8 +43,11 @@ export const auth = {
   updateProfile:   (data: { name?: string; department?: string; aiScribeEnabled?: boolean; aiScribeProvider?: string; aiScribeApiKey?: string; aiScribeModel?: string }) =>
     put<any>("/auth/profile", data),
   getClinicSettings: () => get<any>("/auth/clinic-settings"),
-  updateClinicSettings: (data: { name?: string; logoUrl?: string; clinicPhone?: string; clinicAddress?: string }) =>
-    put<any>("/auth/clinic-settings", data),
+  updateClinicSettings: (data: {
+    name?: string; logoUrl?: string; clinicPhone?: string; clinicAddress?: string;
+    gstNo?: string; invoicePrefix?: string;
+    taxConfig?: { cgstRate?: number; sgstRate?: number; igstRate?: number; taxInclusivePricing?: boolean };
+  }) => put<any>("/auth/clinic-settings", data),
 };
 
 // ── Superadmin ────────────────────────────────────────────────────────────────
@@ -149,17 +152,58 @@ export const pharmacy = {
     create: (data: any)  => post<any>("/pharmacy/inventory", data),
     update: (id: string, data: any) => put<any>(`/pharmacy/inventory/${id}`, data),
   },
+  batches: {
+    list: (drugId?: string) => {
+      const qs = drugId ? `?drugId=${encodeURIComponent(drugId)}` : "";
+      return get<any[]>(`/pharmacy/batches${qs}`);
+    },
+  },
+  grn: {
+    list:   (params?: Record<string, string>) => {
+      const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+      return get<any>(`/pharmacy/grn${qs}`);
+    },
+    get:    (id: string) => get<any>(`/pharmacy/grn/${id}`),
+    create: (data: any)  => post<any>("/pharmacy/grn", data),
+    update: (id: string, data: any) => put<any>(`/pharmacy/grn/${id}`, data),
+  },
+  adjustments: {
+    list:   (params?: Record<string, string>) => {
+      const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+      return get<any>(`/pharmacy/adjustments${qs}`);
+    },
+    create: (data: any)  => post<any>("/pharmacy/adjustments", data),
+  },
 };
 
 // ── Billing ───────────────────────────────────────────────────────────────────
 export const billing = {
-  list:   (params?: Record<string, string>) => {
+  list:       (params?: Record<string, string>) => {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
     return get<any>(`/billing${qs}`);
   },
-  get:    (id: string) => get<any>(`/billing/${id}`),
-  create: (data: any)  => post<any>("/billing", data),
-  update: (id: string, data: any) => put<any>(`/billing/${id}`, data),
+  get:        (id: string) => get<any>(`/billing/${id}`),
+  create:     (data: any)  => post<any>("/billing", data),
+  update:     (id: string, data: any) => put<any>(`/billing/${id}`, data),
+  // Payment
+  postPayment:(id: string, data: any) => post<any>(`/billing/${id}/payments`, data),
+  unlock:     (id: string) => post<any>(`/billing/${id}/unlock`, {}),
+  // Insurance / claims
+  preAuth:    (id: string, data: any) => post<any>(`/billing/${id}/pre-auth`, data),
+  updatePreAuth:(id: string, data: any) => put<any>(`/billing/${id}/pre-auth`, data),
+  fileClaim:  (id: string, data: any) => post<any>(`/billing/${id}/claim`, data),
+  updateClaim:(id: string, data: any) => put<any>(`/billing/${id}/claim`, data),
+};
+
+// ── Service Rate Master ───────────────────────────────────────────────────────
+export const ratemaster = {
+  list:   (params?: Record<string, string>) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return get<any[]>(`/ratemaster${qs}`);
+  },
+  create: (data: any)  => post<any>("/ratemaster", data),
+  update: (id: string, data: any) => put<any>(`/ratemaster/${id}`, data),
+  remove: (id: string) => del<any>(`/ratemaster/${id}`),
 };
 
 // ── Reports ───────────────────────────────────────────────────────────────────
@@ -208,4 +252,4 @@ export const publicApi = {
     fetch(`/api/public/display?tenantId=${encodeURIComponent(tenantId)}`).then((r) => r.json()),
 };
 
-export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, reports, ipd, prescriptions, publicApi };
+export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, prescriptions, publicApi };

@@ -26,6 +26,13 @@ export interface ApiError {
 }
 
 // ── Tenant (Hospital) ─────────────────────────────────────────────────────────
+export interface TaxConfig {
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+  taxInclusivePricing: boolean;
+}
+
 export interface Tenant {
   _id: string;
   name: string;
@@ -45,6 +52,10 @@ export interface Tenant {
     maxUsers: number;
     maxPatients: number;
     modules: string[];
+    gstNo?: string;
+    invoicePrefix?: string;
+    paymentMethods?: string[];
+    taxConfig?: TaxConfig;
   };
   subscription: {
     startedAt: string;
@@ -111,6 +122,18 @@ export interface LabOrder {
 }
 
 // ── Pharmacy ──────────────────────────────────────────────────────────────────
+export interface OrderItem {
+  _id?: string;
+  drugId?: string;
+  drugName: string;
+  batchId?: string;
+  batchNo: string;
+  quantity: number;
+  unit: string;
+  mrpPerUnit: number;
+  totalAmount: number;
+}
+
 export interface PharmacyOrder {
   _id?: string;
   rxId?: string;
@@ -119,10 +142,32 @@ export interface PharmacyOrder {
   drug: string;
   qty: number;
   unit: string;
+  items?: OrderItem[];
   status: "Pending" | "Verified" | "Dispensed";
   type: "OPD" | "IPD" | "ICU";
+  rxSource?: "Digital" | "Paper" | "OTC";
+  paperRxNote?: string;
   doctor: string;
   time: string;
+  prescriptionId?: string;
+  dispensedBy?: string;
+  dispensedAt?: string;
+  notes?: string;
+}
+
+export interface DrugBatch {
+  _id?: string;
+  drugId: string;
+  batchNo: string;
+  lotNo?: string;
+  supplierName?: string;
+  manufacturingDate?: string;
+  expiryDate: string;
+  quantityReceived: number;
+  quantityRemaining: number;
+  purchasePricePerUnit: number;
+  mrpPerUnit: number;
+  status: "Active" | "Exhausted" | "Expired" | "Quarantine";
 }
 
 export interface DrugInventory {
@@ -131,24 +176,152 @@ export interface DrugInventory {
   stock: number;
   unit: string;
   reorderLevel: number;
-  expiryDate: string;
+  expiryDate?: string;
   status: "OK" | "Low" | "Critical";
   supplier: string;
+  category?: string;
+  hsnCode?: string;
+  mrpPerUnit?: number;
+  purchasePricePerUnit?: number;
+  isBatchTracked?: boolean;
+}
+
+export interface GRNItem {
+  _id?: string;
+  drugId: string;
+  drugName: string;
+  batchNo: string;
+  expiryDate: string;
+  quantityReceived: number;
+  purchasePricePerUnit: number;
+  mrpPerUnit: number;
+  totalCost: number;
+}
+
+export interface GRN {
+  _id?: string;
+  grnId?: string;
+  supplierName: string;
+  invoiceNo?: string;
+  invoiceDate?: string;
+  receivedDate?: string;
+  receivedBy?: string;
+  items: GRNItem[];
+  totalValue: number;
+  status: "Draft" | "Received";
+  notes?: string;
+}
+
+export interface StockAdjustment {
+  _id?: string;
+  adjustmentId?: string;
+  drugId: string;
+  drugName: string;
+  batchId?: string;
+  adjustmentType: "Damage" | "Expiry-Writeoff" | "Theft" | "Count-Correction" | "Return-to-Supplier" | "Opening-Stock";
+  quantityBefore: number;
+  quantityAdjusted: number;
+  quantityAfter: number;
+  reason: string;
+  adjustedBy?: string;
+  createdAt?: string;
 }
 
 // ── Billing ───────────────────────────────────────────────────────────────────
+export interface BillItem {
+  _id?: string;
+  description: string;
+  category: "Consultation" | "Lab" | "Pharmacy" | "Procedure" | "Room" | "Other";
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  hsnCode?: string;
+  taxRate?: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
+  taxableAmount?: number;
+}
+
+export interface PaymentEntry {
+  _id?: string;
+  paymentId?: string;
+  amount: number;
+  paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Advance-Adjustment";
+  payer: string;
+  transactionRef?: string;
+  receivedBy?: string;
+  notes?: string;
+  paidAt?: string;
+}
+
+export interface AdvanceEntry {
+  _id?: string;
+  amount: number;
+  receivedDate?: string;
+  receivedBy?: string;
+  mode: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
+  transactionRef?: string;
+}
+
+export interface InsuranceClaim {
+  tpaName?: string;
+  policyNo?: string;
+  memberNo?: string;
+  claimNo?: string;
+  preAuthNo?: string;
+  preAuthStatus?: "Pending" | "Approved" | "Rejected" | "PartialApproval";
+  preAuthAmount?: number;
+  claimStatus?: "Not-Filed" | "Filed" | "Under-Review" | "Approved" | "Rejected" | "Settled" | "Escalated";
+  claimAmount?: number;
+  settledAmount?: number;
+  submittedDate?: string;
+  settledDate?: string;
+  rejectionReason?: string;
+}
+
 export interface BillingRecord {
   _id?: string;
   billId?: string;
   patientId: string;
   patientName: string;
+  appointmentId?: string;
+  admissionId?: string;
   date: string;
+  items?: BillItem[];
   amount: number;
   paid: number;
   balance: number;
+  discount?: number;
+  discountType?: "Flat" | "Percent";
+  discountPercent?: number;
+  totalAdvance?: number;
+  advances?: AdvanceEntry[];
+  payments?: PaymentEntry[];
   status: "Paid" | "Partial" | "Pending" | "Claimed";
   payer: string;
+  paymentMode?: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
   type: string;
+  notes?: string;
+  isLocked?: boolean;
+  insurance?: InsuranceClaim;
+  totalCgst?: number;
+  totalSgst?: number;
+  totalIgst?: number;
+  totalTax?: number;
+  taxableAmount?: number;
+}
+
+// ── Service Rate Master ───────────────────────────────────────────────────────
+export interface ServiceRate {
+  _id?: string;
+  category: "Consultation" | "Lab" | "Pharmacy" | "Procedure" | "Room" | "Other";
+  name: string;
+  defaultRate: number;
+  unit?: string;
+  hsnCode?: string;
+  taxRate?: number;
+  isActive?: boolean;
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────

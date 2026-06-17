@@ -11,10 +11,11 @@ import {
   Monitor, Globe, Key, Database, CheckCircle2, Users, Plus, Trash2,
   Stethoscope, ChevronDown, ChevronRight, Clock, CalendarDays, Pencil,
   X, Loader2, UserPlus, Mic, FlaskConical, Pill, CreditCard, UserCheck, HeartPulse,
-  Upload, ImageIcon,
+  Upload, ImageIcon, IndianRupee,
 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
-import { auth as authApi, users as usersApi } from "@/lib/api";
+import { auth as authApi, users as usersApi, ratemaster as ratemasterApi } from "@/lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 const ROLES = ["admin", "doctor", "nurse", "pharmacist", "lab_tech", "finance", "receptionist"];
@@ -709,8 +710,27 @@ function HospitalSection({ user }: { user: any }) {
   const [clinicAddress, setClinicAddress] = useState((user as any)?.clinicAddress ?? "");
   const [logoUrl,       setLogoUrl]       = useState((user as any)?.clinicLogoUrl ?? "");
   const [logoPreview,   setLogoPreview]   = useState((user as any)?.clinicLogoUrl ?? "");
+  const [gstNo,         setGstNo]         = useState("");
+  const [invoicePrefix, setInvoicePrefix] = useState("BILL");
+  const [cgstRate,      setCgstRate]      = useState(0);
+  const [sgstRate,      setSgstRate]      = useState(0);
+  const [igstRate,      setIgstRate]      = useState(0);
+  const [taxInclusive,  setTaxInclusive]  = useState(false);
   const [saving,        setSaving]        = useState(false);
   const [msg,           setMsg]           = useState("");
+
+  useEffect(() => {
+    authApi.getClinicSettings().then((s: any) => {
+      if (s.gstNo         !== undefined) setGstNo(s.gstNo);
+      if (s.invoicePrefix !== undefined) setInvoicePrefix(s.invoicePrefix);
+      if (s.taxConfig) {
+        setCgstRate(s.taxConfig.cgstRate ?? 0);
+        setSgstRate(s.taxConfig.sgstRate ?? 0);
+        setIgstRate(s.taxConfig.igstRate ?? 0);
+        setTaxInclusive(s.taxConfig.taxInclusivePricing ?? false);
+      }
+    }).catch(() => {});
+  }, []);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -728,12 +748,19 @@ function HospitalSection({ user }: { user: any }) {
     setSaving(true); setMsg("");
     try {
       await authApi.updateClinicSettings({
-        name:         clinicName,
-        logoUrl:      logoUrl,
-        clinicPhone:  clinicPhone,
-        clinicAddress:clinicAddress,
+        name:          clinicName,
+        logoUrl:       logoUrl,
+        clinicPhone:   clinicPhone,
+        clinicAddress: clinicAddress,
+        gstNo:         gstNo,
+        invoicePrefix: invoicePrefix,
+        taxConfig: {
+          cgstRate:            cgstRate,
+          sgstRate:            sgstRate,
+          igstRate:            igstRate,
+          taxInclusivePricing: taxInclusive,
+        },
       });
-      // Update localStorage so print functions pick up new values immediately
       try {
         const stored = localStorage.getItem("carenoww_user");
         if (stored) {
@@ -841,6 +868,97 @@ function HospitalSection({ user }: { user: any }) {
         </CardContent>
       </Card>
 
+      {/* Tax & Invoice */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <CreditCard className="h-4 w-4" /> Tax &amp; Invoice Settings
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">GSTIN (15-char)</Label>
+              <Input
+                value={gstNo}
+                onChange={(e) => setGstNo(e.target.value.toUpperCase())}
+                placeholder="22AAAAA0000A1Z5"
+                maxLength={15}
+                className="h-9 font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">Leave blank to disable GST on invoices.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Invoice Number Prefix</Label>
+              <Input
+                value={invoicePrefix}
+                onChange={(e) => setInvoicePrefix(e.target.value.toUpperCase())}
+                placeholder="BILL"
+                className="h-9 font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">E.g. BILL-0001, INV-0001.</p>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2">
+            <Label className="text-xs font-medium">GST Rates (% per transaction)</Label>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">CGST %</Label>
+                <Input
+                  type="number" min={0} max={14} step={0.5}
+                  value={cgstRate}
+                  onChange={(e) => setCgstRate(parseFloat(e.target.value) || 0)}
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">SGST %</Label>
+                <Input
+                  type="number" min={0} max={14} step={0.5}
+                  value={sgstRate}
+                  onChange={(e) => setSgstRate(parseFloat(e.target.value) || 0)}
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">IGST % (interstate)</Label>
+                <Input
+                  type="number" min={0} max={28} step={0.5}
+                  value={igstRate}
+                  onChange={(e) => setIgstRate(parseFloat(e.target.value) || 0)}
+                  className="h-9"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Healthcare services (SAC 9993) are GST-exempt in India. Pharmacy products attract 12% GST. Set rates to 0 if you are exempt.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-xs font-medium">Tax-Inclusive Pricing (MRP includes GST)</p>
+              <p className="text-xs text-muted-foreground">When enabled, displayed prices already include GST. Tax is back-calculated for invoices.</p>
+            </div>
+            <Switch checked={taxInclusive} onCheckedChange={setTaxInclusive} />
+          </div>
+
+          <Button
+            size="sm"
+            onClick={saveSettings}
+            disabled={saving || user?.role !== "admin"}
+          >
+            {saving ? "Saving..." : "Save Tax Settings"}
+          </Button>
+          {user?.role !== "admin" && (
+            <p className="text-xs text-muted-foreground">Only administrators can update tax settings.</p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Token Display */}
       <Card>
         <CardHeader>
@@ -873,6 +991,155 @@ function HospitalSection({ user }: { user: any }) {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ── ServiceRatesSection ───────────────────────────────────────────────────────
+const RATE_CATEGORIES = ["Lab", "Diagnosis", "Procedure", "Room", "Bed Charges", "Nursing", "Other"] as const;
+const RATE_UNITS = ["per test", "per visit", "per session", "per day", "per hour", "per procedure", "per admission", "per tablet", "per vial"] as const;
+
+function ServiceRatesSection() {
+  const qc = useQueryClient();
+  const { data: rates = [], isLoading } = useQuery<any[]>({
+    queryKey: ["ratemaster"],
+    queryFn:  () => ratemasterApi.list(),
+  });
+
+  const [form, setForm]       = useState({ name: "", category: "Lab", defaultRate: "", unit: "per test" });
+  const [editId, setEditId]   = useState<string | null>(null);
+  const [error, setError]     = useState("");
+  const [busy, setBusy]       = useState(false);
+
+  const resetForm = () => { setForm({ name: "", category: "Lab", defaultRate: "", unit: "per test" }); setEditId(null); setError(""); };
+
+  const startEdit = (r: any) => {
+    setEditId(r._id);
+    setForm({ name: r.name, category: r.category, defaultRate: String(r.defaultRate), unit: r.unit || "per test" });
+    setError("");
+  };
+
+  const save = async () => {
+    if (!form.name.trim()) { setError("Name is required."); return; }
+    const rate = parseFloat(form.defaultRate) || 0;
+    setBusy(true); setError("");
+    try {
+      if (editId) {
+        await ratemasterApi.update(editId, { name: form.name.trim(), category: form.category, defaultRate: rate, unit: form.unit });
+      } else {
+        await ratemasterApi.create({ name: form.name.trim(), category: form.category, defaultRate: rate, unit: form.unit });
+      }
+      qc.invalidateQueries({ queryKey: ["ratemaster"] });
+      resetForm();
+    } catch (e: any) {
+      setError(e.message || "Failed to save rate.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await ratemasterApi.remove(id);
+      qc.invalidateQueries({ queryKey: ["ratemaster"] });
+    } catch { /* silent */ }
+  };
+
+  const grouped = RATE_CATEGORIES.reduce<Record<string, any[]>>((acc, cat) => {
+    acc[cat] = rates.filter((r) => r.category === cat);
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold">Service Rate Master</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Configure per-item charges for Lab tests, Diagnosis, Procedures, and Room/Bed. These rates are used for auto-billing and the billing quick-pick panel.
+        </p>
+      </div>
+
+      {/* Add / Edit form */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {editId ? "Edit Rate" : "Add Rate"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="space-y-1">
+              <Label className="text-xs">Name *</Label>
+              <Input className="h-8 text-sm" placeholder="e.g. CBC, Hypertension" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Category</Label>
+              <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {RATE_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Rate (₹)</Label>
+              <Input className="h-8 text-sm" type="number" min={0} placeholder="0.00" value={form.defaultRate} onChange={(e) => setForm((f) => ({ ...f, defaultRate: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Unit label</Label>
+              <Select value={form.unit} onValueChange={(v) => setForm((f) => ({ ...f, unit: v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{RATE_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+          {error && <p className="text-xs text-destructive mt-2">{error}</p>}
+          <div className="flex gap-2 mt-3">
+            <Button size="sm" onClick={save} disabled={busy}>{busy ? "Saving…" : editId ? "Update" : "Add Rate"}</Button>
+            {editId && <Button size="sm" variant="ghost" onClick={resetForm}>Cancel</Button>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Rate list grouped by category */}
+      {isLoading ? (
+        <div className="text-xs text-muted-foreground py-4 text-center">Loading rates…</div>
+      ) : (
+        <div className="space-y-4">
+          {RATE_CATEGORIES.map((cat) => (
+            <div key={cat}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <IndianRupee className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{cat}</span>
+                <Badge variant="outline" className="text-xs py-0 h-4">{grouped[cat].length}</Badge>
+              </div>
+              {grouped[cat].length === 0 ? (
+                <p className="text-xs text-muted-foreground pl-5">No rates configured.</p>
+              ) : (
+                <div className="border rounded-md divide-y">
+                  {grouped[cat].map((r) => (
+                    <div key={r._id} className="flex items-center justify-between px-3 py-2">
+                      <div>
+                        <span className="text-sm font-medium">{r.name}</span>
+                        <span className="text-xs text-muted-foreground ml-2">{r.unit}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold">₹{r.defaultRate.toLocaleString()}</span>
+                        <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => startEdit(r)}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => remove(r._id)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -928,9 +1195,10 @@ export default function SettingsPage() {
 
   const sections = [
     { id: "profile",     label: "Profile",              icon: User },
-    { id: "hospital",    label: "Hospital",             icon: Building2 },
-    ...(user?.role === "admin" ? [{ id: "departments", label: "Departments & Doctors", icon: Stethoscope }] : []),
-    ...(user?.role === "admin" ? [{ id: "staff",       label: "Staff Management",      icon: UserCheck   }] : []),
+    ...(user?.role === "admin" ? [{ id: "hospital",    label: "Hospital",             icon: Building2 }] : []),
+    ...(user?.role === "admin" ? [{ id: "departments",  label: "Departments & Doctors", icon: Stethoscope  }] : []),
+    ...(user?.role === "admin" ? [{ id: "staff",        label: "Staff Management",      icon: UserCheck    }] : []),
+    ...(user?.role === "admin" ? [{ id: "servicerates", label: "Service Rates",         icon: IndianRupee  }] : []),
     { id: "notif",       label: "Notifications",        icon: Bell },
     { id: "ai",          label: "AI Features",          icon: Brain },
     { id: "security",    label: "Security",             icon: Shield },
@@ -1101,7 +1369,7 @@ export default function SettingsPage() {
           )}
 
           {/* ── Hospital ─────────────────────────────────────── */}
-          {active === "hospital" && <HospitalSection user={user} />}
+          {active === "hospital" && user?.role === "admin" && <HospitalSection user={user} />}
 
           {/* ── Departments & Doctors ─────────────────────────── */}
           {active === "departments" && user?.role === "admin" && (
@@ -1130,6 +1398,9 @@ export default function SettingsPage() {
               <StaffSection />
             </div>
           )}
+
+          {/* ── Service Rates ─────────────────────────────────── */}
+          {active === "servicerates" && user?.role === "admin" && <ServiceRatesSection />}
 
           {/* ── Notifications ─────────────────────────────────── */}
           {active === "notif" && (
