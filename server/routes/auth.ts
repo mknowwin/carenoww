@@ -120,11 +120,14 @@ router.get("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => 
     const tenant = await Tenant.findById(req.user!.tenantId);
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
     res.json({
-      name:         tenant.name,
-      logoUrl:      tenant.settings?.logoUrl || "",
-      clinicPhone:  tenant.settings?.clinicPhone || tenant.contact?.phone || "",
-      clinicAddress:tenant.settings?.clinicAddress || tenant.contact?.address || "",
-      clinicCity:   tenant.contact?.city || "",
+      name:          tenant.name,
+      logoUrl:       tenant.settings?.logoUrl || "",
+      clinicPhone:   tenant.settings?.clinicPhone || tenant.contact?.phone || "",
+      clinicAddress: tenant.settings?.clinicAddress || tenant.contact?.address || "",
+      clinicCity:    tenant.contact?.city || "",
+      gstNo:         (tenant.settings as any)?.gstNo || "",
+      invoicePrefix: (tenant.settings as any)?.invoicePrefix || "BILL",
+      taxConfig:     (tenant.settings as any)?.taxConfig || { cgstRate: 0, sgstRate: 0, igstRate: 0, taxInclusivePricing: false },
     });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -135,15 +138,23 @@ router.get("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => 
 router.put("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => {
   try {
     if (req.user!.role !== "admin") return res.status(403).json({ error: "Admins only" });
-    const { name, logoUrl, clinicPhone, clinicAddress } = req.body;
+    const { name, logoUrl, clinicPhone, clinicAddress, gstNo, invoicePrefix, taxConfig } = req.body;
     const update: any = {};
-    if (name)          update["name"] = name;
-    if (logoUrl !== undefined) update["settings.logoUrl"] = logoUrl;
-    if (clinicPhone !== undefined) update["settings.clinicPhone"] = clinicPhone;
+    if (name !== undefined)          update["name"] = name;
+    if (logoUrl !== undefined)       update["settings.logoUrl"] = logoUrl;
+    if (clinicPhone !== undefined)   update["settings.clinicPhone"] = clinicPhone;
     if (clinicAddress !== undefined) update["settings.clinicAddress"] = clinicAddress;
+    if (gstNo !== undefined)         update["settings.gstNo"] = gstNo;
+    if (invoicePrefix !== undefined) update["settings.invoicePrefix"] = invoicePrefix;
+    if (taxConfig !== undefined) {
+      if (taxConfig.cgstRate !== undefined)            update["settings.taxConfig.cgstRate"] = taxConfig.cgstRate;
+      if (taxConfig.sgstRate !== undefined)            update["settings.taxConfig.sgstRate"] = taxConfig.sgstRate;
+      if (taxConfig.igstRate !== undefined)            update["settings.taxConfig.igstRate"] = taxConfig.igstRate;
+      if (taxConfig.taxInclusivePricing !== undefined) update["settings.taxConfig.taxInclusivePricing"] = taxConfig.taxInclusivePricing;
+    }
     const tenant = await Tenant.findByIdAndUpdate(req.user!.tenantId, { $set: update }, { new: true });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-    res.json({ message: "Clinic settings saved", logoUrl: tenant.settings?.logoUrl || "" });
+    res.json({ message: "Clinic settings saved" });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

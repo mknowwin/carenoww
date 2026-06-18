@@ -1,6 +1,9 @@
 import { Router } from "express";
 import Appointment from "../models/Appointment.js";
+import User from "../models/User.js";
+import ServiceRateMaster from "../models/ServiceRateMaster.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
+import { createOrAppendBill } from "../lib/autoBilling.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -181,14 +184,75 @@ router.get("/:id", async (req: AuthRequest, res) => {
 // ── PUT /api/appointments/:id ─────────────────────────────────────────────────
 router.put("/:id", requireRole("admin", "doctor", "receptionist", "nurse"), async (req: AuthRequest, res) => {
   try {
+    const tenantId = req.user!.tenantId;
     const { token: _t, tokenNumber: _tn, ...updates } = req.body;
+
+    const before = await Appointment.findOne({ _id: req.params.id, tenantId });
+    if (!before) return res.status(404).json({ error: "Appointment not found" });
+
     const appt = await Appointment.findOneAndUpdate(
-      { _id: req.params.id, tenantId: req.user!.tenantId },
+      { _id: req.params.id, tenantId },
       { $set: updates },
       { new: true, runValidators: true }
     );
     if (!appt) return res.status(404).json({ error: "Appointment not found" });
-    res.json(appt);
+
+    // Auto-bill on first transition to Completed
+    let autoBill: { billId: string } | undefined;
+    if (updates.status === "Completed" && before.status !== "Completed") {
+      try {
+        let consultingFee = 0;
+        if (appt.doctorId) {
+          const docUser = await User.findOne({ _id: appt.doctorId, tenantId });
+          consultingFee = docUser?.consultingFee ?? 0;
+        }
+
+        const billItems: Array<{ description: string; category: "Consultation" | "Diagnosis"; quantity: number; unitPrice: number; total: number }> = [
+          {
+            description: `Consultation – ${appt.doctor}`,
+            category:    "Consultation",
+            quantity:    1,
+            unitPrice:   consultingFee,
+            total:       consultingFee,
+          },
+        ];
+
+        // Look up diagnosis charge if a diagnosis was provided in this update
+        const diagnosis: string | undefined = updates.diagnosis ?? (appt as any).diagnosis;
+        if (diagnosis) {
+          const diagRate = await ServiceRateMaster.findOne({
+            tenantId,
+            category: "Diagnosis",
+            name:     { $regex: diagnosis, $options: "i" },
+            isActive: true,
+          });
+          if (diagRate && diagRate.defaultRate > 0) {
+            billItems.push({
+              description: diagnosis,
+              category:    "Diagnosis",
+              quantity:    1,
+              unitPrice:   diagRate.defaultRate,
+              total:       diagRate.defaultRate,
+            });
+          }
+        }
+
+        const bill = await createOrAppendBill({
+          tenantId,
+          patientId:     appt.patientId,
+          patientName:   appt.patientName,
+          appointmentId: appt._id.toString(),
+          items:         billItems,
+          type:          (appt as any).type === "IPD" ? "IPD" : "OPD",
+          createdBy:     req.user!.name,
+        });
+        autoBill = { billId: (bill as any).billId };
+      } catch (billErr) {
+        console.error("Auto-billing failed for appointment:", billErr);
+      }
+    }
+
+    res.json({ ...appt.toObject(), autoBill });
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

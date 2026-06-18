@@ -24,6 +24,14 @@ export interface ITenant extends Document {
     logoUrl: string;
     clinicPhone: string;
     clinicAddress: string;
+    gstNo?: string;
+    invoicePrefix?: string;
+    taxConfig?: {
+      cgstRate: number;
+      sgstRate: number;
+      igstRate: number;
+      taxInclusivePricing: boolean;
+    };
   };
   subscription: {
     startedAt: Date;
@@ -56,6 +64,14 @@ const TenantSchema = new Schema<ITenant>(
       logoUrl:       { type: String, default: "" },
       clinicPhone:   { type: String, default: "" },
       clinicAddress: { type: String, default: "" },
+      gstNo:         { type: String, default: "" },
+      invoicePrefix: { type: String, default: "BILL" },
+      taxConfig: {
+        cgstRate:            { type: Number, default: 0 },
+        sgstRate:            { type: Number, default: 0 },
+        igstRate:            { type: Number, default: 0 },
+        taxInclusivePricing: { type: Boolean, default: false },
+      },
     },
     subscription: {
       startedAt: { type: Date, default: Date.now },

@@ -50,6 +50,7 @@ router.get("/doctors", async (req: AuthRequest, res) => {
 
         return {
           ...doc.toObject(),
+          consultingFee: doc.consultingFee ?? 0,
           isAvailable: isWorkingDay && remainingSlots > 0,
           isWorkingDay,
           bookedCount,
@@ -61,7 +62,7 @@ router.get("/doctors", async (req: AuthRequest, res) => {
       return res.json(result);
     }
 
-    res.json(doctors.map((d) => d.toObject()));
+    res.json(doctors.map((d) => ({ ...d.toObject(), consultingFee: d.consultingFee ?? 0 })));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -82,7 +83,7 @@ router.get("/", requireRole("admin"), async (req: AuthRequest, res) => {
 // ── POST /api/users — admin only ──────────────────────────────────────────────
 router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
-    const { name, email, password, role, department, specialty, schedule } = req.body;
+    const { name, email, password, role, department, specialty, schedule, consultingFee } = req.body;
     if (!name || !email || !password || !role) {
       return res.status(400).json({ error: "name, email, password, role are required" });
     }
@@ -99,6 +100,7 @@ router.post("/", requireRole("admin"), async (req: AuthRequest, res) => {
       department: department || "",
       specialty: specialty || department || "",
       schedule: schedule || undefined,
+      consultingFee: consultingFee ?? 0,
       isActive: true,
     });
     const { passwordHash: _, ...userObj } = user.toObject();
@@ -124,13 +126,14 @@ router.get("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
 router.put("/:id", requireRole("admin"), async (req: AuthRequest, res) => {
   try {
     const updates: any = {};
-    const { name, role, department, specialty, schedule, isActive, password } = req.body;
+    const { name, role, department, specialty, schedule, isActive, password, consultingFee } = req.body;
     if (name)      updates.name      = name;
     if (role)      updates.role      = role;
-    if (department !== undefined) updates.department = department;
-    if (specialty  !== undefined) updates.specialty  = specialty;
-    if (schedule   !== undefined) updates.schedule   = schedule;
-    if (isActive   !== undefined) updates.isActive   = isActive;
+    if (department    !== undefined) updates.department    = department;
+    if (specialty     !== undefined) updates.specialty     = specialty;
+    if (schedule      !== undefined) updates.schedule      = schedule;
+    if (isActive      !== undefined) updates.isActive      = isActive;
+    if (consultingFee !== undefined) updates.consultingFee = consultingFee;
     if (password) updates.passwordHash = await bcrypt.hash(password, 10);
 
     const user = await User.findOneAndUpdate(

@@ -19,6 +19,7 @@ import Tenant from "./models/Tenant.js";
 import reportsRouter from "./routes/reports.js";
 import ipdRouter from "./routes/ipd.js";
 import prescriptionsRouter from "./routes/prescriptions.js";
+import ratemasterRouter from "./routes/ratemaster.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -118,6 +119,7 @@ app.use("/api/users",        usersRouter);
 app.use("/api/reports",        reportsRouter);
 app.use("/api/ipd",            ipdRouter);
 app.use("/api/prescriptions",  prescriptionsRouter);
+app.use("/api/ratemaster",     ratemasterRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {
