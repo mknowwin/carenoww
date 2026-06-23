@@ -12,6 +12,9 @@ export interface IBillItem {
   sgst?: number;
   igst?: number;
   taxableAmount?: number;
+  batchNo?: string;
+  expiryDate?: Date;
+  drugId?: string;
 }
 
 export interface IPaymentEntry {
@@ -96,6 +99,9 @@ const BillItemSchema = new Schema<IBillItem>({
   sgst:         { type: Number, default: 0 },
   igst:         { type: Number, default: 0 },
   taxableAmount:{ type: Number, default: 0 },
+  batchNo:      { type: String },
+  expiryDate:   { type: Date },
+  drugId:       { type: String },
 }, { _id: true });
 
 const PaymentEntrySchema = new Schema<IPaymentEntry>({

@@ -153,7 +153,7 @@ export function printBill(bill: any, clinicOverride?: ClinicInfo) {
   const itemRows = items.map((item, idx) => `
     <tr>
       <td class="tc" style="width:36px;">${idx + 1}</td>
-      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
+      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}${item.batchNo ? `<div style="font-size:10px;color:#888;">Batch: ${item.batchNo}${item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}</div>` : ""}</td>
       <td style="width:90px;">${item.category}</td>
       <td class="tc" style="width:44px;">${item.quantity}</td>
       <td class="tr" style="width:76px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
@@ -604,6 +604,273 @@ export function printLabReport(order: any, clinicOverride?: ClinicInfo) {
     </div>`;
 
   open(`Lab Report — ${order.labId || order.patientName || ""}`, body);
+}
+
+// ── printCurrentStockReport ───────────────────────────────────────────────────
+export function printCurrentStockReport(drugs: any[], filter: string, clinicOverride?: ClinicInfo) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const filterLabel = filter === "All" ? "All Items" : filter;
+
+  const totalItems = drugs.length;
+  const criticalCount = drugs.filter((d) => d.status === "Critical").length;
+  const lowCount      = drugs.filter((d) => d.status === "Low").length;
+  const okCount       = drugs.filter((d) => d.status === "OK").length;
+
+  const rowHtml = drugs.map((d, i) => {
+    const statusColor =
+      d.status === "Critical" ? "background:#fff0f0;" :
+      d.status === "Low"      ? "background:#fffbeb;" : "";
+    return `
+    <tr style="${statusColor}">
+      <td class="tc">${i + 1}</td>
+      <td><strong>${d.name || "—"}</strong></td>
+      <td>${d.category || "—"}</td>
+      <td class="tr"><strong>${d.stock}</strong> ${d.unit}</td>
+      <td class="tr">${d.reorderLevel} ${d.unit}</td>
+      <td class="tr">${d.mrpPerUnit ? `₹${Number(d.mrpPerUnit).toLocaleString("en-IN")}` : "—"}</td>
+      <td class="tc"><strong style="color:${d.status === "Critical" ? "#dc2626" : d.status === "Low" ? "#d97706" : "#15803d"};">${d.status}</strong></td>
+    </tr>`;
+  }).join("");
+
+  const summaryBadges = `
+  <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+    <span style="padding:4px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;font-size:12px;font-weight:600;color:#15803d;">OK: ${okCount}</span>
+    <span style="padding:4px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;font-size:12px;font-weight:600;color:#d97706;">Low: ${lowCount}</span>
+    <span style="padding:4px 12px;background:#fff0f0;border:1px solid #fecaca;border-radius:4px;font-size:12px;font-weight:600;color:#dc2626;">Critical: ${criticalCount}</span>
+    <span style="padding:4px 12px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;font-size:12px;font-weight:600;color:#475569;">Total: ${totalItems}</span>
+  </div>`;
+
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">CURRENT STOCK REPORT</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Filter: ${filterLabel} &nbsp;·&nbsp; ${totalItems} item${totalItems !== 1 ? "s" : ""}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    ${summaryBadges}
+
+    <table>
+      <thead>
+        <tr>
+          <th class="tc" style="width:36px;">#</th>
+          <th>Drug Name</th>
+          <th style="width:120px;">Category</th>
+          <th class="tr" style="width:110px;">Current Stock</th>
+          <th class="tr" style="width:110px;">Reorder Level</th>
+          <th class="tr" style="width:90px;">MRP/Unit</th>
+          <th class="tc" style="width:80px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowHtml || '<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No items found</td></tr>'}
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <p>Current Stock Report — ${clinic.name} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+
+  open("Current Stock Report", body);
+}
+
+// ── printSalesReport ──────────────────────────────────────────────────────────
+export function printSalesReport(
+  rows: any[],
+  dateRange: { from?: string; to?: string },
+  clinicOverride?: ClinicInfo
+) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const fromLabel = dateRange.from
+    ? new Date(dateRange.from).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : "All";
+  const toLabel = dateRange.to
+    ? new Date(dateRange.to).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : "till date";
+
+  const totBills    = rows.reduce((a, r) => a + (r.billsCreated  || 0), 0);
+  const totBilled   = rows.reduce((a, r) => a + (r.totalBilled   || 0), 0);
+  const totPaid     = rows.reduce((a, r) => a + (r.totalPaid     || 0), 0);
+  const totPayments = rows.reduce((a, r) => a + (r.paymentsCount || 0), 0);
+  const totReceived = rows.reduce((a, r) => a + (r.totalReceived || 0), 0);
+
+  const rowHtml = rows.map((r, i) => `
+    <tr>
+      <td class="tc">${i + 1}</td>
+      <td><strong>${r.staffName || "—"}</strong></td>
+      <td class="tr">${r.billsCreated || 0}</td>
+      <td class="tr">₹${(r.totalBilled || 0).toLocaleString("en-IN")}</td>
+      <td class="tr" style="color:#15803d;">₹${(r.totalPaid || 0).toLocaleString("en-IN")}</td>
+      <td class="tr">${r.paymentsCount || 0}</td>
+      <td class="tr" style="color:#0d9488;">₹${(r.totalReceived || 0).toLocaleString("en-IN")}</td>
+    </tr>`).join("");
+
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">SALES REPORT BY STAFF</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Period: ${fromLabel} — ${toLabel}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="tc" style="width:36px;">#</th>
+          <th>Staff Name</th>
+          <th class="tr" style="width:80px;">Bills</th>
+          <th class="tr" style="width:110px;">Total Billed</th>
+          <th class="tr" style="width:110px;">Collected</th>
+          <th class="tr" style="width:80px;">Payments</th>
+          <th class="tr" style="width:110px;">Cash Received</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowHtml || '<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No data found</td></tr>'}
+      </tbody>
+      <tfoot>
+        <tr style="background:#f0f0f0;font-weight:800;">
+          <td></td>
+          <td><strong>TOTAL</strong></td>
+          <td class="tr">${totBills}</td>
+          <td class="tr">₹${totBilled.toLocaleString("en-IN")}</td>
+          <td class="tr" style="color:#15803d;">₹${totPaid.toLocaleString("en-IN")}</td>
+          <td class="tr">${totPayments}</td>
+          <td class="tr" style="color:#0d9488;">₹${totReceived.toLocaleString("en-IN")}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="footer">
+      <p>Sales Report — ${clinic.name} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+
+  open("Sales Report by Staff", body);
+}
+
+// ── printLowStockReport ───────────────────────────────────────────────────────
+export function printLowStockReport(drugs: any[], filter: string, clinicOverride?: ClinicInfo) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const filterLabel = filter === "both" ? "Low + Critical" : filter;
+
+  const rowHtml = drugs.map((d, i) => `
+    <tr style="${d.status === "Critical" ? "background:#fff0f0;" : d.status === "Low" ? "background:#fffbeb;" : ""}">
+      <td class="tc">${i + 1}</td>
+      <td><strong>${d.name || "—"}</strong></td>
+      <td>${d.category || "—"}</td>
+      <td class="tr">${d.stock} ${d.unit}</td>
+      <td class="tr">${d.reorderLevel} ${d.unit}</td>
+      <td class="tc"><strong style="color:${d.status === "Critical" ? "#dc2626" : "#d97706"};">${d.status}</strong></td>
+    </tr>`).join("");
+
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">LOW STOCK REPORT</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Filter: ${filterLabel} &nbsp;·&nbsp; ${drugs.length} item${drugs.length !== 1 ? "s" : ""}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="tc" style="width:36px;">#</th>
+          <th>Drug Name</th>
+          <th style="width:130px;">Category</th>
+          <th class="tr" style="width:110px;">Current Stock</th>
+          <th class="tr" style="width:110px;">Reorder Level</th>
+          <th class="tc" style="width:80px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowHtml || '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px;">No items found</td></tr>'}
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <p>Low Stock Report — ${clinic.name} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+
+  open("Low Stock Report", body);
+}
+
+// ── printExpiryReport ─────────────────────────────────────────────────────────
+export function printExpiryReport(batches: any[], params: { expiryWithin: string }, clinicOverride?: ClinicInfo) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+
+  const rowHtml = batches.map((b, i) => {
+    const daysLeft  = Math.ceil((new Date(b.expiryDate).getTime() - Date.now()) / 86_400_000);
+    const isExpired = daysLeft < 0;
+    return `
+    <tr style="${isExpired ? "background:#fff0f0;" : ""}">
+      <td class="tc">${i + 1}</td>
+      <td><strong>${b.drugName || "—"}</strong></td>
+      <td>${b.drugCategory || "—"}</td>
+      <td class="tc" style="font-family:monospace;font-size:11px;">${b.batchNo || "—"}</td>
+      <td class="tc">${b.expiryDate ? new Date(b.expiryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
+      <td class="tr" style="color:${isExpired ? "#dc2626" : daysLeft <= 30 ? "#d97706" : "#111"};">
+        ${isExpired ? `<strong>${Math.abs(daysLeft)}d ago</strong>` : `${daysLeft}d`}
+      </td>
+      <td class="tr">${b.quantityRemaining} ${b.drugUnit || ""}</td>
+      <td class="tc"><strong style="color:${b.status === "Expired" ? "#dc2626" : b.status === "Active" ? "#15803d" : "#888"};">${b.status || "—"}</strong></td>
+    </tr>`;
+  }).join("");
+
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">EXPIRY DATE REPORT</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Batches expiring within ${params.expiryWithin} days &nbsp;·&nbsp; ${batches.length} batch${batches.length !== 1 ? "es" : ""}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="tc" style="width:36px;">#</th>
+          <th>Drug Name</th>
+          <th style="width:110px;">Category</th>
+          <th class="tc" style="width:100px;">Batch No</th>
+          <th class="tc" style="width:100px;">Expiry Date</th>
+          <th class="tr" style="width:80px;">Days Left</th>
+          <th class="tr" style="width:100px;">Qty Remaining</th>
+          <th class="tc" style="width:80px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowHtml || '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">No batches found</td></tr>'}
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <p>Expiry Report — ${clinic.name} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+
+  open("Expiry Date Report", body);
 }
 
 // ── helper ────────────────────────────────────────────────────────────────────
