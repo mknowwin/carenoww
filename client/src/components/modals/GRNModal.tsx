@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   inventory: Array<{ _id: string; name: string; unit: string }>;
+  existing?: any;
 }
 
 function F({ label, children }: { label: string; children: React.ReactNode }) {
@@ -36,8 +37,14 @@ const emptyItem = (): GRNItem => ({
   quantityReceived: 0, purchasePricePerUnit: 0, mrpPerUnit: 0, totalCost: 0,
 });
 
-export default function GRNModal({ open, onClose, inventory }: Props) {
+const toDateInput = (val: string | undefined) => {
+  if (!val) return "";
+  return val.slice(0, 10);
+};
+
+export default function GRNModal({ open, onClose, inventory, existing }: Props) {
   const qc = useQueryClient();
+  const isEdit = !!(existing?._id);
 
   const [supplierName, setSupplierName] = useState("");
   const [invoiceNo, setInvoiceNo] = useState("");
@@ -47,6 +54,33 @@ export default function GRNModal({ open, onClose, inventory }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (existing) {
+      setSupplierName(existing.supplierName ?? "");
+      setInvoiceNo(existing.invoiceNo ?? "");
+      setInvoiceDate(toDateInput(existing.invoiceDate));
+      setNotes(existing.notes ?? "");
+      setItems(
+        (existing.items ?? []).map((it: any) => ({
+          drugName:            it.drugName ?? "",
+          drugId:              it.drugId ?? "",
+          unit:                it.unit ?? "Tab",
+          batchNo:             it.batchNo ?? "",
+          expiryDate:          toDateInput(it.expiryDate),
+          quantityReceived:    it.quantityReceived ?? 0,
+          purchasePricePerUnit: it.purchasePricePerUnit ?? 0,
+          mrpPerUnit:          it.mrpPerUnit ?? 0,
+          totalCost:           it.totalCost ?? 0,
+        }))
+      );
+    } else {
+      setSupplierName(""); setInvoiceNo(""); setInvoiceDate(""); setNotes("");
+      setItems([emptyItem()]);
+    }
+    setError(""); setSuccess(false);
+  }, [open, existing]);
 
   const setItem = (idx: number, field: keyof GRNItem, value: string | number) => {
     setItems((prev) => {
@@ -86,7 +120,7 @@ export default function GRNModal({ open, onClose, inventory }: Props) {
     }
     setLoading(true); setError("");
     try {
-      await pharmApi.grn.create({
+      const payload = {
         supplierName: supplierName.trim(),
         invoiceNo:    invoiceNo.trim(),
         invoiceDate:  invoiceDate || undefined,
@@ -94,12 +128,17 @@ export default function GRNModal({ open, onClose, inventory }: Props) {
         totalValue,
         notes,
         status: "Received",
-      });
+      };
+      if (isEdit) {
+        await pharmApi.grn.update(existing._id, payload);
+      } else {
+        await pharmApi.grn.create(payload);
+      }
       qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
       qc.invalidateQueries({ queryKey: ["pharmacy-grn"] });
       setSuccess(true);
     } catch (err: any) {
-      setError(err.message || "Failed to create GRN.");
+      setError(err.message || `Failed to ${isEdit ? "update" : "create"} GRN.`);
     } finally {
       setLoading(false);
     }
@@ -115,14 +154,14 @@ export default function GRNModal({ open, onClose, inventory }: Props) {
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Receive Stock (GRN)</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit GRN" : "Receive Stock (GRN)"}</DialogTitle>
         </DialogHeader>
 
         {success ? (
           <div className="text-center py-8 space-y-3">
-            <div className="text-green-600 font-semibold text-lg">Stock Received</div>
+            <div className="text-green-600 font-semibold text-lg">{isEdit ? "GRN Updated" : "Stock Received"}</div>
             <p className="text-sm text-muted-foreground">
-              GRN created and inventory updated with batch information.
+              {isEdit ? "GRN record has been updated." : "GRN created and inventory updated with batch information."}
             </p>
             <Button onClick={handleClose}>Close</Button>
           </div>
@@ -177,8 +216,8 @@ export default function GRNModal({ open, onClose, inventory }: Props) {
                   <Input className="h-8 text-xs" placeholder="BT-001" value={item.batchNo} onChange={(e) => setItem(idx, "batchNo", e.target.value)} />
                   <Input type="date" className="h-8 text-xs" value={item.expiryDate} onChange={(e) => setItem(idx, "expiryDate", e.target.value)} />
                   <Input type="number" min={1} className="h-8 text-xs" placeholder="0" value={item.quantityReceived || ""} onChange={(e) => setItem(idx, "quantityReceived", Number(e.target.value))} />
-                  <Input type="number" min={0} className="h-8 text-xs" placeholder="0.00" value={item.purchasePricePerUnit || ""} onChange={(e) => setItem(idx, "purchasePricePerUnit", Number(e.target.value))} />
-                  <Input type="number" min={0} className="h-8 text-xs" placeholder="0.00" value={item.mrpPerUnit || ""} onChange={(e) => setItem(idx, "mrpPerUnit", Number(e.target.value))} />
+                  <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.purchasePricePerUnit || ""} onChange={(e) => setItem(idx, "purchasePricePerUnit", Number(e.target.value))} />
+                  <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.mrpPerUnit || ""} onChange={(e) => setItem(idx, "mrpPerUnit", Number(e.target.value))} />
                   <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600" disabled={items.length === 1} onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -200,7 +239,7 @@ export default function GRNModal({ open, onClose, inventory }: Props) {
             <div className="flex gap-2 pt-1">
               <Button type="submit" disabled={loading} className="gap-1.5">
                 {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
-                {loading ? "Saving…" : "Receive Stock"}
+                {loading ? "Saving…" : isEdit ? "Save Changes" : "Receive Stock"}
               </Button>
               <Button type="button" variant="ghost" onClick={handleClose}>Cancel</Button>
             </div>

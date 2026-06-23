@@ -7,12 +7,12 @@ import { Progress } from "@/components/ui/progress";
 import {
   CreditCard, Search, Plus, CheckCircle2, Clock,
   TrendingUp, IndianRupee, Pencil, Printer, ChevronDown,
-  ChevronUp, FileText, Download, Banknote, Wallet,
+  ChevronUp, FileText, Download, Banknote, Wallet, Users,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { billing as billingApi } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { printBill } from "@/lib/print";
+import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
 import ModalErrorBoundary from "@/components/ModalErrorBoundary";
 
@@ -46,6 +46,18 @@ export default function BillingPage() {
   const [payOnly,     setPayOnly]     = useState(false);
   const [paying,      setPaying]      = useState<string | null>(null);
   const [expandedId,  setExpandedId]  = useState<string | null>(null);
+
+  // By Staff view
+  const [view,          setView]         = useState<"list" | "staff">("list");
+  const [staffDateFrom, setStaffDateFrom] = useState("");
+  const [staffDateTo,   setStaffDateTo]   = useState("");
+
+  const { data: staffReport = [], isLoading: staffLoading } = useQuery({
+    queryKey: ["billing-by-staff", staffDateFrom, staffDateTo],
+    queryFn: () => billingApi.salesByStaff({ from: staffDateFrom || undefined, to: staffDateTo || undefined }),
+    enabled: view === "staff",
+    retry: false,
+  });
 
   const { data: apiData, isLoading } = useQuery({
     queryKey: ["billing"],
@@ -135,7 +147,21 @@ export default function BillingPage() {
             {ALL_BILLS.length} total bills
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 flex-wrap">
+          <div className="flex items-center border rounded-lg p-0.5 bg-muted/40">
+            <button
+              onClick={() => setView("list")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${view === "list" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Bills List
+            </button>
+            <button
+              onClick={() => setView("staff")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${view === "staff" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <Users className="h-3 w-3" /> By Staff
+            </button>
+          </div>
           <Button variant="outline" size="sm" className="gap-2 h-9">
             <Download className="h-4 w-4" /> Export
           </Button>
@@ -191,8 +217,100 @@ export default function BillingPage() {
         </CardContent>
       </Card>
 
+      {/* ── By Staff Report ───────────────────────────────────────────────── */}
+      {view === "staff" && (
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm font-medium shrink-0">Date Range:</span>
+                <Input type="date" className="h-8 text-sm w-40" value={staffDateFrom} onChange={(e) => setStaffDateFrom(e.target.value)} />
+                <span className="text-xs text-muted-foreground">to</span>
+                <Input type="date" className="h-8 text-sm w-40" value={staffDateTo} onChange={(e) => setStaffDateTo(e.target.value)} />
+                {(staffDateFrom || staffDateTo) && (
+                  <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setStaffDateFrom(""); setStaffDateTo(""); }}>Clear</Button>
+                )}
+                <div className="ml-auto">
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={staffReport.length === 0}
+                    onClick={() => printSalesReport(staffReport, { from: staffDateFrom, to: staffDateTo })}>
+                    <Printer className="h-4 w-4" /> Print Report
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {staffReport.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: "Staff Members",   value: String(staffReport.length),                                                                              color: "text-foreground",  bg: "bg-muted" },
+                { label: "Total Billed",    value: formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0)),                color: "text-foreground",  bg: "bg-muted" },
+                { label: "Total Collected", value: formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0)),                color: "text-green-600",  bg: "bg-green-50" },
+                { label: "Cash Received",   value: formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0)),                color: "text-teal-600",   bg: "bg-teal-50" },
+              ].map((s) => (
+                <Card key={s.label}>
+                  <CardContent className="p-4">
+                    <div className={`text-xl font-bold leading-tight ${s.color}`}>{s.value}</div>
+                    <div className="text-xs text-muted-foreground">{s.label}</div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {staffLoading ? (
+            <div className="text-center py-12 text-sm text-muted-foreground">Loading report…</div>
+          ) : staffReport.length === 0 ? (
+            <Card>
+              <CardContent className="py-14 text-center space-y-2">
+                <Users className="h-10 w-10 text-muted-foreground/20 mx-auto" />
+                <p className="text-sm text-muted-foreground font-medium">No billing records found</p>
+                <p className="text-xs text-muted-foreground">Try a different date range.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="p-0 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received"].map((h, i) => (
+                          <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : "text-right"}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {staffReport.map((row: any, idx: number) => (
+                        <tr key={row.staffName} className="border-b last:border-b-0 hover:bg-muted/20">
+                          <td className="py-3 px-4 text-muted-foreground">{idx + 1}</td>
+                          <td className="py-3 px-4 font-medium">{row.staffName}</td>
+                          <td className="py-3 px-4 text-right">{row.billsCreated}</td>
+                          <td className="py-3 px-4 text-right font-medium">{formatCurrency(row.totalBilled)}</td>
+                          <td className="py-3 px-4 text-right text-green-600 font-medium">{formatCurrency(row.totalPaid)}</td>
+                          <td className="py-3 px-4 text-right">{row.paymentsCount}</td>
+                          <td className="py-3 px-4 text-right text-teal-600 font-medium">{formatCurrency(row.totalReceived)}</td>
+                        </tr>
+                      ))}
+                      <tr className="border-t bg-muted/40 font-semibold">
+                        <td className="py-3 px-4" colSpan={2}>Total</td>
+                        <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.billsCreated  || 0), 0)}</td>
+                        <td className="py-3 px-4 text-right">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0))}</td>
+                        <td className="py-3 px-4 text-right text-green-600">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0))}</td>
+                        <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.paymentsCount || 0), 0)}</td>
+                        <td className="py-3 px-4 text-right text-teal-600">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
       {/* ── Filters row ───────────────────────────────────────────────────── */}
-      <div className="space-y-2">
+      {view === "list" && <div className="space-y-2">
         {/* Type tabs */}
         <div className="flex gap-1.5 flex-wrap">
           {TYPE_TABS.map((t) => (
@@ -289,10 +407,10 @@ export default function BillingPage() {
             ))}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ── Bills list ────────────────────────────────────────────────────── */}
-      <div className="space-y-2">
+      {view === "list" && <div className="space-y-2">
         {isLoading && (
           <div className="text-center py-12 text-sm text-muted-foreground">Loading bills…</div>
         )}
@@ -415,7 +533,14 @@ export default function BillingPage() {
                         </div>
                         {bill.items.map((item: any, idx: number) => (
                           <div key={idx} className="grid grid-cols-[2fr_1fr_40px_70px_80px] gap-2 text-xs py-1.5 px-1 even:bg-muted/30 rounded items-center">
-                            <span className="font-medium">{item.description}</span>
+                            <span className="font-medium leading-tight">
+                              {item.description}
+                              {item.batchNo && (
+                                <span className="block text-[10px] text-muted-foreground font-normal">
+                                  Batch: {item.batchNo}{item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}
+                                </span>
+                              )}
+                            </span>
                             <span className="text-muted-foreground">{item.category}</span>
                             <span className="text-center text-muted-foreground">{item.quantity}</span>
                             <span className="text-right text-muted-foreground">₹{(item.unitPrice || 0).toLocaleString()}</span>
@@ -446,10 +571,10 @@ export default function BillingPage() {
             </Card>
           );
         })}
-      </div>
+      </div>}
 
       {/* ── Daily summary footer ─────────────────────────────────────────── */}
-      {ALL_BILLS.length > 0 && (
+      {view === "list" && ALL_BILLS.length > 0 && (
         <Card className="bg-teal-50 border-teal-100">
           <CardContent className="p-4">
             <div className="flex items-center justify-between flex-wrap gap-3">

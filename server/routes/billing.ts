@@ -1,7 +1,9 @@
 import { Router } from "express";
 import BillingRecord from "../models/BillingRecord.js";
+import DrugInventory from "../models/DrugInventory.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
 import { getNextId } from "../lib/counter.js";
+import { fefoDeduct, syncDrugStock } from "../lib/fefo.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -124,6 +126,34 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance"), async
       payments,
       isLocked:      paidAmount >= finalAmount,
     });
+
+    // Deduct pharmacy stock for items that carry a drugId
+    if (type === "Pharmacy") {
+      const pharmacyItems = (items as any[]).filter((it) => it.category === "Pharmacy" && it.drugId);
+      for (const item of pharmacyItems) {
+        try {
+          const drug = await DrugInventory.findOne({ _id: item.drugId, tenantId });
+          if (!drug) continue;
+          const qty = item.quantity ?? 1;
+
+          if (drug.isBatchTracked) {
+            // FEFO batch deduction — syncs DrugInventory.stock from batches
+            await fefoDeduct(tenantId.toString(), item.drugId, qty);
+            await syncDrugStock(tenantId.toString(), item.drugId);
+          } else {
+            // Direct stock decrement on the inventory record
+            const newStock = Math.max(0, drug.stock - qty);
+            const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
+            const ratio = newStock / reorderLevel;
+            const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
+            await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } });
+          }
+        } catch {
+          // best-effort: bill is saved even if stock deduction fails
+        }
+      }
+    }
+
     res.status(201).json(bill);
   } catch (err: any) {
     if (err.code === 11000) return res.status(409).json({ error: "Bill ID conflict — retry" });
@@ -360,6 +390,84 @@ router.put("/:id/claim", requireRole("admin", "finance"), async (req: AuthReques
 
     const updated = await BillingRecord.findByIdAndUpdate(bill._id, updates, { new: true });
     res.json(updated);
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── GET /api/billing/report/by-staff — sales aggregated by staff member ─────────
+router.get("/report/by-staff", requireRole("admin", "finance"), async (req: AuthRequest, res) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const { from, to } = req.query as Record<string, string>;
+
+    const dateFilter: any = {};
+    if (from) dateFilter.$gte = new Date(from);
+    if (to) {
+      const toDate = new Date(to);
+      toDate.setHours(23, 59, 59, 999);
+      dateFilter.$lte = toDate;
+    }
+
+    const matchStage: any = { tenantId };
+    if (from || to) matchStage.createdAt = dateFilter;
+
+    const [byCreator, byReceiver] = await Promise.all([
+      BillingRecord.aggregate([
+        { $match: matchStage },
+        { $group: {
+            _id: "$createdBy",
+            billsCreated: { $sum: 1 },
+            totalBilled:  { $sum: "$amount" },
+            totalPaid:    { $sum: "$paid" },
+          },
+        },
+      ]),
+      BillingRecord.aggregate([
+        { $match: matchStage },
+        { $unwind: "$payments" },
+        { $group: {
+            _id: "$payments.receivedBy",
+            paymentsCount: { $sum: 1 },
+            totalReceived: { $sum: "$payments.amount" },
+          },
+        },
+      ]),
+    ]);
+
+    const staffMap = new Map<string, any>();
+
+    for (const row of byCreator) {
+      if (!row._id) continue;
+      staffMap.set(row._id, {
+        staffName:     row._id,
+        billsCreated:  row.billsCreated,
+        totalBilled:   row.totalBilled,
+        totalPaid:     row.totalPaid,
+        paymentsCount: 0,
+        totalReceived: 0,
+      });
+    }
+
+    for (const row of byReceiver) {
+      if (!row._id) continue;
+      if (staffMap.has(row._id)) {
+        const entry = staffMap.get(row._id);
+        entry.paymentsCount = row.paymentsCount;
+        entry.totalReceived = row.totalReceived;
+      } else {
+        staffMap.set(row._id, {
+          staffName:     row._id,
+          billsCreated:  0,
+          totalBilled:   0,
+          totalPaid:     0,
+          paymentsCount: row.paymentsCount,
+          totalReceived: row.totalReceived,
+        });
+      }
+    }
+
+    res.json(Array.from(staffMap.values()).sort((a, b) => b.totalBilled - a.totalBilled));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

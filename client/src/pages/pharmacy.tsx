@@ -9,13 +9,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DRUG_UNITS } from "@/lib/constants";
 import {
   Pill, Search, Plus, AlertTriangle, CheckCircle2,
-  Clock, Package, RefreshCw, FileText, History, ShoppingCart, Wrench,
+  Clock, Package, RefreshCw, FileText, History, ShoppingCart, Wrench, Pencil,
+  BarChart3, Printer,
 } from "lucide-react";
+import { printLowStockReport, printExpiryReport, printCurrentStockReport } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { pharmacy as pharmacyApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import GRNModal from "@/components/modals/GRNModal";
 import StockAdjustmentModal from "@/components/modals/StockAdjustmentModal";
 import DispenseCounterModal from "@/components/modals/DispenseCounterModal";
+import DrugEditModal from "@/components/modals/DrugEditModal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +50,9 @@ interface DrugInventory {
   reorderLevel: number;
   status: "OK" | "Low" | "Critical";
   mrpPerUnit?: number;
+  purchasePricePerUnit?: number;
+  supplier?: string;
+  hsnCode?: string;
   isBatchTracked?: boolean;
 }
 
@@ -146,6 +153,7 @@ function AddDrugForm({ onDone }: { onDone: () => void }) {
 
 export default function PharmacyPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
 
   // Orders tab
   const [orderSearch, setOrderSearch]   = useState("");
@@ -159,6 +167,10 @@ export default function PharmacyPage() {
 
   // GRN tab
   const [grnSearch, setGrnSearch] = useState("");
+  const [editGrn, setEditGrn]     = useState<any>(null);
+
+  // Inventory edit
+  const [editDrug, setEditDrug] = useState<any>(null);
 
   // Stock movements tab
   const [movSearch, setMovSearch] = useState("");
@@ -166,6 +178,14 @@ export default function PharmacyPage() {
   // Modals
   const [showGRN, setShowGRN]         = useState(false);
   const [showCounter, setShowCounter] = useState(false);
+
+  // Reports tab
+  const [activeTab, setActiveTab]           = useState("prescriptions");
+  const [stockStatusFilter, setStockStatusFilter] = useState<"All" | "OK" | "Low" | "Critical">("All");
+  const [stockSearch, setStockSearch]       = useState("");
+  const [lowStockFilter, setLowStockFilter] = useState<"Low" | "Critical" | "both">("both");
+  const [expiryWithin, setExpiryWithin]     = useState("90");
+  const [includeExpired, setIncludeExpired] = useState(true);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -191,6 +211,32 @@ export default function PharmacyPage() {
   const { data: adjData, isLoading: adjLoading } = useQuery({
     queryKey: ["pharmacy-adjustments"],
     queryFn: () => pharmacyApi.adjustments.list(),
+    retry: false,
+  });
+
+  const { data: lowStockData, isLoading: lowStockLoading } = useQuery({
+    queryKey: ["pharmacy-low-stock", lowStockFilter],
+    queryFn: () => pharmacyApi.inventory.lowStock(lowStockFilter),
+    enabled: activeTab === "reports",
+    retry: false,
+  });
+
+  const { data: expiryData, isLoading: expiryLoading } = useQuery({
+    queryKey: ["pharmacy-expiry", expiryWithin, includeExpired],
+    queryFn: () => pharmacyApi.batches.expiryReport({ expiryWithin, includeExpired: String(includeExpired) }),
+    enabled: activeTab === "reports",
+    retry: false,
+  });
+
+  const { data: stockReportData = [], isLoading: stockReportLoading } = useQuery({
+    queryKey: ["pharmacy-stock-report", stockStatusFilter, stockSearch],
+    queryFn: () => {
+      const params: Record<string, string> = {};
+      if (stockStatusFilter !== "All") params.status = stockStatusFilter;
+      if (stockSearch.trim()) params.search = stockSearch.trim();
+      return pharmacyApi.inventory.list(params) as Promise<any[]>;
+    },
+    enabled: activeTab === "reports",
     retry: false,
   });
 
@@ -300,12 +346,13 @@ export default function PharmacyPage() {
       </div>
 
       {/* Main Tabs */}
-      <Tabs defaultValue="prescriptions">
+      <Tabs defaultValue="prescriptions" onValueChange={setActiveTab}>
         <TabsList className="mb-4">
           <TabsTrigger value="prescriptions" className="gap-1.5"><Pill className="h-3.5 w-3.5" />Orders</TabsTrigger>
           <TabsTrigger value="inventory"     className="gap-1.5"><Package className="h-3.5 w-3.5" />Inventory</TabsTrigger>
           <TabsTrigger value="grn"           className="gap-1.5"><FileText className="h-3.5 w-3.5" />GRN</TabsTrigger>
           <TabsTrigger value="movements"     className="gap-1.5"><History className="h-3.5 w-3.5" />Stock Movements</TabsTrigger>
+          <TabsTrigger value="reports"       className="gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Reports</TabsTrigger>
         </TabsList>
 
         {/* ── Tab 1: Orders ───────────────────────────────────────────────── */}
@@ -429,13 +476,25 @@ export default function PharmacyPage() {
                         <span className="text-muted-foreground text-xs ml-2">· Reorder at {drug.reorderLevel} {drug.unit}</span>
                       </div>
                       {drug.mrpPerUnit ? (
-                        <div className="text-xs text-muted-foreground">MRP: ₹{drug.mrpPerUnit}/{drug.unit}</div>
+                        <div className="text-xs text-muted-foreground">MRP: ₹{drug.mrpPerUnit}/{drug.unit}{drug.purchasePricePerUnit ? ` · Cost: ₹${drug.purchasePricePerUnit}` : ""}</div>
                       ) : null}
+                      {(drug.supplier || drug.hsnCode) && (
+                        <div className="text-xs text-muted-foreground">
+                          {drug.supplier && <span>{drug.supplier}</span>}
+                          {drug.supplier && drug.hsnCode && <span> · </span>}
+                          {drug.hsnCode && <span>HSN: {drug.hsnCode}</span>}
+                        </div>
+                      )}
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
                       <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowGRN(true)}>
                         <Plus className="h-3 w-3" /> GRN
                       </Button>
+                      {user?.role === "admin" && (
+                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setEditDrug(drug)}>
+                          <Pencil className="h-3 w-3" /> Edit
+                        </Button>
+                      )}
                       <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-orange-600 hover:text-orange-700" onClick={() => setAdjustDrug(drug)}>
                         <Wrench className="h-3 w-3" /> Adjust
                       </Button>
@@ -479,13 +538,29 @@ export default function PharmacyPage() {
                         Received: {new Date(grn.receivedDate || grn.createdAt).toLocaleDateString("en-IN")}
                         {" · "}{grn.receivedBy}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {grn.items?.length ?? 0} item{grn.items?.length !== 1 ? "s" : ""}
-                      </div>
+                      {grn.items?.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {grn.items.map((it: any, i: number) => (
+                            <div key={i} className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5">
+                              <span className="font-medium text-foreground">{it.drugName}</span>
+                              {it.batchNo && <span>Batch: {it.batchNo}</span>}
+                              {it.expiryDate && <span>Exp: {new Date(it.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</span>}
+                              <span>Qty: {it.quantityReceived} {it.unit}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-xs text-muted-foreground">Total Value</div>
-                      <div className="font-bold text-sm">₹{(grn.totalValue || 0).toLocaleString("en-IN")}</div>
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      <div className="text-right">
+                        <div className="text-xs text-muted-foreground">Total Value</div>
+                        <div className="font-bold text-sm">₹{(grn.totalValue || 0).toLocaleString("en-IN")}</div>
+                      </div>
+                      {user?.role === "admin" && (
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => setEditGrn(grn)}>
+                          <Pencil className="h-3 w-3" /> Edit
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -531,12 +606,283 @@ export default function PharmacyPage() {
             ))
           )}
         </TabsContent>
+        {/* ── Tab 5: Reports ──────────────────────────────────────────────── */}
+        <TabsContent value="reports" className="space-y-6">
+
+          {/* Section A: Current Stock Report */}
+          <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-sm">Current Stock Report</h3>
+                    <p className="text-xs text-muted-foreground">All drugs with stock levels as of now</p>
+                  </div>
+                  <Button size="sm" variant="outline" className="h-9 gap-1.5 shrink-0"
+                    onClick={() => printCurrentStockReport(stockReportData, stockStatusFilter)}>
+                    <Printer className="h-4 w-4" /> Print
+                  </Button>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Search drug name or category…" className="pl-9 h-9" value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} />
+                  </div>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {(["All", "OK", "Low", "Critical"] as const).map((s) => (
+                      <button key={s} onClick={() => setStockStatusFilter(s)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                          stockStatusFilter === s
+                            ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                            : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        }`}
+                      >
+                        {s}
+                        <span className="ml-1.5 opacity-70">
+                          {s === "All" ? inventory.length : inventory.filter((d) => d.status === s).length}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {stockReportLoading ? (
+                  <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
+                ) : stockReportData.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-10 text-center">
+                      <Package className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">No drugs match the filter</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="p-0 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/40">
+                              {["#", "Drug Name", "Category", "Stock", "Reorder Level", "MRP/Unit", "Status"].map((h, i) => (
+                                <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 3 ? "text-left" : "text-right"} ${i === 6 ? "text-center" : ""}`}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {stockReportData.map((drug, idx) => (
+                              <tr key={drug._id} className={`border-b last:border-0 hover:bg-muted/20 ${drug.status === "Critical" ? "bg-red-50/40" : drug.status === "Low" ? "bg-amber-50/40" : ""}`}>
+                                <td className="py-2.5 px-4 text-muted-foreground">{idx + 1}</td>
+                                <td className="py-2.5 px-4 font-medium">{drug.name}</td>
+                                <td className="py-2.5 px-4 text-muted-foreground">{drug.category || "—"}</td>
+                                <td className="py-2.5 px-4 text-right font-semibold">{drug.stock} <span className="font-normal text-muted-foreground">{drug.unit}</span></td>
+                                <td className="py-2.5 px-4 text-right text-muted-foreground">{drug.reorderLevel} {drug.unit}</td>
+                                <td className="py-2.5 px-4 text-right text-muted-foreground">{drug.mrpPerUnit ? `₹${Number(drug.mrpPerUnit).toLocaleString("en-IN")}` : "—"}</td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <Badge className={`text-xs ${INVENTORY_STATUS_COLORS[drug.status]}`}>{drug.status}</Badge>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="px-4 py-2 text-xs text-muted-foreground border-t flex items-center gap-4">
+                        <span>{stockReportData.length} item{stockReportData.length !== 1 ? "s" : ""}</span>
+                        {stockStatusFilter === "All" && (
+                          <>
+                            <span className="text-green-600">{inventory.filter((d) => d.status === "OK").length} OK</span>
+                            <span className="text-amber-600">{lowCount} Low</span>
+                            <span className="text-red-600">{criticalCount} Critical</span>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+
+          <div className="border-t" />
+
+          {/* Section C: Low Stock Report */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-sm">Low Stock Report</h3>
+                <p className="text-xs text-muted-foreground">Drugs below or near reorder level</p>
+              </div>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5 shrink-0"
+                onClick={() => printLowStockReport(lowStockData ?? [], lowStockFilter)}>
+                <Printer className="h-4 w-4" /> Print
+              </Button>
+            </div>
+
+            <div className="flex gap-1.5 flex-wrap">
+              {([["both", "All (Low + Critical)"], ["Low", "Low Only"], ["Critical", "Critical Only"]] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setLowStockFilter(key)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                    lowStockFilter === key
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                  {key !== "both" && (
+                    <span className="ml-1.5 opacity-70">
+                      {key === "Low" ? lowCount : criticalCount}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {lowStockLoading ? (
+              <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
+            ) : (lowStockData ?? []).length === 0 ? (
+              <Card>
+                <CardContent className="py-10 text-center">
+                  <Package className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No low stock items found</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-0 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/40">
+                          {["#", "Drug Name", "Category", "Stock", "Reorder Level", "Status"].map((h, i) => (
+                            <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 3 ? "text-left" : "text-right"} ${i === 5 ? "text-center" : ""}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(lowStockData ?? []).map((drug: any, idx: number) => (
+                          <tr key={drug._id} className="border-b last:border-0 hover:bg-muted/20">
+                            <td className="py-2.5 px-4 text-muted-foreground">{idx + 1}</td>
+                            <td className="py-2.5 px-4 font-medium">{drug.name}</td>
+                            <td className="py-2.5 px-4 text-muted-foreground">{drug.category || "—"}</td>
+                            <td className="py-2.5 px-4 text-right">{drug.stock} {drug.unit}</td>
+                            <td className="py-2.5 px-4 text-right text-muted-foreground">{drug.reorderLevel} {drug.unit}</td>
+                            <td className="py-2.5 px-4 text-center">
+                              <Badge className={`text-xs ${INVENTORY_STATUS_COLORS[drug.status]}`}>{drug.status}</Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-4 py-2 text-xs text-muted-foreground border-t">
+                    {(lowStockData ?? []).length} item{(lowStockData ?? []).length !== 1 ? "s" : ""}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="border-t" />
+
+          {/* Section D: Expiry Report */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-sm">Expiry Date Report</h3>
+                <p className="text-xs text-muted-foreground">Batches nearing or past expiry date</p>
+              </div>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5 shrink-0"
+                onClick={() => printExpiryReport(expiryData ?? [], { expiryWithin })}>
+                <Printer className="h-4 w-4" /> Print
+              </Button>
+            </div>
+
+            <div className="flex flex-wrap gap-4 items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground shrink-0">Expiring within:</span>
+                <Select value={expiryWithin} onValueChange={setExpiryWithin}>
+                  <SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="30">30 days</SelectItem>
+                    <SelectItem value="60">60 days</SelectItem>
+                    <SelectItem value="90">90 days</SelectItem>
+                    <SelectItem value="180">180 days</SelectItem>
+                    <SelectItem value="365">1 year</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeExpired}
+                  onChange={(e) => setIncludeExpired(e.target.checked)}
+                  className="rounded"
+                />
+                Include already expired
+              </label>
+            </div>
+
+            {expiryLoading ? (
+              <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
+            ) : (expiryData ?? []).length === 0 ? (
+              <Card>
+                <CardContent className="py-10 text-center">
+                  <Package className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No batches found for this expiry window</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-0 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/40">
+                          {["#", "Drug Name", "Batch No", "Expiry Date", "Days Left", "Qty Remaining", "Status"].map((h, i) => (
+                            <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 3 ? "text-left" : "text-right"} ${i === 6 ? "text-center" : ""}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(expiryData ?? []).map((batch: any, idx: number) => {
+                          const daysLeft  = Math.ceil((new Date(batch.expiryDate).getTime() - Date.now()) / 86_400_000);
+                          const isExpired = daysLeft < 0;
+                          return (
+                            <tr key={batch._id || idx} className={`border-b last:border-0 hover:bg-muted/20 ${isExpired ? "bg-red-50/60" : ""}`}>
+                              <td className="py-2.5 px-4 text-muted-foreground">{idx + 1}</td>
+                              <td className="py-2.5 px-4 font-medium">{batch.drugName || "—"}</td>
+                              <td className="py-2.5 px-4 font-mono text-xs">{batch.batchNo || "—"}</td>
+                              <td className="py-2.5 px-4 text-right text-muted-foreground">
+                                {batch.expiryDate ? new Date(batch.expiryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                              </td>
+                              <td className={`py-2.5 px-4 text-right font-medium ${isExpired ? "text-red-600" : daysLeft <= 30 ? "text-amber-600" : "text-foreground"}`}>
+                                {isExpired ? `${Math.abs(daysLeft)}d ago` : `${daysLeft}d`}
+                              </td>
+                              <td className="py-2.5 px-4 text-right">{batch.quantityRemaining} {batch.drugUnit || ""}</td>
+                              <td className="py-2.5 px-4 text-center">
+                                <Badge className={`text-xs ${batch.status === "Expired" ? "bg-red-100 text-red-700" : batch.status === "Active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
+                                  {batch.status}
+                                </Badge>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-4 py-2 text-xs text-muted-foreground border-t">
+                    {(expiryData ?? []).length} batch{(expiryData ?? []).length !== 1 ? "es" : ""}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+        </TabsContent>
       </Tabs>
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}
-      <GRNModal open={showGRN} onClose={() => setShowGRN(false)} inventory={inventory} />
+      <GRNModal open={showGRN || !!editGrn} onClose={() => { setShowGRN(false); setEditGrn(null); }} inventory={inventory} existing={editGrn} />
       <StockAdjustmentModal open={!!adjustDrug} onClose={() => setAdjustDrug(null)} drug={adjustDrug} />
       <DispenseCounterModal open={showCounter} onClose={() => setShowCounter(false)} inventory={inventory} />
+      <DrugEditModal open={!!editDrug} onClose={() => setEditDrug(null)} drug={editDrug} />
     </div>
   );
 }

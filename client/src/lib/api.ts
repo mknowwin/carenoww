@@ -151,11 +151,19 @@ export const pharmacy = {
     },
     create: (data: any)  => post<any>("/pharmacy/inventory", data),
     update: (id: string, data: any) => put<any>(`/pharmacy/inventory/${id}`, data),
+    lowStock: (filter?: "Low" | "Critical" | "both") => {
+      const params: Record<string, string> = (!filter || filter === "both") ? { statusIn: "Low,Critical" } : { status: filter };
+      return get<any[]>(`/pharmacy/inventory?${new URLSearchParams(params).toString()}`);
+    },
   },
   batches: {
     list: (drugId?: string) => {
       const qs = drugId ? `?drugId=${encodeURIComponent(drugId)}` : "";
       return get<any[]>(`/pharmacy/batches${qs}`);
+    },
+    expiryReport: (params?: { expiryWithin?: string; includeExpired?: string }) => {
+      const qs = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
+      return get<any[]>(`/pharmacy/batches/expiry-report${qs}`);
     },
   },
   grn: {
@@ -185,6 +193,11 @@ export const billing = {
   get:        (id: string) => get<any>(`/billing/${id}`),
   create:     (data: any)  => post<any>("/billing", data),
   update:     (id: string, data: any) => put<any>(`/billing/${id}`, data),
+  salesByStaff: (params?: { from?: string; to?: string }) => {
+    const filtered = Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v)) as Record<string, string>;
+    const qs = Object.keys(filtered).length ? "?" + new URLSearchParams(filtered).toString() : "";
+    return get<any[]>(`/billing/report/by-staff${qs}`);
+  },
   // Payment
   postPayment:(id: string, data: any) => post<any>(`/billing/${id}/payments`, data),
   unlock:     (id: string) => post<any>(`/billing/${id}/unlock`, {}),

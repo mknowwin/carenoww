@@ -24,7 +24,7 @@ const BILL_RATE_CATEGORIES: Record<string, string[]> = {
   Lab:       ["Lab"],
 };
 
-interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; }
+interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; availableQty?: number; }
 const emptyItem = (): BillItem => ({ description: "", category: "Consultation", quantity: 1, unitPrice: 0, total: 0 });
 
 interface Props {
@@ -96,11 +96,28 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   });
   const drugList: any[] = Array.isArray(drugResults) ? drugResults : (drugResults as any)?.drugs ?? [];
 
-  const addDrugItem = (drug: any) => {
-    const unitPrice = drug.mrpPerUnit ?? 0;
+  const addDrugItem = async (drug: any) => {
+    let unitPrice = drug.mrpPerUnit ?? 0;
+    let batchNo: string | undefined;
+    let expiryDate: string | undefined;
+    let availableQty: number = drug.stock ?? 0;
+    try {
+      const batches: any[] = await pharmacyApi.batches.list(drug._id);
+      const activeBatches = batches
+        .filter((b) => b.status === "Active" && b.quantityRemaining > 0)
+        .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
+      if (activeBatches.length > 0) {
+        if (activeBatches[0].mrpPerUnit != null) unitPrice = activeBatches[0].mrpPerUnit;
+        batchNo      = activeBatches[0].batchNo;
+        expiryDate   = activeBatches[0].expiryDate;
+        availableQty = activeBatches.reduce((s, b) => s + b.quantityRemaining, 0);
+      }
+    } catch {
+      // fall back to inventory-level values
+    }
     setItems((prev) => [
       ...prev.filter((it) => it.description !== "" || it.unitPrice > 0),
-      { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice },
+      { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, drugId: drug._id, availableQty },
     ]);
     setDrugSearch("");
   };
@@ -195,6 +212,8 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     e.preventDefault();
     if (!patientName.trim()) { setError("Patient name is required"); return; }
     if (!payOnly && items.some((it) => !it.description.trim())) { setError("All items need a description"); return; }
+    const overStock = !payOnly && items.find((it) => it.availableQty != null && it.quantity > it.availableQty);
+    if (overStock) { setError(`Quantity for "${overStock.description}" exceeds available stock (${overStock.availableQty})`); return; }
 
     setLoading(true); setError("");
     try {
@@ -230,6 +249,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
       }
 
       qc.invalidateQueries({ queryKey: ["billing"] });
+      if (type === "Pharmacy") qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
       setSavedBill({
         billId:      result?.billId,
         patientName: patientName || existing?.patientName,
@@ -423,21 +443,36 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                   {/* Added drugs table */}
                   {items.some((it) => it.description !== "" || it.unitPrice > 0) && (
                     <div className="space-y-1.5">
-                      <div className="grid grid-cols-[2fr_52px_88px_70px_32px] gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 border-b pb-1.5">
+                      <div className="grid grid-cols-[2fr_72px_88px_70px_32px] gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 border-b pb-1.5">
                         <span>Drug</span><span className="text-center">Qty</span><span className="text-right">MRP/Unit</span><span className="text-right">Total</span><span />
                       </div>
-                      {items.filter((it) => it.description !== "" || it.unitPrice > 0).map((item, idx) => (
-                        <div key={idx} className="grid grid-cols-[2fr_52px_88px_70px_32px] gap-1.5 items-center">
-                          <span className="text-sm pl-1 truncate">{item.description}</span>
-                          <Input className="h-7 text-xs text-center" type="number" min={1} value={item.quantity} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseFloat(e.target.value) || 1)} />
-                          <Input className="h-7 text-xs text-right" type="number" min={0} value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
-                          <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
-                          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
-                            onClick={() => setItems((p) => p.filter((_, i) => i !== items.indexOf(item)))}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      ))}
+                      {items.filter((it) => it.description !== "" || it.unitPrice > 0).map((item, idx) => {
+                        const overStock = item.availableQty != null && item.quantity > item.availableQty;
+                        return (
+                          <div key={idx} className="space-y-0.5">
+                            <div className="grid grid-cols-[2fr_72px_88px_70px_32px] gap-1.5 items-center">
+                              <span className="text-sm pl-1 leading-tight">
+                                <span className="truncate block">{item.description}</span>
+                                {item.batchNo && (
+                                  <span className="block text-[10px] text-muted-foreground">
+                                    Batch: {item.batchNo}{item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}
+                                  </span>
+                                )}
+                              </span>
+                              <Input className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} value={item.quantity} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseFloat(e.target.value) || 1)} />
+                              <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
+                              <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
+                              <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                                onClick={() => setItems((p) => p.filter((_, i) => i !== items.indexOf(item)))}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                            {overStock && (
+                              <p className="text-[10px] text-red-600 pl-1">Only {item.availableQty} in stock</p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -451,17 +486,17 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
               {/* Line items (non-pharmacy or manual pharmacy mode) */}
               {!payOnly && !isPharmacyBill && (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-[2fr_1.2fr_52px_88px_70px_32px] gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 border-b pb-1.5">
+                  <div className="grid grid-cols-[2fr_1.2fr_72px_88px_70px_32px] gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 border-b pb-1.5">
                     <span>Description</span><span>Category</span><span className="text-center">Qty</span><span className="text-right">Unit Price</span><span className="text-right">Total</span><span />
                   </div>
                   {items.map((item, idx) => (
-                    <div key={idx} className="grid grid-cols-[2fr_1.2fr_52px_88px_70px_32px] gap-1.5 items-center">
+                    <div key={idx} className="grid grid-cols-[2fr_1.2fr_72px_88px_70px_32px] gap-1.5 items-center">
                       <Input className="h-7 text-xs" placeholder="e.g. Consultation, CBC test" value={item.description} onChange={(e) => updateItem(idx, "description", e.target.value)} />
                       <select value={item.category} onChange={(e) => updateItem(idx, "category", e.target.value)} className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring">
                         {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
                       <Input className="h-7 text-xs text-center" type="number" min={1} value={item.quantity} onChange={(e) => updateItem(idx, "quantity", parseFloat(e.target.value) || 1)} />
-                      <Input className="h-7 text-xs text-right" type="number" min={0} placeholder="₹" value={item.unitPrice || ""} onChange={(e) => updateItem(idx, "unitPrice", parseFloat(e.target.value) || 0)} />
+                      <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" placeholder="₹" value={item.unitPrice || ""} onChange={(e) => updateItem(idx, "unitPrice", parseFloat(e.target.value) || 0)} />
                       <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
                       {items.length > 1 ? (
                         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10" onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}>

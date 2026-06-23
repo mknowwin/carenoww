@@ -8,69 +8,10 @@ import StockAdjustment from "../models/StockAdjustment.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
 import { getNextId } from "../lib/counter.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
+import { fefoDeduct, syncDrugStock } from "../lib/fefo.js";
 
 const router = Router();
 router.use(authMiddleware);
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Recompute DrugInventory.stock and status from active batches */
-async function syncDrugStock(tenantId: string, drugId: string) {
-  const agg = await DrugBatch.aggregate([
-    { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), drugId: new mongoose.Types.ObjectId(drugId), status: "Active" } },
-    { $group: { _id: null, total: { $sum: "$quantityRemaining" } } },
-  ]);
-  const stock = agg[0]?.total ?? 0;
-  const drug = await DrugInventory.findById(drugId);
-  if (!drug) return;
-  const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
-  const ratio = stock / reorderLevel;
-  const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
-  await DrugInventory.findByIdAndUpdate(drugId, { $set: { stock, status } });
-}
-
-/** FEFO deduction: deduct qty from batches in expiry-ascending order.
- *  Returns the batch records used (with updated batchNo, batchId).
- *  Throws with { insufficientStock: true } when stock is short.  */
-async function fefoDeduct(
-  tenantId: string,
-  drugId: string,
-  quantity: number
-): Promise<Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number }>> {
-  const batches = await DrugBatch.find({
-    tenantId: new mongoose.Types.ObjectId(tenantId),
-    drugId: new mongoose.Types.ObjectId(drugId),
-    status: "Active",
-    quantityRemaining: { $gt: 0 },
-  }).sort({ expiryDate: 1 });
-
-  const available = batches.reduce((s, b) => s + b.quantityRemaining, 0);
-  if (available < quantity) {
-    const err: any = new Error("Insufficient stock");
-    err.insufficientStock = true;
-    err.available = available;
-    throw err;
-  }
-
-  let remaining = quantity;
-  const used: Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number }> = [];
-
-  for (const batch of batches) {
-    if (remaining <= 0) break;
-    const take = Math.min(batch.quantityRemaining, remaining);
-    const newQty = batch.quantityRemaining - take;
-    await DrugBatch.findByIdAndUpdate(batch._id, {
-      $set: {
-        quantityRemaining: newQty,
-        status: newQty === 0 ? "Exhausted" : "Active",
-      },
-    });
-    used.push({ batchId: batch._id as mongoose.Types.ObjectId, batchNo: batch.batchNo, deducted: take, mrpPerUnit: batch.mrpPerUnit ?? 0 });
-    remaining -= take;
-  }
-
-  return used;
-}
 
 // ── Pharmacy Orders ───────────────────────────────────────────────────────────
 
@@ -271,9 +212,11 @@ router.put("/orders/:id", requireRole("admin", "pharmacist", "nurse"), async (re
 // GET /api/pharmacy/inventory
 router.get("/inventory", requireRole("admin", "pharmacist", "nurse", "doctor"), async (req: AuthRequest, res) => {
   try {
-    const { search } = req.query as Record<string, string>;
+    const { search, status, statusIn } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
     if (search) query.name = { $regex: search, $options: "i" };
+    if (statusIn) query.status = { $in: statusIn.split(",") };
+    else if (status) query.status = status;
     const inventory = await DrugInventory.find(query).sort({ name: 1 });
     res.json(inventory);
   } catch {
@@ -327,6 +270,53 @@ router.get("/batches", requireRole("admin", "pharmacist", "nurse", "doctor"), as
     const query: any = { tenantId: req.user!.tenantId };
     if (drugId) query.drugId = drugId;
     const batches = await DrugBatch.find(query).sort({ expiryDate: 1 });
+    res.json(batches);
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/pharmacy/batches/expiry-report — cross-drug expiry query (registered before /batches to avoid route collision)
+router.get("/batches/expiry-report", requireRole("admin", "pharmacist"), async (req: AuthRequest, res) => {
+  try {
+    const { expiryWithin = "90", includeExpired = "true" } = req.query as Record<string, string>;
+
+    const now = new Date();
+    const cutoff = new Date(now);
+    cutoff.setDate(now.getDate() + parseInt(expiryWithin));
+
+    const dateQuery =
+      includeExpired === "false"
+        ? { $gte: now, $lte: cutoff }
+        : { $lte: cutoff };
+
+    const batches = await DrugBatch.aggregate([
+      { $match: { tenantId: req.user!.tenantId, expiryDate: dateQuery } },
+      {
+        $lookup: {
+          from: "druginventories",
+          localField: "drugId",
+          foreignField: "_id",
+          as: "drug",
+        },
+      },
+      { $unwind: { path: "$drug", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          batchNo:           1,
+          expiryDate:        1,
+          quantityRemaining: 1,
+          mrpPerUnit:        1,
+          status:            1,
+          supplierName:      1,
+          drugName:          "$drug.name",
+          drugCategory:      "$drug.category",
+          drugUnit:          "$drug.unit",
+        },
+      },
+      { $sort: { expiryDate: 1 } },
+    ]);
+
     res.json(batches);
   } catch {
     res.status(500).json({ error: "Internal server error" });
