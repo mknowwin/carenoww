@@ -1,6 +1,8 @@
 // ── Print utilities — opens a formatted page in a new window and auto-prints ──
 import { LAB_TEST_MASTER } from "./labTestMaster";
 
+export type InvoiceStyle = "classic" | "modern" | "minimal" | "thermal" | "compact";
+
 export interface ClinicInfo {
   name: string;
   logoUrl?: string;
@@ -8,6 +10,7 @@ export interface ClinicInfo {
   address?: string;
   city?: string;
   gstNo?: string;
+  invoiceStyle?: InvoiceStyle;
 }
 
 const DEFAULT_CLINIC: ClinicInfo = {
@@ -23,11 +26,12 @@ function getStoredClinic(): ClinicInfo {
     if (stored) {
       const u = JSON.parse(stored);
       return {
-        name:     u.organization || DEFAULT_CLINIC.name,
-        logoUrl:  u.clinicLogoUrl || "",
-        phone:    u.clinicPhone   || "",
-        address:  u.clinicAddress || "",
-        city:     u.clinicCity    || "",
+        name:         u.organization  || DEFAULT_CLINIC.name,
+        logoUrl:      u.clinicLogoUrl || "",
+        phone:        u.clinicPhone   || "",
+        address:      u.clinicAddress || "",
+        city:         u.clinicCity    || "",
+        invoiceStyle: u.invoiceStyle  || "classic",
       };
     }
   } catch {}
@@ -112,6 +116,10 @@ function base(title: string, body: string): string {
     /* footer */
     .footer{margin-top:22px;padding-top:10px;border-top:1px solid #ddd;text-align:center;font-size:11px;color:#888;line-height:1.6;}
 
+    /* page-break helpers */
+    tr{page-break-inside:avoid;}
+    .no-break{page-break-inside:avoid;}
+
     /* lab param table */
     .param-section{margin-bottom:14px;}
     .param-section .test-name{font-size:13px;font-weight:700;background:#e8f5f3;border:1px solid #aed7d1;padding:5px 10px;border-radius:4px 4px 0 0;color:#1a6b5e;}
@@ -139,37 +147,67 @@ ${body}
 </html>`;
 }
 
-// ── printBill ─────────────────────────────────────────────────────────────────
-export function printBill(bill: any, clinicOverride?: ClinicInfo) {
-  const clinic   = clinicOverride ?? getStoredClinic();
-  const date     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
-  const items    = (bill.items || []) as any[];
-  const subtotal = items.reduce((s, i) => s + (i.total || 0), 0);
-  const balance  = (bill.amount || 0) - (bill.paid || 0);
+// ── baseA5 — half-A4 (A5) page wrapper ───────────────────────────────────────
+function baseA5(title: string, body: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${title}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;background:#fff;}
+    @page{size:A5 landscape;margin:8mm 12mm;}
+    .page{max-width:700px;margin:auto;padding:14px;}
+    tr{page-break-inside:avoid;}
+    .no-break{page-break-inside:avoid;}
+    @media print{.no-print{display:none!important;}}
+  </style>
+</head>
+<body>
+<div class="page">
+${body}
+</div>
+<script>
+  window.addEventListener("load",()=>{window.print();window.addEventListener("afterprint",()=>window.close());});
+</script>
+</body>
+</html>`;
+}
 
-  const hasGst = clinic.gstNo && (bill.totalCgst > 0 || bill.totalSgst > 0 || bill.totalIgst > 0);
+// ── Bill body builders ────────────────────────────────────────────────────────
+
+function _billMeta(bill: any, clinic: ClinicInfo, hasGst: boolean | string | undefined) {
+  const subtotal = ((bill.items || []) as any[]).reduce((s: number, i: any) => s + (i.total || 0), 0);
+  const gstSummary = hasGst ? `
+    <tr><td>Taxable Amount</td><td class="tr">₹${(bill.taxableAmount || subtotal).toLocaleString()}</td></tr>
+    ${bill.totalCgst > 0 ? `<tr><td>CGST</td><td class="tr">₹${bill.totalCgst.toLocaleString()}</td></tr>` : ""}
+    ${bill.totalSgst > 0 ? `<tr><td>SGST</td><td class="tr">₹${bill.totalSgst.toLocaleString()}</td></tr>` : ""}
+    ${bill.totalIgst > 0 ? `<tr><td>IGST</td><td class="tr">₹${bill.totalIgst.toLocaleString()}</td></tr>` : ""}` : "";
+  return { subtotal, gstSummary };
+}
+
+// ── Style 1: Classic ──────────────────────────────────────────────────────────
+function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
   const docLabel = hasGst ? "Tax Invoice" : undefined;
+  const { gstSummary } = _billMeta(bill, clinic, hasGst);
 
+  const hasBatch = items.some((i: any) => i.batchNo);
   const itemRows = items.map((item, idx) => `
     <tr>
       <td class="tc" style="width:36px;">${idx + 1}</td>
-      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}${item.batchNo ? `<div style="font-size:10px;color:#888;">Batch: ${item.batchNo}${item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}</div>` : ""}</td>
+      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
       <td style="width:90px;">${item.category}</td>
+      ${hasBatch ? `<td style="width:96px;font-family:monospace;font-size:11px;">${item.batchNo || "—"}</td>` : ""}
+      ${hasBatch ? `<td style="width:76px;font-size:11px;text-align:center;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
       <td class="tc" style="width:44px;">${item.quantity}</td>
       <td class="tr" style="width:76px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
       ${hasGst ? `<td class="tr" style="width:68px;">${item.taxRate ? `${item.taxRate}%` : "—"}</td>` : ""}
       <td class="tr" style="width:88px;font-weight:600;">₹${(item.total || 0).toLocaleString()}</td>
     </tr>`).join("");
 
-  const gstSummary = hasGst ? `
-    <tr><td>Taxable Amount</td><td class="tr">₹${(bill.taxableAmount || subtotal).toLocaleString()}</td></tr>
-    ${bill.totalCgst > 0 ? `<tr><td>CGST</td><td class="tr">₹${bill.totalCgst.toLocaleString()}</td></tr>` : ""}
-    ${bill.totalSgst > 0 ? `<tr><td>SGST</td><td class="tr">₹${bill.totalSgst.toLocaleString()}</td></tr>` : ""}
-    ${bill.totalIgst > 0 ? `<tr><td>IGST</td><td class="tr">₹${bill.totalIgst.toLocaleString()}</td></tr>` : ""}` : "";
-
-  const body = `
+  return `
     ${clinicHeader(clinic, docLabel)}
-
     <div class="doc-row">
       <div>
         <div class="doc-title">INVOICE / RECEIPT</div>
@@ -181,7 +219,6 @@ export function printBill(bill: any, clinicOverride?: ClinicInfo) {
         <div style="margin-top:3px;font-size:11px;color:#888;">Status: <strong>${bill.status || "Pending"}</strong></div>
       </div>
     </div>
-
     <div class="meta">
       <div class="meta-item"><label>Patient Name</label><span>${bill.patientName || "—"}</span></div>
       <div class="meta-item"><label>UHID</label><span>${bill.patientId || "—"}</span></div>
@@ -190,22 +227,18 @@ export function printBill(bill: any, clinicOverride?: ClinicInfo) {
       <div class="meta-item"><label>Payment Mode</label><span>${bill.paymentMode || "—"}</span></div>
       ${bill.appointmentId ? `<div class="meta-item"><label>Appointment Ref</label><span>${bill.appointmentId}</span></div>` : ""}
     </div>
-
     <table>
       <thead>
         <tr>
-          <th class="tc">#</th>
-          <th>Description</th>
-          <th>Category</th>
+          <th class="tc">#</th><th>Description</th><th>Category</th>
+          ${hasBatch ? `<th>Batch No</th>` : ""}
+          ${hasBatch ? `<th class="tc">Expiry</th>` : ""}
           <th class="tc">Qty</th>
-          <th class="tr">Rate</th>
-          ${hasGst ? `<th class="tr">GST%</th>` : ""}
-          <th class="tr">Amount</th>
+          <th class="tr">Rate</th>${hasGst ? `<th class="tr">GST%</th>` : ""}<th class="tr">Amount</th>
         </tr>
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
-
     <div class="summary">
       <table>
         <tr><td>Subtotal</td><td class="tr">₹${subtotal.toLocaleString()}</td></tr>
@@ -217,16 +250,355 @@ export function printBill(bill: any, clinicOverride?: ClinicInfo) {
         ${balance < 0 ? `<tr><td style="color:#15803d;">Overpaid</td><td class="tr" style="color:#15803d;">₹${Math.abs(balance).toLocaleString()}</td></tr>` : ""}
       </table>
     </div>
-
     ${bill.notes ? `<div class="notes"><strong>Notes</strong>${bill.notes}</div>` : ""}
-
     <div class="footer">
       <p>Thank you for choosing ${clinic.name}. We wish you a speedy recovery!</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
-      ${hasGst ? `<p style="font-size:10px;">This is a computer-generated Tax Invoice. GSTIN: ${clinic.gstNo}</p>` : ""}
+      ${hasGst ? `<p style="font-size:10px;">Computer-generated Tax Invoice · GSTIN: ${clinic.gstNo}</p>` : ""}
     </div>`;
+}
 
-  open(`Invoice ${bill.billId || bill.id}`, body);
+// ── Style 2: Modern ───────────────────────────────────────────────────────────
+function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
+  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join("  ·  ");
+  const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:40px;width:auto;object-fit:contain;margin-bottom:4px;display:block;" />` : "";
+
+  const hasBatch = items.some((i: any) => i.batchNo);
+  const itemRows = items.map((item, idx) => `
+    <tr>
+      <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;width:32px;text-align:center;color:#888;">${idx + 1}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;">
+        <strong>${item.description}</strong>
+        ${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}
+      </td>
+      <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;color:#555;width:80px;">${item.category}</td>
+      ${hasBatch ? `<td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;font-family:monospace;font-size:11px;width:90px;">${item.batchNo || "—"}</td>` : ""}
+      ${hasBatch ? `<td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;font-size:11px;text-align:center;width:76px;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
+      <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;text-align:center;width:40px;">${item.quantity}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;text-align:right;width:80px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
+      ${hasGst ? `<td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;text-align:right;width:60px;">${item.taxRate ? `${item.taxRate}%` : "—"}</td>` : ""}
+      <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;text-align:right;width:90px;font-weight:700;color:#1a5c4a;">₹${(item.total || 0).toLocaleString()}</td>
+    </tr>`).join("");
+
+  return `
+    <div style="margin:-20px -20px 20px;background:#1a5c4a;color:#fff;padding:18px 24px;display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        ${logoHtml}
+        <div style="font-size:20px;font-weight:800;letter-spacing:.3px;">${clinic.name}</div>
+        ${sub ? `<div style="font-size:10px;opacity:.75;margin-top:3px;">${sub}</div>` : ""}
+        ${clinic.gstNo ? `<div style="font-size:10px;opacity:.7;margin-top:2px;">GSTIN: ${clinic.gstNo}</div>` : ""}
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;opacity:.7;">${hasGst ? "Tax Invoice" : "Invoice"}</div>
+        <div style="font-size:18px;font-weight:800;font-family:monospace;margin-top:2px;">${bill.billId || bill.id || "—"}</div>
+        <div style="font-size:10px;opacity:.75;margin-top:4px;">${date}</div>
+        <div style="margin-top:6px;">
+          <span style="padding:2px 9px;border-radius:3px;font-size:10px;font-weight:700;background:rgba(255,255,255,.18);letter-spacing:.5px;">${bill.status || "Pending"}</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 20px;margin-bottom:16px;padding:10px 14px;background:#f0faf7;border:1px solid #c4e8df;border-radius:6px;">
+      ${[
+        ["Patient", bill.patientName || "—"],
+        ["UHID", bill.patientId || "—"],
+        ...(bill.doctor ? [["Doctor", bill.doctor]] : []),
+        ["Type", bill.type || "OPD"],
+        ["Payer", bill.payer || "Self"],
+        ["Payment Mode", bill.paymentMode || "—"],
+      ].map(([l, v]) => `<div><div style="font-size:9px;color:#4a7c70;text-transform:uppercase;letter-spacing:.4px;">${l}</div><div style="font-size:12px;font-weight:600;">${v}</div></div>`).join("")}
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin:0 0 12px;">
+      <thead>
+        <tr style="background:#1a5c4a;">
+          <th style="padding:7px 10px;text-align:center;color:#fff;font-size:10px;letter-spacing:.3px;width:32px;">#</th>
+          <th style="padding:7px 10px;text-align:left;color:#fff;font-size:10px;letter-spacing:.3px;">Description</th>
+          <th style="padding:7px 10px;text-align:left;color:#fff;font-size:10px;letter-spacing:.3px;width:80px;">Category</th>
+          ${hasBatch ? `<th style="padding:7px 10px;text-align:left;color:#fff;font-size:10px;letter-spacing:.3px;width:90px;">Batch No</th>` : ""}
+          ${hasBatch ? `<th style="padding:7px 10px;text-align:center;color:#fff;font-size:10px;letter-spacing:.3px;width:76px;">Expiry</th>` : ""}
+          <th style="padding:7px 10px;text-align:center;color:#fff;font-size:10px;letter-spacing:.3px;width:40px;">Qty</th>
+          <th style="padding:7px 10px;text-align:right;color:#fff;font-size:10px;letter-spacing:.3px;width:80px;">Rate</th>
+          ${hasGst ? `<th style="padding:7px 10px;text-align:right;color:#fff;font-size:10px;letter-spacing:.3px;width:60px;">GST%</th>` : ""}
+          <th style="padding:7px 10px;text-align:right;color:#fff;font-size:10px;letter-spacing:.3px;width:90px;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    <div style="margin-left:auto;width:280px;border:1px solid #1a5c4a;border-radius:6px;overflow:hidden;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="padding:6px 12px;font-size:12px;">Subtotal</td><td style="padding:6px 12px;text-align:right;font-size:12px;">₹${subtotal.toLocaleString()}</td></tr>
+        ${bill.discount > 0 ? `<tr><td style="padding:6px 12px;font-size:12px;color:#d97706;">Discount</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#d97706;">−₹${bill.discount.toLocaleString()}</td></tr>` : ""}
+        ${gstSummary ? gstSummary.replace(/<tr>/g, '<tr>').replace(/class="tr"/g, 'style="text-align:right;"') : ""}
+        <tr style="background:#1a5c4a;"><td style="padding:8px 12px;color:#fff;font-weight:800;font-size:14px;">Total</td><td style="padding:8px 12px;text-align:right;color:#fff;font-weight:800;font-size:14px;">₹${(bill.amount || 0).toLocaleString()}</td></tr>
+        <tr><td style="padding:6px 12px;font-size:12px;color:#15803d;font-weight:600;">Paid</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#15803d;font-weight:600;">₹${(bill.paid || 0).toLocaleString()}</td></tr>
+        ${balance > 0 ? `<tr><td style="padding:6px 12px;font-size:12px;color:#dc2626;font-weight:600;">Balance Due</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#dc2626;font-weight:600;">₹${balance.toLocaleString()}</td></tr>` : ""}
+      </table>
+    </div>
+
+    ${bill.notes ? `<div style="margin-top:14px;padding:9px 12px;background:#fffbf0;border:1px solid #e5d68a;border-radius:5px;font-size:12px;"><strong style="display:block;margin-bottom:3px;color:#92400e;">Notes</strong>${bill.notes}</div>` : ""}
+
+    <div style="margin-top:22px;padding-top:10px;border-top:2px solid #1a5c4a;text-align:center;font-size:11px;color:#555;">
+      <p>Thank you for choosing <strong>${clinic.name}</strong>. We wish you a speedy recovery!</p>
+      ${clinic.phone ? `<p>For queries: ${clinic.phone}</p>` : ""}
+    </div>`;
+}
+
+// ── Style 3: Minimal ──────────────────────────────────────────────────────────
+function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
+  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join("  ·  ");
+  const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:44px;width:auto;object-fit:contain;margin-bottom:6px;display:block;" />` : "";
+
+  const hasBatch = items.some((i: any) => i.batchNo);
+  const itemRows = items.map((item, idx) => `
+    <tr>
+      <td style="padding:8px 4px;border-bottom:1px solid #f0f0f0;color:#aaa;width:28px;font-size:11px;">${idx + 1}</td>
+      <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;">
+        <span style="font-weight:600;">${item.description}</span>
+      </td>
+      <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;color:#888;font-size:11px;width:80px;">${item.category}</td>
+      ${hasBatch ? `<td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;font-family:monospace;font-size:11px;width:90px;">${item.batchNo || "—"}</td>` : ""}
+      ${hasBatch ? `<td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;font-size:11px;text-align:center;width:76px;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
+      <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;text-align:center;width:36px;font-size:12px;">${item.quantity}</td>
+      <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;text-align:right;width:80px;color:#555;">₹${(item.unitPrice || 0).toLocaleString()}</td>
+      ${hasGst ? `<td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;text-align:right;width:56px;color:#888;font-size:11px;">${item.taxRate ? `${item.taxRate}%` : "—"}</td>` : ""}
+      <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;text-align:right;width:90px;font-weight:700;">₹${(item.total || 0).toLocaleString()}</td>
+    </tr>`).join("");
+
+  return `
+    <div style="padding-bottom:14px;margin-bottom:18px;border-bottom:2px solid #111;">
+      ${logoHtml}
+      <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;line-height:1;">${clinic.name}</div>
+      ${sub ? `<div style="font-size:11px;color:#888;margin-top:4px;">${sub}</div>` : ""}
+      ${clinic.gstNo ? `<div style="font-size:11px;color:#555;margin-top:2px;font-weight:600;">GSTIN: ${clinic.gstNo}</div>` : ""}
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div>
+        <div style="font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">${hasGst ? "Tax Invoice" : "Invoice"}</div>
+        <div style="font-size:30px;font-weight:800;font-family:monospace;letter-spacing:-1px;line-height:1;margin-top:3px;">${bill.billId || bill.id || "—"}</div>
+        <div style="margin-top:6px;"><span style="padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:#f0f0f0;color:#444;">${bill.type || "OPD"}</span></div>
+      </div>
+      <div style="text-align:right;font-size:12px;color:#555;line-height:1.7;">
+        <div>${date}</div>
+        <div style="font-weight:600;color:#111;">${bill.patientName || "—"}</div>
+        <div style="font-size:11px;color:#888;">UHID: ${bill.patientId || "—"}</div>
+        ${bill.doctor ? `<div style="font-size:11px;color:#888;">Dr. ${bill.doctor}</div>` : ""}
+        <div style="font-size:11px;">${bill.paymentMode || ""} · ${bill.payer || "Self"}</div>
+      </div>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+      <thead>
+        <tr style="border-bottom:2px solid #111;">
+          <th style="padding:6px 4px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:28px;">#</th>
+          <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;">Description</th>
+          <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:80px;">Category</th>
+          ${hasBatch ? `<th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:90px;">Batch No</th>` : ""}
+          ${hasBatch ? `<th style="padding:6px 8px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:76px;">Expiry</th>` : ""}
+          <th style="padding:6px 8px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:36px;">Qty</th>
+          <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:80px;">Rate</th>
+          ${hasGst ? `<th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:56px;">GST%</th>` : ""}
+          <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;width:90px;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+      <div style="min-width:240px;font-size:13px;">
+        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;">
+          <span>Subtotal</span><span>₹${subtotal.toLocaleString()}</span>
+        </div>
+        ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
+        ${hasGst && bill.totalCgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>CGST</span><span>₹${bill.totalCgst.toLocaleString()}</span></div>` : ""}
+        ${hasGst && bill.totalSgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>SGST</span><span>₹${bill.totalSgst.toLocaleString()}</span></div>` : ""}
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #111;margin-top:2px;font-size:16px;font-weight:800;">
+          <span>Total</span><span>₹${(bill.amount || 0).toLocaleString()}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;color:#15803d;font-weight:600;">
+          <span>Paid</span><span>₹${(bill.paid || 0).toLocaleString()}</span>
+        </div>
+        ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;color:#dc2626;font-weight:600;"><span>Balance Due</span><span>₹${balance.toLocaleString()}</span></div>` : ""}
+      </div>
+    </div>
+
+    ${bill.notes ? `<div style="margin-top:8px;font-size:12px;color:#555;font-style:italic;border-left:3px solid #ddd;padding-left:10px;">${bill.notes}</div>` : ""}
+
+    <div style="margin-top:32px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center;">
+      ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
+      ${hasGst ? `<div style="margin-top:3px;font-size:10px;">GSTIN: ${clinic.gstNo}</div>` : ""}
+    </div>`;
+}
+
+// ── Style 4: Thermal / Slip (A5) ──────────────────────────────────────────────
+function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number): string {
+  const sub = [clinic.phone, clinic.address].filter(Boolean).join(" · ");
+  const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:36px;width:auto;object-fit:contain;display:block;margin:0 auto 4px;" />` : "";
+
+  const itemLines = items.map((item) => `
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+      <span style="flex:1;margin-right:8px;">
+        ${item.description}${item.quantity > 1 ? ` <span style="color:#888;">×${item.quantity}</span>` : ""}
+        ${item.batchNo ? `<div style="font-size:9px;color:#aaa;">Batch: ${item.batchNo}${item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" })}` : ""}</div>` : ""}
+      </span>
+      <span style="font-weight:700;white-space:nowrap;">₹${(item.total || 0).toLocaleString()}</span>
+    </div>`).join("");
+
+  return `
+    <div style="text-align:center;margin-bottom:10px;">
+      ${logoHtml}
+      <div style="font-size:16px;font-weight:800;letter-spacing:.3px;">${clinic.name}</div>
+      ${sub ? `<div style="font-size:9px;color:#666;margin-top:2px;">${sub}</div>` : ""}
+      <div style="margin-top:8px;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">${bill.type || "OPD"} RECEIPT</div>
+    </div>
+
+    <div style="border-top:1px dashed #333;border-bottom:1px dashed #333;padding:6px 0;margin-bottom:8px;font-size:10px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+        <span style="color:#888;">Bill No</span>
+        <span style="font-weight:700;font-family:monospace;">${bill.billId || bill.id || "—"}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+        <span style="color:#888;">Date</span><span>${date}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+        <span style="color:#888;">Patient</span>
+        <span style="font-weight:600;">${bill.patientName || "—"}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+        <span style="color:#888;">UHID</span><span>${bill.patientId || "—"}</span>
+      </div>
+      ${bill.doctor ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#888;">Doctor</span><span>Dr. ${bill.doctor}</span></div>` : ""}
+      <div style="display:flex;justify-content:space-between;">
+        <span style="color:#888;">Payment</span><span>${bill.paymentMode || "Cash"} · ${bill.payer || "Self"}</span>
+      </div>
+    </div>
+
+    <div style="font-size:11px;margin-bottom:8px;">
+      ${itemLines}
+    </div>
+
+    <div style="border-top:1px dashed #333;padding-top:7px;font-size:11px;">
+      ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;padding-bottom:5px;border-bottom:1px dashed #333;margin-bottom:5px;">
+        <span>TOTAL</span><span>₹${(bill.amount || 0).toLocaleString()}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;color:#15803d;font-weight:600;margin-bottom:3px;">
+        <span>Paid</span><span>₹${(bill.paid || 0).toLocaleString()}</span>
+      </div>
+      ${balance > 0 ? `<div style="display:flex;justify-content:space-between;color:#dc2626;font-weight:600;"><span>Balance Due</span><span>₹${balance.toLocaleString()}</span></div>` : ""}
+      ${balance === 0 ? `<div style="text-align:center;margin-top:4px;font-weight:700;color:#15803d;font-size:12px;">✓ PAID IN FULL</div>` : ""}
+    </div>
+
+    ${bill.notes ? `<div style="margin-top:8px;font-size:10px;color:#666;border-top:1px dashed #ccc;padding-top:6px;">${bill.notes}</div>` : ""}
+
+    <div style="margin-top:12px;padding-top:8px;border-top:2px dashed #333;text-align:center;font-size:10px;color:#777;">
+      <div style="font-weight:700;margin-bottom:2px;">Thank you for visiting ${clinic.name}!</div>
+      ${clinic.phone ? `<div>${clinic.phone}</div>` : ""}
+      <div style="margin-top:4px;font-size:9px;color:#aaa;">Status: ${bill.status || "—"}</div>
+    </div>`;
+}
+
+// ── Style 5: Compact (A5) ─────────────────────────────────────────────────────
+function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
+  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join(" · ");
+  const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:32px;width:auto;object-fit:contain;" />` : "";
+
+  const hasBatch = items.some((i: any) => i.batchNo);
+  const itemRows = items.map((item, idx) => `
+    <tr>
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;color:#888;width:24px;text-align:center;">${idx + 1}</td>
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;font-weight:600;">${item.description}</td>
+      ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;font-family:monospace;width:84px;">${item.batchNo || "—"}</td>` : ""}
+      ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;text-align:center;width:68px;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;text-align:center;width:30px;">${item.quantity}</td>
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;text-align:right;width:70px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;text-align:right;width:70px;font-weight:700;">₹${(item.total || 0).toLocaleString()}</td>
+    </tr>`).join("");
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px;">
+      <div>
+        ${logoHtml}
+        <div style="font-size:15px;font-weight:800;margin-top:${clinic.logoUrl ? "4px" : "0"};">${clinic.name}</div>
+        ${sub ? `<div style="font-size:9px;color:#777;margin-top:2px;">${sub}</div>` : ""}
+        ${clinic.gstNo ? `<div style="font-size:9px;color:#555;font-weight:600;margin-top:1px;">GSTIN: ${clinic.gstNo}</div>` : ""}
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.5px;">${hasGst ? "Tax Invoice" : "Invoice"}</div>
+        <div style="font-size:15px;font-weight:800;font-family:monospace;">${bill.billId || bill.id || "—"}</div>
+        <div style="font-size:10px;color:#555;margin-top:2px;">${date}</div>
+        <span style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:3px;font-size:9px;font-weight:700;background:#e8f5f3;color:#1a6b5e;border:1px solid #aed7d1;">${bill.status || "Pending"}</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 14px;margin-bottom:12px;font-size:10px;">
+      <div><span style="color:#888;">Patient: </span><strong>${bill.patientName || "—"}</strong></div>
+      <div><span style="color:#888;">UHID: </span>${bill.patientId || "—"}</div>
+      ${bill.doctor ? `<div><span style="color:#888;">Doctor: </span>${bill.doctor}</div>` : ""}
+      <div><span style="color:#888;">Type: </span>${bill.type || "OPD"}</div>
+      <div><span style="color:#888;">Mode: </span>${bill.paymentMode || "—"}</div>
+      <div><span style="color:#888;">Payer: </span>${bill.payer || "Self"}</div>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+      <thead>
+        <tr style="background:#f0f0f0;">
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:center;width:24px;">#</th>
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:left;">Description</th>
+          ${hasBatch ? `<th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:left;width:84px;">Batch No</th>` : ""}
+          ${hasBatch ? `<th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:center;width:68px;">Expiry</th>` : ""}
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:center;width:30px;">Qty</th>
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:right;width:70px;">Rate</th>
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:right;width:70px;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    <div style="margin-left:auto;width:200px;font-size:10px;">
+      <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>Subtotal</span><span>₹${subtotal.toLocaleString()}</span></div>
+      ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
+      ${hasGst && bill.totalCgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>CGST</span><span>₹${bill.totalCgst.toLocaleString()}</span></div>` : ""}
+      ${hasGst && bill.totalSgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>SGST</span><span>₹${bill.totalSgst.toLocaleString()}</span></div>` : ""}
+      <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;font-weight:800;border-top:2px solid #111;"><span>Total</span><span>₹${(bill.amount || 0).toLocaleString()}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:3px 0;color:#15803d;font-weight:600;"><span>Paid</span><span>₹${(bill.paid || 0).toLocaleString()}</span></div>
+      ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;color:#dc2626;font-weight:600;"><span>Balance</span><span>₹${balance.toLocaleString()}</span></div>` : ""}
+    </div>
+
+    ${bill.notes ? `<div style="margin-top:10px;font-size:10px;color:#666;padding:6px 8px;border-left:3px solid #ddd;">${bill.notes}</div>` : ""}
+
+    <div style="margin-top:14px;padding-top:8px;border-top:1px solid #ddd;text-align:center;font-size:9px;color:#aaa;">
+      ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
+    </div>`;
+}
+
+// ── printBill — dispatches to style-specific builder ──────────────────────────
+export function printBill(bill: any, clinicOverride?: ClinicInfo) {
+  const clinic   = clinicOverride ?? getStoredClinic();
+  const style    = clinic.invoiceStyle || "classic";
+  const date     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+  const items    = (bill.items || []) as any[];
+  const subtotal = items.reduce((s: number, i: any) => s + (i.total || 0), 0);
+  const balance  = (bill.amount || 0) - (bill.paid || 0);
+  const hasGst   = clinic.gstNo && (bill.totalCgst > 0 || bill.totalSgst > 0 || bill.totalIgst > 0);
+  const title    = `Invoice ${bill.billId || bill.id}`;
+
+  if (style === "modern") {
+    open(title, _bodyModern(bill, clinic, date, items, subtotal, balance, hasGst));
+  } else if (style === "minimal") {
+    open(title, _bodyMinimal(bill, clinic, date, items, subtotal, balance, hasGst));
+  } else if (style === "thermal") {
+    openA5(title, _bodyThermal(bill, clinic, date, items, subtotal, balance));
+  } else if (style === "compact") {
+    openA5(title, _bodyCompact(bill, clinic, date, items, subtotal, balance, hasGst));
+  } else {
+    open(title, _bodyClassic(bill, clinic, date, items, subtotal, balance, hasGst));
+  }
 }
 
 // ── printDispenseSlip ─────────────────────────────────────────────────────────
@@ -873,13 +1245,17 @@ export function printExpiryReport(batches: any[], params: { expiryWithin: string
   open("Expiry Date Report", body);
 }
 
-// ── helper ────────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 function open(title: string, body: string) {
   const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
-  if (!win) {
-    alert("Pop-ups are blocked. Please allow pop-ups for this site to print.");
-    return;
-  }
+  if (!win) { alert("Pop-ups are blocked. Please allow pop-ups for this site to print."); return; }
   win.document.write(base(title, body));
+  win.document.close();
+}
+
+function openA5(title: string, body: string) {
+  const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
+  if (!win) { alert("Pop-ups are blocked. Please allow pop-ups for this site to print."); return; }
+  win.document.write(baseA5(title, body));
   win.document.close();
 }

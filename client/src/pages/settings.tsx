@@ -11,7 +11,7 @@ import {
   Monitor, Globe, Key, Database, CheckCircle2, Users, Plus, Trash2,
   Stethoscope, ChevronDown, ChevronRight, Clock, CalendarDays, Pencil,
   X, Loader2, UserPlus, Mic, FlaskConical, Pill, CreditCard, UserCheck, HeartPulse,
-  Upload, ImageIcon, IndianRupee,
+  Upload, ImageIcon, IndianRupee, Printer,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
@@ -710,6 +710,9 @@ function HospitalSection({ user }: { user: any }) {
   const [clinicAddress, setClinicAddress] = useState((user as any)?.clinicAddress ?? "");
   const [logoUrl,       setLogoUrl]       = useState((user as any)?.clinicLogoUrl ?? "");
   const [logoPreview,   setLogoPreview]   = useState((user as any)?.clinicLogoUrl ?? "");
+  const [invoiceStyle,  setInvoiceStyle]  = useState<string>(() => {
+    try { const u = JSON.parse(localStorage.getItem("carenoww_user") || "{}"); return u.invoiceStyle || "classic"; } catch { return "classic"; }
+  });
   const [gstNo,         setGstNo]         = useState("");
   const [invoicePrefix, setInvoicePrefix] = useState("BILL");
   const [cgstRate,      setCgstRate]      = useState(0);
@@ -721,6 +724,10 @@ function HospitalSection({ user }: { user: any }) {
 
   useEffect(() => {
     authApi.getClinicSettings().then((s: any) => {
+      if (s.name          !== undefined) setClinicName(s.name);
+      if (s.clinicPhone   !== undefined) setClinicPhone(s.clinicPhone);
+      if (s.clinicAddress !== undefined) setClinicAddress(s.clinicAddress);
+      if (s.logoUrl       !== undefined) { setLogoUrl(s.logoUrl); setLogoPreview(s.logoUrl); }
       if (s.gstNo         !== undefined) setGstNo(s.gstNo);
       if (s.invoicePrefix !== undefined) setInvoicePrefix(s.invoicePrefix);
       if (s.taxConfig) {
@@ -769,6 +776,7 @@ function HospitalSection({ user }: { user: any }) {
           u.clinicLogoUrl   = logoUrl;
           u.clinicPhone     = clinicPhone;
           u.clinicAddress   = clinicAddress;
+          u.invoiceStyle    = invoiceStyle;
           localStorage.setItem("carenoww_user", JSON.stringify(u));
         }
       } catch {}
@@ -956,6 +964,45 @@ function HospitalSection({ user }: { user: any }) {
           {user?.role !== "admin" && (
             <p className="text-xs text-muted-foreground">Only administrators can update tax settings.</p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Invoice Print Style */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Printer className="h-4 w-4" /> Invoice Print Style
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">Choose how invoices look when printed. Half-A4 styles (A5) automatically continue on the next page if items overflow.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {([
+              { id: "classic",  label: "Classic",        size: "Full A4", desc: "Centered header, grey meta grid, bordered table. Clean & professional." },
+              { id: "modern",   label: "Modern",         size: "Full A4", desc: "Dark teal header band, coloured table headers. Bold & branded." },
+              { id: "minimal",  label: "Minimal",        size: "Full A4", desc: "Large typographic bill ID, hairline borders, airy whitespace." },
+              { id: "thermal",  label: "Thermal / Slip", size: "Half A4 (A5)", desc: "Receipt-style, dashed dividers, compact lines. Fast queue printing." },
+              { id: "compact",  label: "Compact",        size: "Half A4 (A5)", desc: "Two-column layout, condensed table, structured. Good for busy counters." },
+            ] as const).map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setInvoiceStyle(s.id)}
+                className={`text-left rounded-xl border-2 p-3 transition-all ${invoiceStyle === s.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-sm font-semibold">{s.label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${s.size.startsWith("Half") ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{s.size}</span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">{s.desc}</p>
+                {invoiceStyle === s.id && (
+                  <div className="mt-2 text-[10px] font-semibold text-primary flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> Selected
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">Save Clinic Settings above to apply the selected style.</p>
         </CardContent>
       </Card>
 

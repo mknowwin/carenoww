@@ -51,7 +51,10 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: user.role,
         department: user.department,
-        organization: tenant.name,
+        organization:   tenant.name,
+        clinicLogoUrl:  tenant.settings?.logoUrl       || "",
+        clinicPhone:    tenant.settings?.clinicPhone   || tenant.contact?.phone   || "",
+        clinicAddress:  tenant.settings?.clinicAddress || tenant.contact?.address || "",
       },
     });
   } catch (err) {

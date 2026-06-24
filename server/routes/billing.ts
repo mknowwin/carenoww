@@ -34,6 +34,10 @@ router.get("/", requireRole("admin", "finance", "receptionist"), async (req: Aut
     if (status)    query.status    = status;
     if (patientId) query.patientId = patientId;
     if (type)      query.type      = type;
+    // Non-admin/finance users see only their own bills
+    if (!["admin", "finance"].includes(req.user!.role)) {
+      query.createdById = req.user!.id;
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [bills, total] = await Promise.all([
@@ -123,6 +127,7 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance"), async
       type:          type        || "OPD",
       notes:         notes       || "",
       createdBy:     req.user!.name,
+      createdById:   req.user!.id,
       payments,
       isLocked:      paidAmount >= finalAmount,
     });
