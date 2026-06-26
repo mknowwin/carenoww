@@ -1,16 +1,38 @@
 import { Router } from "express";
 import Patient from "../models/Patient.js";
+import Counter from "../models/Counter.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
 router.use(authMiddleware);
 
-// Generate next UHID for tenant
+// Atomic UHID generation — race-safe via MongoDB $inc counter.
+// On first call for a tenant, seeds the counter from the current max UHID
+// so existing patient records stay consistent.
 async function nextUHID(tenantId: string): Promise<string> {
-  const last = await Patient.findOne({ tenantId }).sort({ createdAt: -1 });
-  if (!last) return "UHID-001";
-  const num = parseInt(last.uhid.replace("UHID-", "")) + 1;
-  return `UHID-${String(num).padStart(3, "0")}`;
+  // Seed counter if it doesn't exist yet (handles existing data migration).
+  // $setOnInsert is a no-op when the document already exists, so concurrent
+  // first-time calls are safe — only one write wins, the other is ignored.
+  const existing = await Counter.findOne({ tenantId, name: "patient" });
+  if (!existing) {
+    const last = await Patient.findOne({ tenantId }).sort({ createdAt: -1 });
+    const seed = last ? (parseInt(last.uhid.replace(/\D/g, ""), 10) || 0) : 0;
+    await Counter.findOneAndUpdate(
+      { tenantId, name: "patient" },
+      { $setOnInsert: { seq: seed } },
+      { upsert: true }
+    );
+  }
+
+  // Atomically increment — this is the only line that must be race-safe,
+  // and MongoDB guarantees $inc on a single document is atomic.
+  const counter = await Counter.findOneAndUpdate(
+    { tenantId, name: "patient" },
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true }
+  );
+
+  return `UHID-${String(counter!.seq).padStart(3, "0")}`;
 }
 
 // GET /api/patients

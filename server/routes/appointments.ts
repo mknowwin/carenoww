@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import ServiceRateMaster from "../models/ServiceRateMaster.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
+import { getNextId } from "../lib/counter.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -41,8 +42,7 @@ const DEPT_PREFIX: Record<string, string> = {
 };
 
 async function nextAptId(tenantId: string): Promise<string> {
-  const count = await Appointment.countDocuments({ tenantId });
-  return `APT-${String(count + 1).padStart(3, "0")}`;
+  return getNextId(tenantId, "apt", "APT-");
 }
 
 async function generateToken(
@@ -189,6 +189,20 @@ router.put("/:id", requireRole("admin", "doctor", "receptionist", "nurse"), asyn
 
     const before = await Appointment.findOne({ _id: req.params.id, tenantId });
     if (!before) return res.status(404).json({ error: "Appointment not found" });
+
+    // Merge vitals: preserve nurse-entered values for any field the caller left empty.
+    // Use the already-fetched `before` doc so we can merge in one round-trip.
+    if (updates.vitals && typeof updates.vitals === "object") {
+      const existing: Record<string, string> = (before.vitals as any)?.toObject
+        ? (before.vitals as any).toObject()
+        : { ...(before.vitals ?? {}) };
+      const incoming = updates.vitals as Record<string, string>;
+      const merged: Record<string, string> = { ...existing };
+      for (const [k, v] of Object.entries(incoming)) {
+        if (v !== "" && v != null) merged[k] = v;
+      }
+      updates.vitals = merged;
+    }
 
     const appt = await Appointment.findOneAndUpdate(
       { _id: req.params.id, tenantId },

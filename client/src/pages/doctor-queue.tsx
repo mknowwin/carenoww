@@ -28,9 +28,9 @@ function PatientDetailPanel({ patientId }: { patientId: string }) {
   });
 
   const { data: historyData } = useQuery({
-    queryKey: ["appointments", { patientId }],
-    queryFn:  () => apptApi.list({ limit: "5" }),
-    enabled:  !!patientId,
+    queryKey: ["appointments", { patientId: patient?.uhid }],
+    queryFn:  () => apptApi.list({ patientId: patient!.uhid, limit: "5" }),
+    enabled:  !!patient?.uhid,
     retry: false,
   });
 
@@ -41,7 +41,7 @@ function PatientDetailPanel({ patientId }: { patientId: string }) {
   );
 
   const pastVisits = (historyData?.appointments ?? [])
-    .filter((a: any) => a.patientId === patient.uhid && a.status === "Completed")
+    .filter((a: any) => a.status === "Completed")
     .slice(0, 3);
 
   return (

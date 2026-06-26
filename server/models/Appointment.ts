@@ -18,6 +18,8 @@ export interface IAppointment extends Document {
   token: string;
   tokenNumber: number;
   notes: string;
+  vitals?: { bp?: string; pulse?: string; temp?: string; spo2?: string; weight?: string; height?: string };
+  soap?: { subjective?: string; objective?: string; assessment?: string; plan?: string };
   checkedInAt?: Date;
   calledAt?: Date;
   createdAt: Date;
@@ -43,6 +45,20 @@ const AppointmentSchema = new Schema<IAppointment>(
     token:         { type: String, default: "" },
     tokenNumber:   { type: Number, default: 0 },
     notes:         { type: String, default: "" },
+    vitals: {
+      bp:     { type: String, default: "" },
+      pulse:  { type: String, default: "" },
+      temp:   { type: String, default: "" },
+      spo2:   { type: String, default: "" },
+      weight: { type: String, default: "" },
+      height: { type: String, default: "" },
+    },
+    soap: {
+      subjective: { type: String, default: "" },
+      objective:  { type: String, default: "" },
+      assessment: { type: String, default: "" },
+      plan:       { type: String, default: "" },
+    },
     checkedInAt:   { type: Date },
     calledAt:      { type: Date },
   },

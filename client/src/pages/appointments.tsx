@@ -3,14 +3,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
   Plus, Search, Clock, Video,
-  User, Brain, AlertCircle, CheckCircle2, RefreshCw, Pencil, XCircle,
+  User, Brain, AlertCircle, CheckCircle2, RefreshCw, Pencil, XCircle, Activity, Loader2,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { appointments as apptApi, users as usersApi } from "@/lib/api";
 import AppointmentModal from "@/components/modals/AppointmentModal";
+
+const BLANK_VITALS = { bp: "", pulse: "", temp: "", spo2: "", weight: "", height: "" };
 
 const STATUS_COLORS: Record<string, string> = {
   "Confirmed":  "bg-green-100 text-green-700",
@@ -33,13 +37,18 @@ export default function AppointmentsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editAppt, setEditAppt] = useState<any>(null);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [vitalsApptId, setVitalsApptId] = useState<string | null>(null);
+  const [vitalsApptName, setVitalsApptName] = useState("");
+  const [vitalsForm, setVitalsForm] = useState(BLANK_VITALS);
+  const [savingVitals, setSavingVitals] = useState(false);
 
   const today = new Date().toISOString().split("T")[0];
 
   const { data: apiData } = useQuery({
-    queryKey: ["appointments"],
-    queryFn: () => apptApi.list(),
+    queryKey: ["appointments", { date: today }],
+    queryFn: () => apptApi.list({ date: today, limit: "200" }),
     retry: false,
+    refetchInterval: 30000,
   });
 
   const { data: doctorsData } = useQuery({
@@ -48,6 +57,26 @@ export default function AppointmentsPage() {
     retry: false,
     refetchInterval: 30000,
   });
+
+  const openVitals = (apt: any) => {
+    setVitalsForm(apt.vitals ? { ...BLANK_VITALS, ...apt.vitals } : BLANK_VITALS);
+    setVitalsApptName(apt.patientName);
+    setVitalsApptId(apt._id);
+  };
+
+  const handleSaveVitals = async () => {
+    if (!vitalsApptId) return;
+    setSavingVitals(true);
+    try {
+      await apptApi.update(vitalsApptId, { vitals: vitalsForm });
+      qc.invalidateQueries({ queryKey: ["appointments"] });
+      setVitalsApptId(null);
+    } catch (e: any) {
+      alert(e.message || "Failed to save vitals");
+    } finally {
+      setSavingVitals(false);
+    }
+  };
 
   // Always use _id (MongoDB ObjectId) for API calls, not the display id (aptId)
   const patchStatus = async (apt: any, status: string) => {
@@ -83,7 +112,9 @@ export default function AppointmentsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold">Appointment & Scheduling</h2>
-          <p className="text-sm text-muted-foreground">{apiData?.total ?? APPOINTMENTS.length} appointments today · AI Smart Scheduling active</p>
+          <p className="text-sm text-muted-foreground">
+            {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} · {apiData?.total ?? APPOINTMENTS.length} appointments · AI Smart Scheduling active
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="gap-2"><Video className="h-4 w-4" /> Teleconsult</Button>
@@ -151,6 +182,16 @@ export default function AppointmentsPage() {
                       <div className="text-xs text-muted-foreground mt-0.5">
                         {apt.doctor} · {apt.department}
                       </div>
+                      {apt.vitals && Object.values(apt.vitals).some(Boolean) && (
+                        <div className="flex gap-1.5 flex-wrap mt-1.5">
+                          {apt.vitals.bp     && <Badge className="text-xs bg-blue-50 text-blue-700 border border-blue-100">BP {apt.vitals.bp}</Badge>}
+                          {apt.vitals.pulse  && <Badge className="text-xs bg-green-50 text-green-700 border border-green-100">P {apt.vitals.pulse}</Badge>}
+                          {apt.vitals.temp   && <Badge className="text-xs bg-orange-50 text-orange-700 border border-orange-100">T {apt.vitals.temp}°F</Badge>}
+                          {apt.vitals.spo2   && <Badge className="text-xs bg-purple-50 text-purple-700 border border-purple-100">SpO2 {apt.vitals.spo2}%</Badge>}
+                          {apt.vitals.weight && <Badge className="text-xs bg-muted text-muted-foreground">Wt {apt.vitals.weight}kg</Badge>}
+                          {apt.vitals.height && <Badge className="text-xs bg-muted text-muted-foreground">Ht {apt.vitals.height}cm</Badge>}
+                        </div>
+                      )}
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="flex items-center gap-1 text-sm font-medium">
@@ -190,6 +231,13 @@ export default function AppointmentsPage() {
                         disabled={updating === apt._id + "In Consult"}
                         onClick={() => patchStatus(apt, "In Consult")}>
                         Call In
+                      </Button>
+                    )}
+                    {(apt.status === "Confirmed" || apt.status === "Waiting") && (
+                      <Button variant="outline" size="sm" className="h-7 text-xs text-teal-700 border-teal-300 hover:bg-teal-50"
+                        onClick={() => openVitals(apt)}>
+                        <Activity className="h-3 w-3 mr-1" />
+                        {apt.vitals && Object.values(apt.vitals).some(Boolean) ? "Edit Vitals" : "Vitals"}
                       </Button>
                     )}
                     {!["Completed","Cancelled"].includes(apt.status) && (
@@ -296,6 +344,44 @@ export default function AppointmentsPage() {
         onClose={() => { setModalOpen(false); setEditAppt(null); }}
         existing={editAppt}
       />
+
+      {/* Vitals capture dialog */}
+      <Dialog open={!!vitalsApptId} onOpenChange={(open) => { if (!open) setVitalsApptId(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-teal-600" /> Record Vitals — {vitalsApptName}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            {([
+              { key: "bp",     label: "Blood Pressure", placeholder: "120/80", unit: "mmHg" },
+              { key: "pulse",  label: "Pulse",          placeholder: "72",     unit: "bpm"  },
+              { key: "temp",   label: "Temperature",    placeholder: "98.6",   unit: "°F"   },
+              { key: "spo2",   label: "SpO2",           placeholder: "98",     unit: "%"    },
+              { key: "weight", label: "Weight",         placeholder: "70",     unit: "kg"   },
+              { key: "height", label: "Height",         placeholder: "170",    unit: "cm"   },
+            ] as const).map((v) => (
+              <div key={v.key} className="space-y-1">
+                <Label className="text-xs text-muted-foreground">{v.label} <span className="text-muted-foreground/60">({v.unit})</span></Label>
+                <Input
+                  value={vitalsForm[v.key]}
+                  onChange={(e) => setVitalsForm((f) => ({ ...f, [v.key]: e.target.value }))}
+                  placeholder={v.placeholder}
+                  className="h-8 font-mono text-sm"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setVitalsApptId(null)}>Cancel</Button>
+            <Button size="sm" className="bg-teal-600 hover:bg-teal-700" disabled={savingVitals} onClick={handleSaveVitals}>
+              {savingVitals ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+              Save Vitals
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

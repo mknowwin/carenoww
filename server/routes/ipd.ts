@@ -2,13 +2,13 @@ import { Router } from "express";
 import IPDAdmission from "../models/IPDAdmission.js";
 import Patient from "../models/Patient.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
+import { getNextId } from "../lib/counter.js";
 
 const router = Router();
 router.use(authMiddleware);
 
 async function nextAdmissionId(tenantId: string): Promise<string> {
-  const count = await IPDAdmission.countDocuments({ tenantId });
-  return `ADM-${String(count + 1).padStart(4, "0")}`;
+  return getNextId(tenantId, "admission", "ADM-");
 }
 
 // ── GET /api/ipd — list admissions (active by default) ────────────────────────

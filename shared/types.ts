@@ -91,6 +91,22 @@ export interface Patient {
 }
 
 // ── Appointment ───────────────────────────────────────────────────────────────
+export interface AppointmentVitals {
+  bp?: string;
+  pulse?: string;
+  temp?: string;
+  spo2?: string;
+  weight?: string;
+  height?: string;
+}
+
+export interface AppointmentSoap {
+  subjective?: string;
+  objective?: string;
+  assessment?: string;
+  plan?: string;
+}
+
 export interface Appointment {
   _id?: string;
   id?: string;               // alias used by UI
@@ -105,6 +121,8 @@ export interface Appointment {
   status: "Scheduled" | "Confirmed" | "Waiting" | "In Consult" | "Completed" | "Cancelled";
   token: string;
   notes?: string;
+  vitals?: AppointmentVitals;
+  soap?: AppointmentSoap;
 }
 
 // ── Lab Order ─────────────────────────────────────────────────────────────────

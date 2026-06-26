@@ -3,13 +3,13 @@ import LabOrder from "../models/LabOrder.js";
 import ServiceRateMaster from "../models/ServiceRateMaster.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
+import { getNextId } from "../lib/counter.js";
 
 const router = Router();
 router.use(authMiddleware);
 
 async function nextLabId(tenantId: string): Promise<string> {
-  const count = await LabOrder.countDocuments({ tenantId });
-  return `LAB-${String(count + 1).padStart(4, "0")}`;
+  return getNextId(tenantId, "lab", "LAB-");
 }
 
 // ── GET /api/lab/orders ───────────────────────────────────────────────────────

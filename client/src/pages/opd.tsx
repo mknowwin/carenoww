@@ -633,7 +633,7 @@ function HistoryTab({ patientId }: { patientId: string }) {
                 <Hash className="h-3 w-3 text-teal-500" />
                 <span className="text-xs font-bold text-teal-700 font-mono leading-tight">{a.token || "—"}</span>
               </div>
-              <div>
+              <div className="flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium">{a.date}</span>
                   <Badge className={`text-xs ${
@@ -644,8 +644,23 @@ function HistoryTab({ patientId }: { patientId: string }) {
                   <Badge className="text-xs bg-gray-100 text-gray-600">{a.type}</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{a.doctor} · {a.department} · {a.time}</p>
-                {a.notes && (
-                  <p className="text-xs text-muted-foreground mt-1 bg-muted/40 rounded px-2 py-1">{a.notes}</p>
+                {/* Vitals recorded at check-in or during consultation */}
+                {a.vitals && Object.values(a.vitals).some(Boolean) && (
+                  <div className="flex gap-1.5 flex-wrap mt-2">
+                    {a.vitals.bp     && <Badge className="text-xs bg-blue-50 text-blue-700 border border-blue-200">BP {a.vitals.bp}</Badge>}
+                    {a.vitals.pulse  && <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">P {a.vitals.pulse} bpm</Badge>}
+                    {a.vitals.temp   && <Badge className="text-xs bg-orange-50 text-orange-700 border border-orange-200">T {a.vitals.temp}°F</Badge>}
+                    {a.vitals.spo2   && <Badge className="text-xs bg-purple-50 text-purple-700 border border-purple-200">SpO2 {a.vitals.spo2}%</Badge>}
+                    {a.vitals.weight && <Badge className="text-xs bg-muted text-muted-foreground">Wt {a.vitals.weight} kg</Badge>}
+                    {a.vitals.height && <Badge className="text-xs bg-muted text-muted-foreground">Ht {a.vitals.height} cm</Badge>}
+                  </div>
+                )}
+                {/* SOAP notes */}
+                {(a.soap?.assessment || a.soap?.plan) && (
+                  <div className="text-xs text-muted-foreground mt-2 space-y-0.5 bg-muted/40 rounded px-2 py-1.5">
+                    {a.soap.assessment && <p><span className="font-semibold text-foreground">A:</span> {a.soap.assessment}</p>}
+                    {a.soap.plan      && <p><span className="font-semibold text-foreground">P:</span> {a.soap.plan}</p>}
+                  </div>
                 )}
               </div>
             </div>
@@ -699,10 +714,10 @@ export default function OPDPage() {
     retry: false,
   });
 
-  // Reset vitals + SOAP when patient changes
+  // Load vitals + SOAP from appointment (pre-filled at check-in), reset on patient change
   useEffect(() => {
-    setVitals(BLANK_VITALS);
-    setSoapNote(BLANK_SOAP);
+    setVitals(activeAppt?.vitals ? { ...BLANK_VITALS, ...activeAppt.vitals } : BLANK_VITALS);
+    setSoapNote(activeAppt?.soap ? { ...BLANK_SOAP, ...activeAppt.soap } : BLANK_SOAP);
     setActiveTab("consult");
   }, [activeAppt?._id]);
 
@@ -712,17 +727,11 @@ export default function OPDPage() {
     setSigning(true);
     try {
       if (activeAppt) {
-        const noteText = [
-          vitals.bp ? `BP: ${vitals.bp}` : "",
-          vitals.pulse ? `Pulse: ${vitals.pulse}` : "",
-          vitals.temp ? `Temp: ${vitals.temp}°F` : "",
-          vitals.spo2 ? `SpO2: ${vitals.spo2}%` : "",
-          "",
-          soapNote.assessment ? `Assessment: ${soapNote.assessment}` : "",
-          soapNote.plan ? `Plan: ${soapNote.plan}` : "",
-        ].filter(Boolean).join("\n");
-
-        await apptApi.update(activeAppt._id, { status: "Completed", notes: noteText });
+        await apptApi.update(activeAppt._id, {
+          status: "Completed",
+          vitals,
+          soap: soapNote,
+        });
         qc.invalidateQueries({ queryKey: ["opd-queue"] });
         qc.invalidateQueries({ queryKey: ["appointments"] });
         qc.invalidateQueries({ queryKey: ["queue"] });
@@ -1057,7 +1066,11 @@ export default function OPDPage() {
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm font-semibold">Vital Signs</CardTitle>
-                        <span className="text-xs text-muted-foreground">Enter readings below</span>
+                        <span className="text-xs text-muted-foreground">
+                          {activeAppt?.vitals && Object.values(activeAppt.vitals).some(Boolean)
+                            ? "Pre-filled at check-in — edit if needed"
+                            : "Enter readings below"}
+                        </span>
                       </div>
                     </CardHeader>
                     <CardContent>
