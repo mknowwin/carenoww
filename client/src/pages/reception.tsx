@@ -4,12 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { appointments as apptApi, users as usersApi } from "@/lib/api";
 import AppointmentModal from "@/components/modals/AppointmentModal";
 import {
   Search, CheckCircle2, Clock, UserCheck, Users, Stethoscope,
-  Plus, Hash, Phone, Calendar, ChevronRight, Loader2,
+  Plus, Hash, Phone, Calendar, ChevronRight, Loader2, Activity,
 } from "lucide-react";
+
+const BLANK_VITALS = { bp: "", pulse: "", temp: "", spo2: "", weight: "", height: "" };
 
 const STATUS_COLOR: Record<string, string> = {
   Scheduled:  "bg-gray-100 text-gray-700",
@@ -29,6 +33,9 @@ export default function ReceptionPage() {
   const [modalOpen, setModalOpen]   = useState(false);
   const [actionId, setActionId]     = useState<string | null>(null);
   const [checkedToken, setCheckedToken] = useState<{ token: string; name: string; doctor: string } | null>(null);
+  const [vitalsApptId, setVitalsApptId] = useState<string | null>(null);
+  const [vitalsForm, setVitalsForm] = useState(BLANK_VITALS);
+  const [savingVitals, setSavingVitals] = useState(false);
 
   const { data: apiData, isLoading } = useQuery({
     queryKey: ["appointments", { date: today }],
@@ -70,10 +77,26 @@ export default function ReceptionPage() {
       const updated = await apptApi.checkin(apt._id);
       qc.invalidateQueries({ queryKey: ["appointments"] });
       setCheckedToken({ token: updated.token, name: updated.patientName, doctor: updated.doctor });
+      setVitalsForm(BLANK_VITALS);
+      setVitalsApptId(apt._id);
     } catch (e: any) {
       alert(e.message || "Check-in failed");
     } finally {
       setActionId(null);
+    }
+  };
+
+  const handleSaveVitals = async () => {
+    if (!vitalsApptId) return;
+    setSavingVitals(true);
+    try {
+      await apptApi.update(vitalsApptId, { vitals: vitalsForm });
+      qc.invalidateQueries({ queryKey: ["appointments"] });
+      setVitalsApptId(null);
+    } catch (e: any) {
+      alert(e.message || "Failed to save vitals");
+    } finally {
+      setSavingVitals(false);
     }
   };
 
@@ -253,6 +276,16 @@ export default function ReceptionPage() {
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">{apt.department} · {apt.type}</div>
+                    {apt.vitals && Object.values(apt.vitals).some(Boolean) && (
+                      <div className="flex gap-1.5 flex-wrap mt-1.5">
+                        {apt.vitals.bp     && <Badge className="text-xs bg-blue-50 text-blue-700 border border-blue-100">BP {apt.vitals.bp}</Badge>}
+                        {apt.vitals.pulse  && <Badge className="text-xs bg-green-50 text-green-700 border border-green-100">P {apt.vitals.pulse}</Badge>}
+                        {apt.vitals.temp   && <Badge className="text-xs bg-orange-50 text-orange-700 border border-orange-100">T {apt.vitals.temp}°F</Badge>}
+                        {apt.vitals.spo2   && <Badge className="text-xs bg-purple-50 text-purple-700 border border-purple-100">SpO2 {apt.vitals.spo2}%</Badge>}
+                        {apt.vitals.weight && <Badge className="text-xs bg-muted text-muted-foreground">Wt {apt.vitals.weight}kg</Badge>}
+                        {apt.vitals.height && <Badge className="text-xs bg-muted text-muted-foreground">Ht {apt.vitals.height}cm</Badge>}
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
@@ -293,6 +326,17 @@ export default function ReceptionPage() {
                         )}
                       </Badge>
                     )}
+                    {(apt.status === "Confirmed" || apt.status === "Waiting") && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs text-teal-700 border-teal-300 hover:bg-teal-50"
+                        onClick={() => { setVitalsForm(apt.vitals ? { ...BLANK_VITALS, ...apt.vitals } : BLANK_VITALS); setVitalsApptId(apt._id); }}
+                      >
+                        <Activity className="h-3 w-3 mr-1" />
+                        {apt.vitals && Object.values(apt.vitals).some(Boolean) ? "Edit Vitals" : "Vitals"}
+                      </Button>
+                    )}
                     {apt.status === "In Consult" && (
                       <Badge className="text-xs bg-blue-100 text-blue-700 px-2 py-1">
                         <ChevronRight className="h-3 w-3 mr-1" /> In Room
@@ -319,6 +363,44 @@ export default function ReceptionPage() {
       </div>
 
       <AppointmentModal open={modalOpen} onClose={() => setModalOpen(false)} />
+
+      {/* Vitals capture dialog — opens after check-in */}
+      <Dialog open={!!vitalsApptId} onOpenChange={(open) => { if (!open) setVitalsApptId(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-teal-600" /> Record Vitals
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            {([
+              { key: "bp",     label: "Blood Pressure", placeholder: "120/80", unit: "mmHg" },
+              { key: "pulse",  label: "Pulse",          placeholder: "72",     unit: "bpm"  },
+              { key: "temp",   label: "Temperature",    placeholder: "98.6",   unit: "°F"   },
+              { key: "spo2",   label: "SpO2",           placeholder: "98",     unit: "%"    },
+              { key: "weight", label: "Weight",         placeholder: "70",     unit: "kg"   },
+              { key: "height", label: "Height",         placeholder: "170",    unit: "cm"   },
+            ] as const).map((v) => (
+              <div key={v.key} className="space-y-1">
+                <Label className="text-xs text-muted-foreground">{v.label} <span className="text-muted-foreground/60">({v.unit})</span></Label>
+                <Input
+                  value={vitalsForm[v.key]}
+                  onChange={(e) => setVitalsForm((f) => ({ ...f, [v.key]: e.target.value }))}
+                  placeholder={v.placeholder}
+                  className="h-8 font-mono text-sm"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setVitalsApptId(null)}>Skip</Button>
+            <Button size="sm" className="bg-teal-600 hover:bg-teal-700" disabled={savingVitals} onClick={handleSaveVitals}>
+              {savingVitals ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+              Save Vitals
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
