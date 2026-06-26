@@ -76,6 +76,7 @@ export interface IBillingRecord extends Document {
   type: "OPD" | "IPD" | "Emergency" | "Lab" | "Pharmacy";
   notes: string;
   createdBy: string;
+  createdById: string;
   isLocked: boolean;
   insurance: IInsuranceClaim;
   totalCgst: number;
@@ -164,6 +165,7 @@ const BillingRecordSchema = new Schema<IBillingRecord>(
     type:           { type: String, enum: ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"], default: "OPD" },
     notes:          { type: String, default: "" },
     createdBy:      { type: String, default: "" },
+    createdById:    { type: String, default: "", index: true },
     isLocked:       { type: Boolean, default: false },
     insurance:      { type: InsuranceClaimSchema, default: () => ({ claimStatus: "Not-Filed" }) },
     totalCgst:      { type: Number, default: 0 },

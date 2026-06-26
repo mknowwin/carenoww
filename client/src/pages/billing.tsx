@@ -47,6 +47,8 @@ export default function BillingPage() {
   const [paying,      setPaying]      = useState<string | null>(null);
   const [expandedId,  setExpandedId]  = useState<string | null>(null);
 
+  const [staffFilter,   setStaffFilter]   = useState<string | null>(null);
+
   // By Staff view
   const [view,          setView]         = useState<"list" | "staff">("list");
   const [staffDateFrom, setStaffDateFrom] = useState("");
@@ -100,7 +102,8 @@ export default function BillingPage() {
     const matchType    = typeFilter === "All" || b.type === typeFilter;
     const matchStatus  = statusFilter === "All" || b.status === statusFilter;
     const matchDate    = withinDate(b);
-    return matchSearch && matchType && matchStatus && matchDate;
+    const matchStaff   = !staffFilter || b.createdBy === staffFilter;
+    return matchSearch && matchType && matchStatus && matchDate && matchStaff;
   });
 
   // ── summary stats ─────────────────────────────────────────────────────────
@@ -275,8 +278,8 @@ export default function BillingPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40">
-                        {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received"].map((h, i) => (
-                          <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : "text-right"}`}>{h}</th>
+                        {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received", ""].map((h, i) => (
+                          <th key={i} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : i === 7 ? "text-right" : "text-right"}`}>{h}</th>
                         ))}
                       </tr>
                     </thead>
