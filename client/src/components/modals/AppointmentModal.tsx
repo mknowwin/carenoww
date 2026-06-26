@@ -67,14 +67,15 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
     patientAge:   existing?.patientAge   ?? "",
     patientGender:existing?.patientGender?? "",
     patientPhone: existing?.patientPhone ?? "",
-    doctorId:     existing?.doctorId     ?? "",
-    doctor:       existing?.doctor       ?? "",
-    department:   existing?.department   ?? "Cardiology",
-    date:         existing?.date         ?? today,
-    time:         existing?.time         ?? "",
-    type:         existing?.type         ?? "New",
-    status:       existing?.status       ?? "Scheduled",
-    notes:        existing?.notes        ?? "",
+    doctorId:         existing?.doctorId         ?? "",
+    doctor:           existing?.doctor           ?? "",
+    department:       existing?.department       ?? "Cardiology",
+    date:             existing?.date             ?? today,
+    time:             existing?.time             ?? "",
+    type:             existing?.type             ?? "New",
+    status:           existing?.status           ?? "Scheduled",
+    notes:            existing?.notes            ?? "",
+    referringDoctor:  existing?.referringDoctor  ?? "",
   });
 
   const [patientSearch, setPatientSearch] = useState("");
@@ -162,6 +163,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
       }
       qc.invalidateQueries({ queryKey: ["appointments"] });
       qc.invalidateQueries({ queryKey: ["queue"] });
+      qc.invalidateQueries({ queryKey: ["referral-stats"] });
       onClose();
     } catch (err: any) {
       setError(err.message || "Failed to save appointment");
@@ -359,6 +361,14 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
               onChange={(e) => set("notes", e.target.value)}
               placeholder="Chief complaint or notes (optional)"
               className="h-8 text-sm"
+            />
+          </F>
+
+          <F label="Referring Doctor (optional)">
+            <SI
+              value={form.referringDoctor}
+              onChange={(v) => set("referringDoctor", v)}
+              placeholder="Dr. Name or clinic"
             />
           </F>
 

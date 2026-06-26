@@ -121,6 +121,7 @@ export interface Appointment {
   status: "Scheduled" | "Confirmed" | "Waiting" | "In Consult" | "Completed" | "Cancelled";
   token: string;
   notes?: string;
+  referringDoctor?: string;
   vitals?: AppointmentVitals;
   soap?: AppointmentSoap;
 }

@@ -11,7 +11,8 @@ import {
   User, Brain, AlertCircle, CheckCircle2, RefreshCw, Pencil, XCircle, Activity, Loader2,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { appointments as apptApi, users as usersApi } from "@/lib/api";
+import { appointments as apptApi, users as usersApi, dashboard as dashApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import AppointmentModal from "@/components/modals/AppointmentModal";
 
 const BLANK_VITALS = { bp: "", pulse: "", temp: "", spo2: "", weight: "", height: "" };
@@ -32,6 +33,8 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
 
 export default function AppointmentsPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [modalOpen, setModalOpen] = useState(false);
@@ -43,6 +46,17 @@ export default function AppointmentsPage() {
   const [savingVitals, setSavingVitals] = useState(false);
 
   const today = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const [referralMonth, setReferralMonth] = useState(currentMonth);
+
+  // Build last 6 months for the dropdown
+  const monthOptions = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleString("default", { month: "long", year: "numeric" });
+    return { value, label };
+  });
 
   const { data: apiData } = useQuery({
     queryKey: ["appointments", { date: today }],
@@ -56,6 +70,13 @@ export default function AppointmentsPage() {
     queryFn: () => usersApi.doctors({ date: today }),
     retry: false,
     refetchInterval: 30000,
+  });
+
+  const { data: referralStats } = useQuery({
+    queryKey: ["referral-stats", referralMonth],
+    queryFn: () => dashApi.referralStats(referralMonth),
+    retry: false,
+    enabled: isAdmin,
   });
 
   const openVitals = (apt: any) => {
@@ -182,6 +203,9 @@ export default function AppointmentsPage() {
                       <div className="text-xs text-muted-foreground mt-0.5">
                         {apt.doctor} · {apt.department}
                       </div>
+                      {apt.referringDoctor && (
+                        <div className="text-xs text-violet-600 mt-0.5">Ref: {apt.referringDoctor}</div>
+                      )}
                       {apt.vitals && Object.values(apt.vitals).some(Boolean) && (
                         <div className="flex gap-1.5 flex-wrap mt-1.5">
                           {apt.vitals.bp     && <Badge className="text-xs bg-blue-50 text-blue-700 border border-blue-100">BP {apt.vitals.bp}</Badge>}
@@ -299,6 +323,35 @@ export default function AppointmentsPage() {
             </CardContent>
           </Card>
 
+          {isAdmin && (
+            <Card>
+              <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-sm font-semibold">Referrals by Month</CardTitle>
+                <select
+                  value={referralMonth}
+                  onChange={(e) => setReferralMonth(e.target.value)}
+                  className="text-xs rounded border border-input bg-background px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {monthOptions.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {(!referralStats || referralStats.length === 0) ? (
+                  <p className="text-xs text-muted-foreground text-center py-2">No referrals recorded.</p>
+                ) : (
+                  referralStats.map((r: { referringDoctor: string; count: number }) => (
+                    <div key={r.referringDoctor} className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground truncate flex-1 mr-2">{r.referringDoctor}</span>
+                      <Badge className="text-xs bg-violet-100 text-violet-700 shrink-0">{r.count}</Badge>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Today's Slot Utilization</CardTitle>
@@ -340,6 +393,7 @@ export default function AppointmentsPage() {
       </div>
 
       <AppointmentModal
+        key={editAppt?._id ?? "new"}
         open={modalOpen}
         onClose={() => { setModalOpen(false); setEditAppt(null); }}
         existing={editAppt}
