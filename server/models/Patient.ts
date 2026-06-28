@@ -45,5 +45,29 @@ const PatientSchema = new Schema<IPatient>(
 
 PatientSchema.index({ tenantId: 1, uhid: 1 }, { unique: true });
 PatientSchema.index({ tenantId: 1, name: "text" });
+PatientSchema.index({ tenantId: 1, phone: 1 }, { partialFilterExpression: { phone: { $gt: "" } } });
+
+function normalizePhone(raw: string): string {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0"))  return digits.slice(1);
+  return digits;
+}
+
+PatientSchema.pre("save", function (next) {
+  if (this.phone !== undefined) this.phone = normalizePhone(this.phone);
+  next();
+});
+
+PatientSchema.pre("findOneAndUpdate", function (next) {
+  const update = this.getUpdate() as any;
+  const phone = update?.$set?.phone ?? update?.phone;
+  if (phone !== undefined) {
+    const norm = normalizePhone(phone);
+    if (update.$set) update.$set.phone = norm;
+    else update.phone = norm;
+  }
+  next();
+});
 
 export default mongoose.model<IPatient>("Patient", PatientSchema);

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import mongoose from "mongoose";
 import BillingRecord from "../models/BillingRecord.js";
 import DrugInventory from "../models/DrugInventory.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
@@ -414,7 +415,7 @@ router.get("/report/by-staff", requireRole("admin", "finance"), async (req: Auth
       dateFilter.$lte = toDate;
     }
 
-    const matchStage: any = { tenantId };
+    const matchStage: any = { tenantId: new mongoose.Types.ObjectId(tenantId) };
     if (from || to) matchStage.createdAt = dateFilter;
 
     const [byCreator, byReceiver] = await Promise.all([
