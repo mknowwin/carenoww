@@ -71,11 +71,12 @@ export const superadmin = {
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export const dashboard = {
-  metrics:     () => get<any>("/dashboard/metrics"),
-  bedOccupancy:() => get<any>("/dashboard/bed-occupancy"),
-  aiAlerts:    () => get<any>("/dashboard/ai-alerts"),
-  revenueTrend:() => get<any>("/dashboard/revenue-trend"),
-  deptVolume:  () => get<any>("/dashboard/dept-volume"),
+  metrics:      () => get<any>("/dashboard/metrics"),
+  bedOccupancy: () => get<any>("/dashboard/bed-occupancy"),
+  aiAlerts:     () => get<any>("/dashboard/ai-alerts"),
+  revenueTrend: () => get<any>("/dashboard/revenue-trend"),
+  deptVolume:   () => get<any>("/dashboard/dept-volume"),
+  referralStats:(month?: string) => get<any[]>(`/dashboard/referral-stats${month ? `?month=${month}` : ""}`),
 };
 
 // ── Patients ──────────────────────────────────────────────────────────────────

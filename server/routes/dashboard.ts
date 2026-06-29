@@ -9,11 +9,11 @@ import { authMiddleware, AuthRequest } from "../middleware/auth.js";
 
 const WARD_CAPACITY: Record<string, number> = {
   "General Ward": 80,
-  "ICU":          20,
+  "ICU": 20,
   "Private Ward": 30,
   "Semi-Private": 20,
-  "Obs/Gyn":      15,
-  "Pediatric":    20,
+  "Obs/Gyn": 15,
+  "Pediatric": 20,
 };
 
 const router = Router();
@@ -51,7 +51,7 @@ router.get("/metrics", async (req: AuthRequest, res) => {
 
     // Bed occupancy rate from live IPD admissions
     const activeAdmissions = await IPDAdmission.find({ tenantId, status: "Active" });
-    const totalBeds    = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
+    const totalBeds = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
     const occupiedBeds = activeAdmissions.length;
     const bedOccupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
 
@@ -86,7 +86,7 @@ router.get("/bed-occupancy", async (req: AuthRequest, res) => {
     const result = Object.entries(WARD_CAPACITY).map(([ward, total]) => ({
       ward,
       total,
-      occupied:  wardCounts[ward] || 0,
+      occupied: wardCounts[ward] || 0,
       available: total - (wardCounts[ward] || 0),
     }));
     res.json(result);
@@ -158,11 +158,11 @@ router.get("/revenue-trend", async (req: AuthRequest, res) => {
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       monthDefs.push({
-        year:  d.getFullYear(),
+        year: d.getFullYear(),
         month: d.getMonth() + 1,
         label: d.toLocaleString("default", { month: "short" }),
         start: new Date(d.getFullYear(), d.getMonth(), 1),
-        end:   new Date(d.getFullYear(), d.getMonth() + 1, 1),
+        end: new Date(d.getFullYear(), d.getMonth() + 1, 1),
       });
     }
 
@@ -185,10 +185,10 @@ router.get("/revenue-trend", async (req: AuthRequest, res) => {
           { $group: { _id: null, total: { $sum: "$paid" } } },
         ]),
       ]);
-      const opd      = opdRes[0]?.total   || 0;
-      const ipd      = ipdRes[0]?.total   || 0;
-      const pharmacy = pharmRes[0]?.total  || 0;
-      const total    = allRes[0]?.total    || 0;
+      const opd = opdRes[0]?.total || 0;
+      const ipd = ipdRes[0]?.total || 0;
+      const pharmacy = pharmRes[0]?.total || 0;
+      const total = allRes[0]?.total || 0;
       // Remaining goes to ipd bucket (Lab/Procedures etc.)
       return { month: m.label, opd, ipd: ipd || Math.max(0, total - opd - pharmacy), pharmacy };
     }));
@@ -211,6 +211,50 @@ router.get("/dept-volume", async (req: AuthRequest, res) => {
     ]);
     res.json(deptVolume);
   } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/dashboard/referral-stats?month=YYYY-MM — referrals per referring doctor for a given month
+router.get("/referral-stats", async (req: AuthRequest, res) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const { month } = req.query as Record<string, string>;
+
+    // Parse ?month=YYYY-MM, default to current month
+    let year: number, mon: number;
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      [year, mon] = month.split("-").map(Number);
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      mon = now.getMonth() + 1;
+    }
+    const startOfMonth = new Date(year, mon - 1, 1);
+    const startOfNextMonth = new Date(year, mon, 1);
+
+    console.log(`Fetching referral stats for tenant ${tenantId}, month ${year}-${mon.toString().padStart(2, "0")}`);
+    console.log(`Date range: ${startOfMonth.toISOString()} to ${startOfNextMonth.toISOString()}`);
+    console.log(`Query: ${JSON.stringify({ tenantId, referringDoctor: { $exists: true, $ne: "" }, createdAt: { $gte: startOfMonth, $lt: startOfNextMonth } })}`);
+    const appts = await Appointment.find({
+      tenantId,
+      referringDoctor: { $exists: true, $ne: "" },
+      createdAt: { $gte: startOfMonth, $lt: startOfNextMonth },
+    }).select("referringDoctor");
+
+    const grouped: Record<string, number> = {};
+    for (const a of appts) {
+      const dr = (a as any).referringDoctor as string;
+      grouped[dr] = (grouped[dr] || 0) + 1;
+    }
+
+    const stats = Object.entries(grouped)
+      .map(([referringDoctor, count]) => ({ referringDoctor, count }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json(stats);
+  } catch (err) {
+    console.error("referral-stats error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
