@@ -44,6 +44,27 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   );
 }
 
+const ROLE_REDIRECTS: Record<string, string> = {
+  doctor:       "/opd",
+  nurse:        "/ipd",
+  receptionist: "/reception",
+  pharmacist:   "/pharmacy",
+  lab_tech:     "/lab",
+  finance:      "/billing",
+};
+
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const { user, isLoading } = useAuth();
+  if (isLoading) return <LoadingScreen />;
+  if (!user) return <Redirect to="/login" />;
+  if (user.role !== "admin") return <Redirect to={ROLE_REDIRECTS[user.role] ?? "/login"} />;
+  return (
+    <AdminLayout>
+      <Component />
+    </AdminLayout>
+  );
+}
+
 function SuperAdminRoute({ component: Component }: { component: React.ComponentType }) {
   const { superAdmin, isLoading } = useSuperAdmin();
   if (isLoading) return <LoadingScreen />;
@@ -76,7 +97,7 @@ export default function App() {
       </Route>
 
       {/* ── HMS protected routes ───────────────────── */}
-      <Route path="/"              component={() => <ProtectedRoute component={DashboardPage} />} />
+      <Route path="/"              component={() => <AdminRoute component={DashboardPage} />} />
       <Route path="/patients"      component={() => <ProtectedRoute component={PatientsPage} />} />
       <Route path="/appointments"  component={() => <ProtectedRoute component={AppointmentsPage} />} />
       <Route path="/reception"     component={() => <ProtectedRoute component={ReceptionPage} />} />

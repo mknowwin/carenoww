@@ -1245,6 +1245,63 @@ export function printExpiryReport(batches: any[], params: { expiryWithin: string
   open("Expiry Date Report", body);
 }
 
+// ── printReferralStats ────────────────────────────────────────────────────────
+export function printReferralStats(
+  rows: { referringDoctor: string; count: number }[],
+  month: string,
+  clinicOverride?: ClinicInfo
+) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const total = rows.reduce((s, r) => s + r.count, 0);
+
+  const rowHtml = rows.map((r, i) => `
+    <tr>
+      <td class="tc">${i + 1}</td>
+      <td>${r.referringDoctor || "Walk-in / Direct"}</td>
+      <td class="tr">${r.count}</td>
+    </tr>`).join("");
+
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">REFERRAL STATISTICS</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Month: ${month}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="tc" style="width:36px;">#</th>
+          <th>Referring Doctor</th>
+          <th class="tr" style="width:110px;">Appointments</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowHtml || '<tr><td colspan="3" style="text-align:center;color:#888;padding:20px;">No referral data for this month</td></tr>'}
+      </tbody>
+      <tfoot>
+        <tr style="background:#f0f0f0;font-weight:800;">
+          <td></td>
+          <td><strong>TOTAL</strong></td>
+          <td class="tr">${total}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="footer">
+      <p>Referral Stats — ${clinic.name} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+
+  open("Referral Statistics", body);
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 function open(title: string, body: string) {
   const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
