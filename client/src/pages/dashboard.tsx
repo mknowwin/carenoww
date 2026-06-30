@@ -5,7 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   Users, CalendarDays, BedDouble, Activity, TrendingUp, AlertTriangle,
   Pill, FlaskConical, CreditCard, ArrowRight, Brain, Zap, Clock,
-  CheckCircle2, XCircle, Info,
+  CheckCircle2, XCircle, Info, Printer, IndianRupee,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import {
@@ -13,9 +13,12 @@ import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
-import { dashboard as dashApi, appointments as apptApi, patients as patientsApi } from "@/lib/api";
+import { dashboard as dashApi, appointments as apptApi, patients as patientsApi, billing as billingApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, todayInTz, currentMonthInTz } from "@/lib/utils";
+import { printReferralStats } from "@/lib/print";
+import { useState } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const ALERT_ICONS = { critical: XCircle, warning: AlertTriangle, info: Info };
 const ALERT_COLORS = {
@@ -29,20 +32,53 @@ export default function DashboardPage() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
 
-  const { data: metricsData } = useQuery({ queryKey: ["dashboard-metrics"], queryFn: dashApi.metrics, retry: false });
-  const { data: revenueData }  = useQuery({ queryKey: ["dashboard-revenue"],  queryFn: dashApi.revenueTrend, retry: false });
-  const { data: deptData }     = useQuery({ queryKey: ["dashboard-dept"],     queryFn: dashApi.deptVolume, retry: false });
-  const { data: bedData }      = useQuery({ queryKey: ["dashboard-beds"],     queryFn: dashApi.bedOccupancy, retry: false });
-  const { data: alertsData }   = useQuery({ queryKey: ["dashboard-alerts"],   queryFn: dashApi.aiAlerts, retry: false });
-  const { data: apptData }     = useQuery({ queryKey: ["appointments"],        queryFn: () => apptApi.list({ date: new Date().toISOString().split("T")[0] }), retry: false });
-  const { data: highRiskData } = useQuery({ queryKey: ["patients-highrisk"],   queryFn: () => patientsApi.list({ riskLevel: "Critical", limit: "10" }), retry: false });
+  const { data: metricsData,  isLoading: metricsLoading  } = useQuery({ queryKey: ["dashboard-metrics"], queryFn: dashApi.metrics, retry: false });
+  const { data: deptData,     isLoading: deptLoading     } = useQuery({ queryKey: ["dashboard-dept"],     queryFn: dashApi.deptVolume, retry: false });
+  const { data: bedData,      isLoading: bedLoading      } = useQuery({ queryKey: ["dashboard-beds"],     queryFn: dashApi.bedOccupancy, retry: false });
+  const { data: alertsData                               } = useQuery({ queryKey: ["dashboard-alerts"],   queryFn: dashApi.aiAlerts, retry: false });
+  const tz = user?.timezone ?? "Asia/Kolkata";
+  const { data: apptData,     isLoading: apptLoading     } = useQuery({ queryKey: ["appointments"],        queryFn: () => apptApi.list({ date: todayInTz(tz) }), retry: false });
+  const { data: highRiskData, isLoading: highRiskLoading } = useQuery({ queryKey: ["patients-highrisk"],   queryFn: () => patientsApi.list({ riskLevel: "Critical", limit: "10" }), retry: false });
+  const [referralMonth, setReferralMonth] = useState(() => currentMonthInTz(tz));
+  const { data: referralStats = [], isLoading: referralLoading } = useQuery({ queryKey: ["referral-stats", referralMonth], queryFn: () => dashApi.referralStats(referralMonth), retry: false });
+  const { data: billsData, isLoading: billsLoading } = useQuery({ queryKey: ["billing"], queryFn: () => billingApi.list(), retry: false });
 
-  const m = metricsData ?? {
-    totalPatients: 0, opdToday: 0, ipdCurrent: 0, icuCurrent: 0,
-    appointmentsToday: 0, pendingClaims: 0, criticalAlerts: 0,
-    bedOccupancyRate: 0, revenueToday: 0, revenueMonth: 0, surgeriesThisWeek: 0, avgLOS: 0,
+  const ALL_BILLS: any[] = (billsData?.bills ?? []).map((b: any) => ({ ...b, id: b.billId || b._id || b.id }));
+  const todayStr = new Date().toDateString();
+  const nowDate  = new Date();
+  const revenueToday = ALL_BILLS
+    .filter((b) => new Date(b.createdAt).toDateString() === todayStr)
+    .reduce((a, b) => a + (b.paid || 0), 0);
+  const revenueMonth = ALL_BILLS
+    .filter((b) => { const d = new Date(b.createdAt); return d.getMonth() === nowDate.getMonth() && d.getFullYear() === nowDate.getFullYear(); })
+    .reduce((a, b) => a + (b.paid || 0), 0);
+
+  const m = {
+    ...(metricsData ?? {
+      totalPatients: 0, opdToday: 0, ipdCurrent: 0, icuCurrent: 0,
+      appointmentsToday: 0, pendingClaims: 0, criticalAlerts: 0,
+      bedOccupancyRate: 0, surgeriesThisWeek: 0, avgLOS: 0,
+    }),
+    revenueToday,
+    revenueMonth,
   };
-  const REVENUE_TREND = revenueData  ?? [];
+  const revNow = new Date();
+  const revMonthMap: Record<number, { month: string; opd: number; ipd: number; pharmacy: number }> = {};
+  for (let mo = 0; mo <= revNow.getMonth(); mo++) {
+    revMonthMap[mo] = { month: new Date(revNow.getFullYear(), mo, 1).toLocaleString("default", { month: "short" }), opd: 0, ipd: 0, pharmacy: 0 };
+  }
+  for (const bill of ALL_BILLS) {
+    const d = new Date(bill.createdAt);
+    if (d.getFullYear() !== revNow.getFullYear()) continue;
+    const mo = d.getMonth();
+    if (revMonthMap[mo] === undefined) continue;
+    const paid = bill.paid || 0;
+    if (bill.type === "OPD")           revMonthMap[mo].opd      += paid;
+    else if (bill.type === "IPD")      revMonthMap[mo].ipd      += paid;
+    else if (bill.type === "Pharmacy") revMonthMap[mo].pharmacy += paid;
+    else                               revMonthMap[mo].ipd      += paid;
+  }
+  const REVENUE_TREND = Object.values(revMonthMap);
   const DEPT_VOLUME   = deptData     ?? [];
   const BED_OCCUPANCY = bedData      ?? [];
   const AI_ALERTS     = alertsData   ?? [];
@@ -54,7 +90,6 @@ export default function DashboardPage() {
     { label: "IPD Patients",    value: m.ipdCurrent,           icon: BedDouble,   change: "Active admissions", color: "text-blue-600",   bg: "bg-blue-50",   suffix: "" },
     { label: "ICU Occupancy",   value: `${m.icuCurrent}/20`,   icon: Activity,    change: "3 beds available",  color: "text-red-600",    bg: "bg-red-50",    suffix: "" },
     { label: "Bed Occupancy",   value: `${m.bedOccupancyRate}%`,icon: BedDouble,  change: "Across all wards",  color: "text-violet-600", bg: "bg-violet-50", suffix: "" },
-    { label: "Today Revenue",   value: formatCurrency(m.revenueToday), icon: CreditCard, change: "Collected today", color: "text-emerald-600",bg: "bg-emerald-50",suffix: "" },
     { label: "Pending Claims",  value: m.pendingClaims,        icon: TrendingUp,  change: "Insurance claims",  color: "text-amber-600",  bg: "bg-amber-50",  suffix: "" },
     { label: "Appointments",    value: m.appointmentsToday,    icon: CalendarDays,change: "Scheduled today",   color: "text-cyan-600",   bg: "bg-cyan-50",   suffix: "" },
     { label: "Critical Alerts", value: m.criticalAlerts,       icon: AlertTriangle,change: "Require attention",color: "text-rose-600",   bg: "bg-rose-50",   suffix: "" },
@@ -87,20 +122,56 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-        {stats.map((stat) => (
-          <Card key={stat.label} className="hover:shadow-sm transition-shadow">
-            <CardContent className="p-4">
-              <div className={`w-8 h-8 rounded-lg ${stat.bg} flex items-center justify-center mb-2`}>
-                <stat.icon className={`h-4 w-4 ${stat.color}`} />
+      {/* Today's Revenue highlight */}
+      <Card className="bg-teal-50 border-teal-100">
+        <CardContent className="p-4 flex items-center justify-between">
+          {billsLoading ? (
+            <div className="w-full space-y-2">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-8 w-40" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          ) : (
+            <>
+              <div>
+                <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide">Today's Revenue</p>
+                <p className="text-2xl font-bold text-teal-800">{formatCurrency(m.revenueToday)}</p>
+                <p className="text-xs text-teal-600 mt-0.5">Collected today</p>
               </div>
-              <div className="text-xl font-bold text-foreground">{stat.value}</div>
-              <div className="text-xs font-medium text-foreground mt-0.5 leading-tight">{stat.label}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{stat.change}</div>
-            </CardContent>
-          </Card>
-        ))}
+              <div className="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center">
+                <IndianRupee className="h-6 w-6 text-teal-700" />
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        {metricsLoading
+          ? Array.from({ length: 7 }).map((_, i) => (
+              <Card key={i}>
+                <CardContent className="p-4 space-y-2">
+                  <Skeleton className="w-8 h-8 rounded-lg" />
+                  <Skeleton className="h-6 w-16" />
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-3 w-24" />
+                </CardContent>
+              </Card>
+            ))
+          : stats.map((stat) => (
+              <Card key={stat.label} className="hover:shadow-sm transition-shadow">
+                <CardContent className="p-4">
+                  <div className={`w-8 h-8 rounded-lg ${stat.bg} flex items-center justify-center mb-2`}>
+                    <stat.icon className={`h-4 w-4 ${stat.color}`} />
+                  </div>
+                  <div className="text-xl font-bold text-foreground">{stat.value}</div>
+                  <div className="text-xs font-medium text-foreground mt-0.5 leading-tight">{stat.label}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{stat.change}</div>
+                </CardContent>
+              </Card>
+            ))
+        }
       </div>
 
       {/* AI Alerts */}
@@ -144,7 +215,7 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-semibold">Revenue Trend (Monthly)</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            {billsLoading ? <Skeleton className="h-[200px] w-full" /> : <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={REVENUE_TREND} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorOpd" x1="0" y1="0" x2="0" y2="1">
@@ -164,7 +235,7 @@ export default function DashboardPage() {
                 <Area type="monotone" dataKey="opd"      name="OPD"      stroke="#0d9488" fill="url(#colorOpd)" strokeWidth={2} />
                 <Area type="monotone" dataKey="pharmacy" name="Pharmacy" stroke="#6366f1" fill="none"            strokeWidth={1.5} strokeDasharray="4 2" />
               </AreaChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer>}
           </CardContent>
         </Card>
 
@@ -174,19 +245,21 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-semibold">Today's Dept. Volume</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={DEPT_VOLUME} layout="vertical" margin={{ top: 0, right: 10, left: 50, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10 }} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={60} />
-                <Tooltip />
-                <Bar dataKey="patients" name="Patients" radius={[0,4,4,0]}>
-                  {DEPT_VOLUME.map((_: any, i: number) => (
-                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {deptLoading ? <Skeleton className="h-[200px] w-full" /> : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={DEPT_VOLUME} layout="vertical" margin={{ top: 0, right: 10, left: 50, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 10 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={60} />
+                  <Tooltip />
+                  <Bar dataKey="patients" name="Patients" radius={[0,4,4,0]}>
+                    {DEPT_VOLUME.map((_: any, i: number) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -202,21 +275,24 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {BED_OCCUPANCY.map((ward: any) => {
-              const pct = Math.round((ward.occupied / ward.total) * 100);
-              const color = pct >= 90 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-teal-500";
-              return (
-                <div key={ward.ward}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="font-medium">{ward.ward}</span>
-                    <span className="text-muted-foreground">{ward.occupied}/{ward.total} · {ward.available} free</span>
+            {bedLoading
+              ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)
+              : BED_OCCUPANCY.map((ward: any) => {
+                const pct = Math.round((ward.occupied / ward.total) * 100);
+                const color = pct >= 90 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-teal-500";
+                return (
+                  <div key={ward.ward}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="font-medium">{ward.ward}</span>
+                      <span className="text-muted-foreground">{ward.occupied}/{ward.total} · {ward.available} free</span>
+                    </div>
+                    <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                      <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
-                  <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-                    <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            }
           </CardContent>
         </Card>
 
@@ -231,7 +307,9 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {todayAppts.map((apt: any) => {
+            {apptLoading
+              ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)
+              : todayAppts.map((apt: any) => {
               const statusColor: Record<string, string> = {
                 "Confirmed":  "bg-green-100 text-green-700",
                 "Waiting":    "bg-amber-100 text-amber-700",
@@ -250,7 +328,8 @@ export default function DashboardPage() {
                   </Badge>
                 </div>
               );
-            })}
+            })
+            }
           </CardContent>
         </Card>
 
@@ -265,32 +344,89 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {criticalPatients.map((p: any) => {
-              const riskColor: Record<string, string> = {
-                Critical: "bg-red-100 text-red-700",
-                High:     "bg-amber-100 text-amber-700",
-                Medium:   "bg-yellow-100 text-yellow-700",
-                Low:      "bg-green-100 text-green-700",
-              };
-              return (
-                <div key={p.id} className="flex items-center gap-3 py-1.5 border-b border-border last:border-0">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
-                    {p.name[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{p.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">{p.diagnosis}</div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <Badge className={`text-xs ${riskColor[p.riskLevel]}`}>{p.riskLevel}</Badge>
-                    <div className="text-xs text-muted-foreground mt-0.5">{p.status}</div>
-                  </div>
-                </div>
-              );
-            })}
+            {highRiskLoading
+              ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)
+              : criticalPatients.map((p: any) => {
+                  const riskColor: Record<string, string> = {
+                    Critical: "bg-red-100 text-red-700",
+                    High:     "bg-amber-100 text-amber-700",
+                    Medium:   "bg-yellow-100 text-yellow-700",
+                    Low:      "bg-green-100 text-green-700",
+                  };
+                  return (
+                    <div key={p.id} className="flex items-center gap-3 py-1.5 border-b border-border last:border-0">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
+                        {p.name[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium truncate">{p.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{p.diagnosis}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <Badge className={`text-xs ${riskColor[p.riskLevel]}`}>{p.riskLevel}</Badge>
+                        <div className="text-xs text-muted-foreground mt-0.5">{p.status}</div>
+                      </div>
+                    </div>
+                  );
+                })
+            }
           </CardContent>
         </Card>
       </div>
+
+      {/* Referral Stats */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Referral Stats</CardTitle>
+            <div className="flex items-center gap-2">
+              <input
+                type="month"
+                value={referralMonth}
+                onChange={(e) => setReferralMonth(e.target.value)}
+                className="text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5"
+                onClick={() => printReferralStats(referralStats, referralMonth)}
+              >
+                <Printer className="h-4 w-4" />
+                Print
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {referralLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+            </div>
+          ) : referralStats.length === 0 ? (
+            <p className="text-sm text-slate-400 py-2">No referral data for this month.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-500 border-b">
+                  <th className="pb-2 w-8">#</th>
+                  <th className="pb-2">Referring Doctor</th>
+                  <th className="pb-2 text-right">Appointments</th>
+                </tr>
+              </thead>
+              <tbody>
+                {referralStats.map((r: { referringDoctor: string; count: number }, i: number) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-2 text-slate-400">{i + 1}</td>
+                    <td className="py-2">{r.referringDoctor || "Walk-in / Direct"}</td>
+                    <td className="py-2 text-right font-medium">{r.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Quick actions */}
       <Card>

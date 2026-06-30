@@ -10,6 +10,7 @@ export interface AuthRequest extends Request {
     email: string;
     role: string;
     name: string;
+    timezone: string;
   };
 }
 

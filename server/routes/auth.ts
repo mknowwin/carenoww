@@ -30,6 +30,8 @@ router.post("/login", async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
+    const timezone = tenant.settings?.timezone || "Asia/Kolkata";
+
     const token = jwt.sign(
       {
         id: user._id.toString(),
@@ -37,6 +39,7 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: user.role,
         name: user.name,
+        timezone,
       },
       JWT_SECRET,
       { expiresIn: "12h" }
@@ -55,6 +58,7 @@ router.post("/login", async (req, res) => {
         clinicLogoUrl:  tenant.settings?.logoUrl       || "",
         clinicPhone:    tenant.settings?.clinicPhone   || tenant.contact?.phone   || "",
         clinicAddress:  tenant.settings?.clinicAddress || tenant.contact?.address || "",
+        timezone,
       },
     });
   } catch (err) {
@@ -81,6 +85,7 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res) => {
       clinicPhone:    tenant?.settings?.clinicPhone || tenant?.contact?.phone || "",
       clinicAddress:  tenant?.settings?.clinicAddress || tenant?.contact?.address || "",
       clinicCity:     tenant?.contact?.city || "",
+      timezone:       tenant?.settings?.timezone || "Asia/Kolkata",
       aiScribeEnabled:  user.aiScribeEnabled ?? false,
       aiScribeProvider: user.aiScribeProvider ?? "deepgram",
       aiScribeApiKey:   user.aiScribeApiKey ?? "",
@@ -130,6 +135,7 @@ router.get("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => 
       clinicCity:    tenant.contact?.city || "",
       gstNo:         (tenant.settings as any)?.gstNo || "",
       invoicePrefix: (tenant.settings as any)?.invoicePrefix || "BILL",
+      timezone:      tenant.settings?.timezone || "Asia/Kolkata",
       taxConfig:     (tenant.settings as any)?.taxConfig || { cgstRate: 0, sgstRate: 0, igstRate: 0, taxInclusivePricing: false },
     });
   } catch {
@@ -141,7 +147,7 @@ router.get("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => 
 router.put("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => {
   try {
     if (req.user!.role !== "admin") return res.status(403).json({ error: "Admins only" });
-    const { name, logoUrl, clinicPhone, clinicAddress, gstNo, invoicePrefix, taxConfig } = req.body;
+    const { name, logoUrl, clinicPhone, clinicAddress, gstNo, invoicePrefix, timezone, taxConfig } = req.body;
     const update: any = {};
     if (name !== undefined)          update["name"] = name;
     if (logoUrl !== undefined)       update["settings.logoUrl"] = logoUrl;
@@ -149,6 +155,7 @@ router.put("/clinic-settings", authMiddleware, async (req: AuthRequest, res) => 
     if (clinicAddress !== undefined) update["settings.clinicAddress"] = clinicAddress;
     if (gstNo !== undefined)         update["settings.gstNo"] = gstNo;
     if (invoicePrefix !== undefined) update["settings.invoicePrefix"] = invoicePrefix;
+    if (timezone !== undefined)      update["settings.timezone"] = timezone;
     if (taxConfig !== undefined) {
       if (taxConfig.cgstRate !== undefined)            update["settings.taxConfig.cgstRate"] = taxConfig.cgstRate;
       if (taxConfig.sgstRate !== undefined)            update["settings.taxConfig.sgstRate"] = taxConfig.sgstRate;

@@ -1,7 +1,9 @@
 import { Router } from "express";
+import mongoose from "mongoose";
 import BillingRecord from "../models/BillingRecord.js";
 import DrugInventory from "../models/DrugInventory.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
+import { startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { getNextId } from "../lib/counter.js";
 import { fefoDeduct, syncDrugStock } from "../lib/fefo.js";
 
@@ -406,15 +408,12 @@ router.get("/report/by-staff", requireRole("admin", "finance"), async (req: Auth
     const tenantId = req.user!.tenantId;
     const { from, to } = req.query as Record<string, string>;
 
+    const tz = req.user!.timezone;
     const dateFilter: any = {};
-    if (from) dateFilter.$gte = new Date(from);
-    if (to) {
-      const toDate = new Date(to);
-      toDate.setHours(23, 59, 59, 999);
-      dateFilter.$lte = toDate;
-    }
+    if (from) dateFilter.$gte = startOfDayUtc(from, tz);
+    if (to)   dateFilter.$lte = endOfDayUtc(to, tz);
 
-    const matchStage: any = { tenantId };
+    const matchStage: any = { tenantId: new mongoose.Types.ObjectId(tenantId) };
     if (from || to) matchStage.createdAt = dateFilter;
 
     const [byCreator, byReceiver] = await Promise.all([

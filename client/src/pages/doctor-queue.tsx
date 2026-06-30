@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { appointments as apptApi, patients as patientsApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import {
   User, Clock, CheckCircle2, Phone, Hash, ChevronRight,
   Stethoscope, AlertCircle, RefreshCw, Loader2, CalendarDays,
@@ -118,7 +119,7 @@ function PatientDetailPanel({ patientId }: { patientId: string }) {
 export default function DoctorQueuePage() {
   const { user } = useAuth();
   const qc = useQueryClient();
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);

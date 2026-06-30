@@ -35,6 +35,9 @@ async function nextUHID(tenantId: string): Promise<string> {
   return `UHID-${String(counter!.seq).padStart(3, "0")}`;
 }
 
+// Prevents regex special chars in search input from being interpreted as regex operators
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // GET /api/patients
 router.get("/", requireRole("admin", "doctor", "nurse", "receptionist", "pharmacist", "lab_tech"), async (req: AuthRequest, res) => {
   try {
@@ -42,7 +45,18 @@ router.get("/", requireRole("admin", "doctor", "nurse", "receptionist", "pharmac
     const query: any = { tenantId: req.user!.tenantId, isActive: true };
     if (status) query.status = status;
     if (riskLevel) query.riskLevel = riskLevel;
-    if (search) query.$or = [{ name: { $regex: search, $options: "i" } }, { uhid: { $regex: search, $options: "i" } }];
+    if (search) {
+      const escaped = escapeRegex(search);
+      if (/^\d+$/.test(search)) {
+        // All digits → phone prefix search (avoids text-index conflict in $or)
+        query.phone = { $regex: `${escaped}`, $options: "i" };
+      } else {
+        query.$or = [
+          { name: { $regex: escaped, $options: "i" } },
+          { uhid: { $regex: escaped, $options: "i" } },
+        ];
+      }
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [patients, total] = await Promise.all([

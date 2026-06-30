@@ -26,6 +26,7 @@ export interface ITenant extends Document {
     clinicAddress: string;
     gstNo?: string;
     invoicePrefix?: string;
+    timezone?: string;
     taxConfig?: {
       cgstRate: number;
       sgstRate: number;
@@ -66,6 +67,7 @@ const TenantSchema = new Schema<ITenant>(
       clinicAddress: { type: String, default: "" },
       gstNo:         { type: String, default: "" },
       invoicePrefix: { type: String, default: "BILL" },
+      timezone:      { type: String, default: "Asia/Kolkata" },
       taxConfig: {
         cgstRate:            { type: Number, default: 0 },
         sgstRate:            { type: Number, default: 0 },

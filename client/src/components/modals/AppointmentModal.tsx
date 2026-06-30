@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { appointments as apptApi, users as usersApi, patients as patientsApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Clock, AlertCircle, Search, Loader2 } from "lucide-react";
 
@@ -58,8 +60,9 @@ function Sel({ value, onChange, opts, disabled }: {
 
 export default function AppointmentModal({ open, onClose, existing }: Props) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const isEdit = !!existing;
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const [form, setForm] = useState({
     patientId:    existing?.patientId    ?? "",

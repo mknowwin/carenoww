@@ -15,6 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
 import ModalErrorBoundary from "@/components/ModalErrorBoundary";
+import { useAuth } from "@/contexts/AuthContext";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
@@ -34,6 +35,8 @@ const TYPE_TABS = ["All", "OPD", "IPD", "Emergency", "Lab", "Pharmacy"];
 // ── component ──────────────────────────────────────────────────────────────────
 export default function BillingPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "finance";
 
   const [search,      setSearch]      = useState("");
   const [typeFilter,  setTypeFilter]  = useState("All");
@@ -149,6 +152,11 @@ export default function BillingPage() {
             {ALL_BILLS.filter((b) => b.status === "Partial").length} partial ·&nbsp;
             {ALL_BILLS.length} total bills
           </p>
+          {!isAdmin && (
+            <p className="text-xs text-teal-600 mt-0.5">
+              Showing bills created by <strong>{user?.name}</strong>
+            </p>
+          )}
         </div>
         <div className="flex gap-2 shrink-0 flex-wrap">
           <div className="flex items-center border rounded-lg p-0.5 bg-muted/40">
@@ -195,6 +203,32 @@ export default function BillingPage() {
           </Card>
         ))}
       </div>
+
+      {/* ── Today's Revenue ──────────────────────────────────────────────── */}
+      {view === "list" && (
+        <Card className="bg-teal-50 border-teal-100">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide">Today's Revenue</p>
+                <p className="text-2xl font-bold text-teal-800">
+                  {formatCurrency(ALL_BILLS.filter((b) => new Date(b.createdAt).toDateString() === new Date().toDateString()).reduce((a, b) => a + (b.paid || 0), 0))}
+                </p>
+              </div>
+              <div className="flex gap-6 text-sm">
+                {["Paid","Partial","Pending"].map((s) => (
+                  <div key={s} className="text-center">
+                    <p className={`text-xl font-bold ${s === "Paid" ? "text-green-600" : s === "Partial" ? "text-amber-600" : "text-red-600"}`}>
+                      {ALL_BILLS.filter((b) => b.status === s).length}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{s}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Revenue collection bar ────────────────────────────────────────── */}
       <Card>
@@ -576,31 +610,6 @@ export default function BillingPage() {
         })}
       </div>}
 
-      {/* ── Daily summary footer ─────────────────────────────────────────── */}
-      {view === "list" && ALL_BILLS.length > 0 && (
-        <Card className="bg-teal-50 border-teal-100">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide">Today's Revenue</p>
-                <p className="text-2xl font-bold text-teal-800">
-                  {formatCurrency(ALL_BILLS.filter((b) => new Date(b.createdAt).toDateString() === new Date().toDateString()).reduce((a, b) => a + (b.paid || 0), 0))}
-                </p>
-              </div>
-              <div className="flex gap-6 text-sm">
-                {["Paid","Partial","Pending"].map((s) => (
-                  <div key={s} className="text-center">
-                    <p className={`text-xl font-bold ${s === "Paid" ? "text-green-600" : s === "Partial" ? "text-amber-600" : "text-red-600"}`}>
-                      {ALL_BILLS.filter((b) => b.status === s).length}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{s}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       <ModalErrorBoundary>
         <BillingModal
