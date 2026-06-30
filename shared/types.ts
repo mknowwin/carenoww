@@ -13,6 +13,7 @@ export interface User {
   role: UserRole;
   department?: string;
   organization: string;
+  timezone: string;
 }
 
 export interface AuthResponse {

@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { ipd as ipdApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import AdmitModal from "@/components/modals/AdmitModal";
 import DischargeModal from "@/components/modals/DischargeModal";
 import NursingRoundModal from "@/components/modals/NursingRoundModal";
@@ -32,6 +34,7 @@ function daysSince(date: string | Date) {
 
 export default function IPDPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [admitOpen,        setAdmitOpen]        = useState(false);
   const [dischargeTarget,  setDischargeTarget]  = useState<any>(null);
   const [roundTarget,      setRoundTarget]      = useState<any>(null);
@@ -59,7 +62,7 @@ export default function IPDPage() {
 
   const admissions: any[] = ipdData?.admissions ?? [];
   const discharged: any[] = dischargedData?.admissions ?? [];
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const wards = ["All", ...Array.from(new Set<string>(admissions.map((a: any) => String(a.ward))))];
 
@@ -74,8 +77,10 @@ export default function IPDPage() {
 
   const icu   = admissions.filter((a: any) => a.ward === "ICU").length;
   const total = admissions.length;
+  const tz = user?.timezone ?? "Asia/Kolkata";
   const dischargedToday = discharged.filter((d: any) =>
-    d.dischargeDate && new Date(d.dischargeDate).toISOString().startsWith(todayStr)
+    d.dischargeDate &&
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(d.dischargeDate)) === todayStr
   ).length;
 
   return (

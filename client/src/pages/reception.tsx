@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { appointments as apptApi, users as usersApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import AppointmentModal from "@/components/modals/AppointmentModal";
 import {
   Search, CheckCircle2, Clock, UserCheck, Users, Stethoscope,
@@ -26,7 +28,8 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function ReceptionPage() {
   const qc = useQueryClient();
-  const today = new Date().toISOString().split("T")[0];
+  const { user } = useAuth();
+  const today = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const [search, setSearch]         = useState("");
   const [doctorFilter, setDoctorFilter] = useState("All");

@@ -15,6 +15,16 @@ export function formatCurrency(amount: number, currency = "INR"): string {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amount);
 }
 
+/** Returns "YYYY-MM-DD" in the given IANA timezone (uses Intl, no packages needed). */
+export function todayInTz(tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+}
+
+/** Returns "YYYY-MM" in the given IANA timezone. */
+export function currentMonthInTz(tz: string): string {
+  return todayInTz(tz).slice(0, 7);
+}
+
 export function formatDate(date: Date | string): string {
   return new Date(date).toLocaleDateString("en-IN", {
     day: "numeric", month: "short", year: "numeric",

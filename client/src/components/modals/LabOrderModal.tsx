@@ -7,6 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FlaskConical, Plus, X, ChevronDown, ChevronRight } from "lucide-react";
 import { lab as labApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import { LAB_TEST_MASTER, buildParameterTemplate } from "@/lib/labTestMaster";
 
 const COMMON_TESTS = Object.keys(LAB_TEST_MASTER);
@@ -32,7 +34,8 @@ interface Props {
 }
 
 export default function LabOrderModal({ open, onClose, onSaved, patientId, patientName, appointmentId, doctor }: Props) {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const { user } = useAuth();
+  const todayStr = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const [selected,   setSelected]   = useState<string[]>([]);
   const [params,     setParams]     = useState<LabParam[]>([]);

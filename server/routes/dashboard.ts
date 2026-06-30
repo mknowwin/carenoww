@@ -6,6 +6,7 @@ import IPDAdmission from "../models/IPDAdmission.js";
 import DrugInventory from "../models/DrugInventory.js";
 import LabOrder from "../models/LabOrder.js";
 import { authMiddleware, AuthRequest } from "../middleware/auth.js";
+import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 
 const WARD_CAPACITY: Record<string, number> = {
   "General Ward": 80,
@@ -23,7 +24,8 @@ router.use(authMiddleware);
 router.get("/metrics", async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
-    const today = new Date().toISOString().split("T")[0];
+    const tz = req.user!.timezone;
+    const today = todayInTz(tz);
 
     const [
       totalPatients,
@@ -43,11 +45,12 @@ router.get("/metrics", async (req: AuthRequest, res) => {
       Patient.countDocuments({ tenantId, riskLevel: "Critical", isActive: true }),
     ]);
 
-    const now2       = new Date();
-    const todayStart = new Date(now2.getFullYear(), now2.getMonth(), now2.getDate());
-    const todayEnd   = new Date(now2.getFullYear(), now2.getMonth(), now2.getDate() + 1);
-    const monthStart = new Date(now2.getFullYear(), now2.getMonth(), 1);
-    const monthEnd   = new Date(now2.getFullYear(), now2.getMonth() + 1, 1);
+    const todayStart = startOfDayUtc(today, tz);
+    const todayEnd   = endOfDayUtc(today, tz);
+    const [todayY, todayM] = today.split("-").map(Number);
+    const monthStart = startOfDayUtc(`${todayY}-${String(todayM).padStart(2, "0")}-01`, tz);
+    const nextMonth  = todayM === 12 ? `${todayY + 1}-01-01` : `${todayY}-${String(todayM + 1).padStart(2, "0")}-01`;
+    const monthEnd   = startOfDayUtc(nextMonth, tz);
 
     // Revenue aggregations — today and current month, both using bill `date` field
     const [todayRevAgg, monthRevAgg] = await Promise.all([
@@ -165,9 +168,10 @@ router.get("/ai-alerts", async (req: AuthRequest, res) => {
 router.get("/revenue-trend", async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
-    const now = new Date();
-    const yearStart = new Date(now.getFullYear(), 0, 1);
-    const yearEnd   = new Date(now.getFullYear() + 1, 0, 1);
+    const tz = req.user!.timezone;
+    const currentYear = todayInTz(tz).split("-")[0];
+    const yearStart = startOfDayUtc(`${currentYear}-01-01`, tz);
+    const yearEnd   = startOfDayUtc(`${Number(currentYear) + 1}-01-01`, tz);
 
     // Single aggregation grouped by bill date month + type (1 query instead of 4×months)
     // Uses `date` (business bill date) not `createdAt` (insert timestamp)
@@ -177,8 +181,9 @@ router.get("/revenue-trend", async (req: AuthRequest, res) => {
     ]);
 
     // Build month buckets Jan → current month
+    const currentMonthNum = Number(todayInTz(tz).split("-")[1]);
     const monthMap: Record<number, { opd: number; ipd: number; pharmacy: number; other: number }> = {};
-    for (let m = 1; m <= now.getMonth() + 1; m++) monthMap[m] = { opd: 0, ipd: 0, pharmacy: 0, other: 0 };
+    for (let m = 1; m <= currentMonthNum; m++) monthMap[m] = { opd: 0, ipd: 0, pharmacy: 0, other: 0 };
     for (const row of rawTrend) {
       const m = row._id.month as number;
       if (!monthMap[m]) continue;
@@ -189,7 +194,7 @@ router.get("/revenue-trend", async (req: AuthRequest, res) => {
     }
 
     const trend = Object.entries(monthMap).map(([m, v]) => {
-      const label = new Date(now.getFullYear(), Number(m) - 1, 1).toLocaleString("default", { month: "short" });
+      const label = new Date(Number(currentYear), Number(m) - 1, 1).toLocaleString("default", { month: "short" });
       return { month: label, opd: v.opd, ipd: v.ipd + v.other, pharmacy: v.pharmacy };
     });
 
@@ -202,7 +207,7 @@ router.get("/revenue-trend", async (req: AuthRequest, res) => {
 // GET /api/dashboard/dept-volume
 router.get("/dept-volume", async (req: AuthRequest, res) => {
   try {
-    const todayDate = new Date().toISOString().split("T")[0];
+    const todayDate = todayInTz(req.user!.timezone);
     const deptVolume = await Appointment.aggregate([
       { $match: { tenantId: req.user!.tenantId, date: todayDate } },
       { $group: { _id: "$department", patients: { $sum: 1 } } },
@@ -223,16 +228,17 @@ router.get("/referral-stats", async (req: AuthRequest, res) => {
     const { month } = req.query as Record<string, string>;
 
     // Parse ?month=YYYY-MM, default to current month
+    const tz = req.user!.timezone;
     let year: number, mon: number;
     if (month && /^\d{4}-\d{2}$/.test(month)) {
       [year, mon] = month.split("-").map(Number);
     } else {
-      const now = new Date();
-      year = now.getFullYear();
-      mon = now.getMonth() + 1;
+      [year, mon] = todayInTz(tz).split("-").map(Number);
     }
-    const startOfMonth = new Date(year, mon - 1, 1);
-    const startOfNextMonth = new Date(year, mon, 1);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const startOfMonth     = startOfDayUtc(`${year}-${pad(mon)}-01`, tz);
+    const nextMonthStr     = mon === 12 ? `${year + 1}-01-01` : `${year}-${pad(mon + 1)}-01`;
+    const startOfNextMonth = startOfDayUtc(nextMonthStr, tz);
 
     console.log(`Fetching referral stats for tenant ${tenantId}, month ${year}-${mon.toString().padStart(2, "0")}`);
     console.log(`Date range: ${startOfMonth.toISOString()} to ${startOfNextMonth.toISOString()}`);

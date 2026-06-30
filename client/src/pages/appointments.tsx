@@ -13,6 +13,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { appointments as apptApi, users as usersApi, dashboard as dashApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import AppointmentModal from "@/components/modals/AppointmentModal";
 
 const BLANK_VITALS = { bp: "", pulse: "", temp: "", spo2: "", weight: "", height: "" };
@@ -45,14 +46,15 @@ export default function AppointmentsPage() {
   const [vitalsForm, setVitalsForm] = useState(BLANK_VITALS);
   const [savingVitals, setSavingVitals] = useState(false);
 
-  const today = new Date().toISOString().split("T")[0];
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const tz = user?.timezone ?? "Asia/Kolkata";
+  const today = todayInTz(tz);
+  const currentMonth = todayInTz(tz).slice(0, 7);
   const [referralMonth, setReferralMonth] = useState(currentMonth);
 
   // Build last 6 months for the dropdown
+  const nowDate = new Date();
   const monthOptions = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(nowDate.getFullYear(), nowDate.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const label = d.toLocaleString("default", { month: "long", year: "numeric" });
     return { value, label };

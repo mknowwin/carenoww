@@ -715,6 +715,7 @@ function HospitalSection({ user }: { user: any }) {
   });
   const [gstNo,         setGstNo]         = useState("");
   const [invoicePrefix, setInvoicePrefix] = useState("BILL");
+  const [timezone,      setTimezone]      = useState("Asia/Kolkata");
   const [cgstRate,      setCgstRate]      = useState(0);
   const [sgstRate,      setSgstRate]      = useState(0);
   const [igstRate,      setIgstRate]      = useState(0);
@@ -730,6 +731,7 @@ function HospitalSection({ user }: { user: any }) {
       if (s.logoUrl       !== undefined) { setLogoUrl(s.logoUrl); setLogoPreview(s.logoUrl); }
       if (s.gstNo         !== undefined) setGstNo(s.gstNo);
       if (s.invoicePrefix !== undefined) setInvoicePrefix(s.invoicePrefix);
+      if (s.timezone      !== undefined) setTimezone(s.timezone);
       if (s.taxConfig) {
         setCgstRate(s.taxConfig.cgstRate ?? 0);
         setSgstRate(s.taxConfig.sgstRate ?? 0);
@@ -761,6 +763,7 @@ function HospitalSection({ user }: { user: any }) {
         clinicAddress: clinicAddress,
         gstNo:         gstNo,
         invoicePrefix: invoicePrefix,
+        timezone:      timezone,
         taxConfig: {
           cgstRate:            cgstRate,
           sgstRate:            sgstRate,
@@ -777,6 +780,7 @@ function HospitalSection({ user }: { user: any }) {
           u.clinicPhone     = clinicPhone;
           u.clinicAddress   = clinicAddress;
           u.invoiceStyle    = invoiceStyle;
+          u.timezone        = timezone;
           localStorage.setItem("carenoww_user", JSON.stringify(u));
         }
       } catch {}
@@ -905,6 +909,34 @@ function HospitalSection({ user }: { user: any }) {
                 className="h-9 font-mono text-xs"
               />
               <p className="text-xs text-muted-foreground">E.g. BILL-0001, INV-0001.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Clinic Timezone</Label>
+              <Select value={timezone} onValueChange={setTimezone}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Select timezone" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Asia/Kolkata">Asia/Kolkata (IST, UTC+5:30)</SelectItem>
+                  <SelectItem value="Asia/Dubai">Asia/Dubai (GST, UTC+4)</SelectItem>
+                  <SelectItem value="Asia/Singapore">Asia/Singapore (SGT, UTC+8)</SelectItem>
+                  <SelectItem value="Asia/Dhaka">Asia/Dhaka (BST, UTC+6)</SelectItem>
+                  <SelectItem value="Asia/Karachi">Asia/Karachi (PKT, UTC+5)</SelectItem>
+                  <SelectItem value="Asia/Colombo">Asia/Colombo (SLST, UTC+5:30)</SelectItem>
+                  <SelectItem value="Asia/Kathmandu">Asia/Kathmandu (NPT, UTC+5:45)</SelectItem>
+                  <SelectItem value="Asia/Riyadh">Asia/Riyadh (AST, UTC+3)</SelectItem>
+                  <SelectItem value="Europe/London">Europe/London (GMT/BST)</SelectItem>
+                  <SelectItem value="Europe/Paris">Europe/Paris (CET, UTC+1)</SelectItem>
+                  <SelectItem value="America/New_York">America/New_York (EST/EDT)</SelectItem>
+                  <SelectItem value="America/Chicago">America/Chicago (CST/CDT)</SelectItem>
+                  <SelectItem value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</SelectItem>
+                  <SelectItem value="America/Toronto">America/Toronto (EST/EDT)</SelectItem>
+                  <SelectItem value="Australia/Sydney">Australia/Sydney (AEST/AEDT)</SelectItem>
+                  <SelectItem value="Africa/Nairobi">Africa/Nairobi (EAT, UTC+3)</SelectItem>
+                  <SelectItem value="UTC">UTC</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">All dates and appointment queues are computed in this timezone.</p>
             </div>
           </div>
 

@@ -45,7 +45,7 @@ export const auth = {
   getClinicSettings: () => get<any>("/auth/clinic-settings"),
   updateClinicSettings: (data: {
     name?: string; logoUrl?: string; clinicPhone?: string; clinicAddress?: string;
-    gstNo?: string; invoicePrefix?: string;
+    gstNo?: string; invoicePrefix?: string; timezone?: string;
     taxConfig?: { cgstRate?: number; sgstRate?: number; igstRate?: number; taxInclusivePricing?: boolean };
   }) => put<any>("/auth/clinic-settings", data),
 };

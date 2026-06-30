@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lab as labApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import { printLabReport } from "@/lib/print";
 import { buildParameterTemplate } from "@/lib/labTestMaster";
 
@@ -82,7 +84,8 @@ interface CardProps {
 }
 
 function OrderCard({ order, onStatusChange, busy }: CardProps) {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const { user } = useAuth();
+  const todayStr = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   // Build initial parameters: use saved ones or generate fresh template
   const initialParams = (): LabParam[] => {

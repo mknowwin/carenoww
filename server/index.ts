@@ -16,6 +16,7 @@ import dashboardRouter from "./routes/dashboard.js";
 import usersRouter from "./routes/users.js";
 import Appointment from "./models/Appointment.js";
 import Tenant from "./models/Tenant.js";
+import { todayInTz } from "./lib/dateUtils.js";
 import reportsRouter from "./routes/reports.js";
 import ipdRouter from "./routes/ipd.js";
 import prescriptionsRouter from "./routes/prescriptions.js";
@@ -53,16 +54,19 @@ app.get("/api/public/display", publicLimiter, async (req, res) => {
   try {
     const { tenantId, slug } = req.query as Record<string, string>;
     let resolvedTenantId = tenantId;
+    let resolvedTenant: any = null;
 
     if (!resolvedTenantId && slug) {
-      const tenant = await (Tenant as any).findOne({ slug });
-      if (!tenant) return res.status(404).json({ error: "Clinic not found" });
-      resolvedTenantId = tenant._id.toString();
+      resolvedTenant = await (Tenant as any).findOne({ slug });
+      if (!resolvedTenant) return res.status(404).json({ error: "Clinic not found" });
+      resolvedTenantId = resolvedTenant._id.toString();
     }
 
     if (!resolvedTenantId) return res.status(400).json({ error: "tenantId or slug required" });
 
-    const today = new Date().toISOString().split("T")[0];
+    if (!resolvedTenant) resolvedTenant = await (Tenant as any).findById(resolvedTenantId);
+    const tz = resolvedTenant?.settings?.timezone || "Asia/Kolkata";
+    const today = todayInTz(tz);
 
     const [inConsult, waiting] = await Promise.all([
       Appointment.find({

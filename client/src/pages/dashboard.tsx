@@ -15,7 +15,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { dashboard as dashApi, appointments as apptApi, patients as patientsApi, billing as billingApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, todayInTz, currentMonthInTz } from "@/lib/utils";
 import { printReferralStats } from "@/lib/print";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,9 +36,10 @@ export default function DashboardPage() {
   const { data: deptData,     isLoading: deptLoading     } = useQuery({ queryKey: ["dashboard-dept"],     queryFn: dashApi.deptVolume, retry: false });
   const { data: bedData,      isLoading: bedLoading      } = useQuery({ queryKey: ["dashboard-beds"],     queryFn: dashApi.bedOccupancy, retry: false });
   const { data: alertsData                               } = useQuery({ queryKey: ["dashboard-alerts"],   queryFn: dashApi.aiAlerts, retry: false });
-  const { data: apptData,     isLoading: apptLoading     } = useQuery({ queryKey: ["appointments"],        queryFn: () => apptApi.list({ date: new Date().toISOString().split("T")[0] }), retry: false });
+  const tz = user?.timezone ?? "Asia/Kolkata";
+  const { data: apptData,     isLoading: apptLoading     } = useQuery({ queryKey: ["appointments"],        queryFn: () => apptApi.list({ date: todayInTz(tz) }), retry: false });
   const { data: highRiskData, isLoading: highRiskLoading } = useQuery({ queryKey: ["patients-highrisk"],   queryFn: () => patientsApi.list({ riskLevel: "Critical", limit: "10" }), retry: false });
-  const [referralMonth, setReferralMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [referralMonth, setReferralMonth] = useState(() => currentMonthInTz(tz));
   const { data: referralStats = [], isLoading: referralLoading } = useQuery({ queryKey: ["referral-stats", referralMonth], queryFn: () => dashApi.referralStats(referralMonth), retry: false });
   const { data: billsData, isLoading: billsLoading } = useQuery({ queryKey: ["billing"], queryFn: () => billingApi.list(), retry: false });
 
