@@ -10,7 +10,7 @@ import { DRUG_UNITS } from "@/lib/constants";
 import {
   Pill, Search, Plus, AlertTriangle, CheckCircle2,
   Clock, Package, RefreshCw, FileText, History, ShoppingCart, Wrench, Pencil,
-  BarChart3, Printer,
+  BarChart3, Printer, Upload,
 } from "lucide-react";
 import { printLowStockReport, printExpiryReport, printCurrentStockReport } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +20,7 @@ import GRNModal from "@/components/modals/GRNModal";
 import StockAdjustmentModal from "@/components/modals/StockAdjustmentModal";
 import DispenseCounterModal from "@/components/modals/DispenseCounterModal";
 import DrugEditModal from "@/components/modals/DrugEditModal";
+import BulkUploadInventoryModal from "@/components/modals/BulkUploadInventoryModal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -163,6 +164,7 @@ export default function PharmacyPage() {
   // Inventory tab
   const [invSearch, setInvSearch]   = useState("");
   const [showAddDrug, setShowAddDrug] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [adjustDrug, setAdjustDrug] = useState<DrugInventory | null>(null);
 
   // GRN tab
@@ -444,6 +446,9 @@ export default function PharmacyPage() {
             </div>
             <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => setShowGRN(true)}>
               <FileText className="h-4 w-4" /> Receive Stock
+            </Button>
+            <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => setShowBulkUpload(true)}>
+              <Upload className="h-4 w-4" /> Bulk Upload
             </Button>
             <Button size="sm" className="h-9 gap-1.5" onClick={() => setShowAddDrug(true)}>
               <Plus className="h-4 w-4" /> Add Drug
@@ -883,6 +888,7 @@ export default function PharmacyPage() {
       <StockAdjustmentModal open={!!adjustDrug} onClose={() => setAdjustDrug(null)} drug={adjustDrug} />
       <DispenseCounterModal open={showCounter} onClose={() => setShowCounter(false)} inventory={inventory} />
       <DrugEditModal open={!!editDrug} onClose={() => setEditDrug(null)} drug={editDrug} />
+      <BulkUploadInventoryModal open={showBulkUpload} onClose={() => setShowBulkUpload(false)} />
     </div>
   );
 }
