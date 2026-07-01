@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import BillingRecord from "../models/BillingRecord.js";
 import DrugInventory from "../models/DrugInventory.js";
 import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js";
+import Tenant from "../models/Tenant.js";
 import { startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { getNextId } from "../lib/counter.js";
 import { fefoDeduct, syncDrugStock } from "../lib/fefo.js";
@@ -29,7 +30,7 @@ function calcAmount(items: any[], discount: number, discountType: string, discou
 const FINANCIAL_FIELDS = new Set(["items", "amount", "discount", "discountType", "discountPercent"]);
 
 // ── GET /api/billing ──────────────────────────────────────────────────────────
-router.get("/", requireRole("admin", "finance", "receptionist"), async (req: AuthRequest, res) => {
+router.get("/", requireRole("admin", "finance", "receptionist", "pharmacist"), async (req: AuthRequest, res) => {
   try {
     const { status, patientId, type, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
@@ -53,7 +54,7 @@ router.get("/", requireRole("admin", "finance", "receptionist"), async (req: Aut
 });
 
 // ── GET /api/billing/:id ──────────────────────────────────────────────────────
-router.get("/:id", requireRole("admin", "finance", "receptionist"), async (req: AuthRequest, res) => {
+router.get("/:id", requireRole("admin", "finance", "receptionist", "pharmacist"), async (req: AuthRequest, res) => {
   try {
     const bill = await BillingRecord.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
     if (!bill) return res.status(404).json({ error: "Bill not found" });
@@ -64,7 +65,7 @@ router.get("/:id", requireRole("admin", "finance", "receptionist"), async (req: 
 });
 
 // ── POST /api/billing ─────────────────────────────────────────────────────────
-router.post("/", requireRole("admin", "receptionist", "nurse", "finance"), async (req: AuthRequest, res) => {
+router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist"), async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
     const {
@@ -94,7 +95,9 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance"), async
 
     const paidAmount = Number(paid);
     const balance    = finalAmount - paidAmount;
-    const billId     = await getNextId(tenantId, "bill", "BILL-");
+    const tenant     = await Tenant.findById(tenantId).select("settings.invoicePrefix").lean();
+    const invoicePrefix = ((tenant as any)?.settings?.invoicePrefix || "BILL").toString().trim();
+    const billId     = await getNextId(tenantId, "bill", `${invoicePrefix}-`);
 
     // Record initial payment entry if paid > 0
     const payments: any[] = [];
@@ -170,7 +173,7 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance"), async
 });
 
 // ── PUT /api/billing/:id — update items / discount / notes ───────────────────
-router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance"), async (req: AuthRequest, res) => {
+router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist"), async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
     const existing = await BillingRecord.findOne({ _id: req.params.id, tenantId });
@@ -223,7 +226,7 @@ router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance"), asy
 });
 
 // ── POST /api/billing/:id/payments — record a payment installment ─────────────
-router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse"), async (req: AuthRequest, res) => {
+router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse", "pharmacist"), async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
     const bill = await BillingRecord.findOne({ _id: req.params.id, tenantId });

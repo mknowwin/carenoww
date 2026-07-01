@@ -1,4 +1,5 @@
 import BillingRecord, { IBillItem } from "../models/BillingRecord.js";
+import Tenant from "../models/Tenant.js";
 import { getNextId } from "./counter.js";
 
 type BillType = "OPD" | "IPD" | "Emergency" | "Lab" | "Pharmacy";
@@ -63,7 +64,9 @@ export async function createOrAppendBill(params: AutoBillParams): Promise<typeof
   }
 
   // Create a new bill
-  const billId = await getNextId(tenantId, "bill", "BILL-");
+  const tenant = await Tenant.findById(tenantId).select("settings.invoicePrefix").lean();
+  const invoicePrefix = ((tenant as any)?.settings?.invoicePrefix || "BILL").toString().trim();
+  const billId = await getNextId(tenantId, "bill", `${invoicePrefix}-`);
   const bill = await BillingRecord.create({
     tenantId,
     billId,
