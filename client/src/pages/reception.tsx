@@ -56,8 +56,13 @@ export default function ReceptionPage() {
   const allAppointments = apiData?.appointments ?? [];
   const doctorList: string[] = ["All", ...Array.from(new Set<string>(allAppointments.map((a: any) => String(a.doctor))))];
 
+  const searchTrimmed = search.trim();
+  const effectiveSearch = searchTrimmed && /^\d+$/.test(searchTrimmed) && searchTrimmed.length <= 6
+    ? `UHID-${searchTrimmed.padStart(3, "0")}`
+    : search;
+
   const filtered = allAppointments.filter((a: any) => {
-    const q = search.toLowerCase();
+    const q = effectiveSearch.toLowerCase();
     const matchSearch = !q
       || a.patientName?.toLowerCase().includes(q)
       || a.patientId?.toLowerCase().includes(q)

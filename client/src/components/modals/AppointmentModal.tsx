@@ -65,7 +65,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   const today = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const [form, setForm] = useState({
-    patientId:    existing?.patientId    ?? "",
+    patientId:    (existing?.patientId ?? "").replace(/^UHID-/, ""),
     patientName:  existing?.patientName  ?? "",
     patientAge:   existing?.patientAge   ?? "",
     patientGender:existing?.patientGender?? "",
@@ -84,10 +84,20 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   const [patientSearch, setPatientSearch] = useState("");
   const [patientResults, setPatientResults] = useState<any[]>([]);
   const [searchingPatient, setSearchingPatient] = useState(false);
+  const [patientSelected, setPatientSelected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Numeric portion typed by the user → full UHID for API / submission.
+  const effectivePatientId = form.patientId ? `UHID-${form.patientId.padStart(3, "0")}` : "";
+
+  // Short digit strings (≤6) are treated as UHID; longer strings are phone numbers.
+  const trimmedSearch = patientSearch.trim();
+  const effectivePatientSearch = trimmedSearch && /^\d+$/.test(trimmedSearch) && trimmedSearch.length <= 6
+    ? `UHID-${trimmedSearch.padStart(3, "0")}`
+    : patientSearch;
 
   // Load doctors when department or date changes
   const { data: doctorData, isFetching: loadingDoctors } = useQuery({
@@ -123,7 +133,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
     const timer = setTimeout(async () => {
       setSearchingPatient(true);
       try {
-        const res = await patientsApi.list({ search: patientSearch, limit: "5" });
+        const res = await patientsApi.list({ search: effectivePatientSearch, limit: "5" });
         setPatientResults(res?.patients ?? []);
       } catch {
         setPatientResults([]);
@@ -137,12 +147,20 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   const selectPatient = (p: any) => {
     setForm((f) => ({
       ...f,
-      patientId:    p.uhid || p._id,
+      patientId:    (p.uhid || p._id || "").replace(/^UHID-/, ""),
       patientName:  p.name,
       patientAge:   String(p.age ?? ""),
       patientGender:p.gender ?? "",
       patientPhone: p.phone ?? "",
     }));
+    setPatientSearch("");
+    setPatientResults([]);
+    setPatientSelected(true);
+  };
+
+  const clearPatient = () => {
+    setForm((f) => ({ ...f, patientId: "", patientName: "", patientAge: "", patientGender: "", patientPhone: "" }));
+    setPatientSelected(false);
     setPatientSearch("");
     setPatientResults([]);
   };
@@ -159,10 +177,11 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
 
     setLoading(true); setError("");
     try {
+      const payload = { ...form, patientId: effectivePatientId };
       if (isEdit) {
-        await apptApi.update(existing._id || existing.id, form);
+        await apptApi.update(existing._id || existing.id, payload);
       } else {
-        await apptApi.create(form);
+        await apptApi.create(payload);
       }
       qc.invalidateQueries({ queryKey: ["appointments"] });
       qc.invalidateQueries({ queryKey: ["queue"] });
@@ -176,7 +195,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { setPatientSelected(false); onClose(); } }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit Appointment" : "Book Appointment"}</DialogTitle>
@@ -187,62 +206,86 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
           {!isEdit && (
             <div className="bg-muted/40 rounded-xl p-3 space-y-2">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Patient</p>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="pl-8 h-8 text-sm"
-                  placeholder="Search by name, UHID or phone..."
-                  value={patientSearch}
-                  onChange={(e) => setPatientSearch(e.target.value)}
-                />
-                {searchingPatient && <Loader2 className="absolute right-2.5 top-2 h-4 w-4 animate-spin text-muted-foreground" />}
-              </div>
-              {patientResults.length > 0 && (
-                <div className="border rounded-lg divide-y bg-background shadow-sm">
-                  {patientResults.map((p) => (
-                    <button
-                      key={p._id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors"
-                      onClick={() => selectPatient(p)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{p.name}</span>
-                        <span className="text-xs text-muted-foreground font-mono">{p.uhid}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {p.age}y · {p.gender} · {p.phone}
-                      </div>
-                    </button>
-                  ))}
+
+              {patientSelected ? (
+                <div className="flex items-center justify-between bg-teal-50 border border-teal-200 rounded-lg px-3 py-2">
+                  <div>
+                    <p className="text-sm font-semibold">{form.patientName}</p>
+                    <p className="text-xs text-muted-foreground font-mono">
+                      UHID-{form.patientId.padStart(3, "0")}{form.patientPhone ? ` · ${form.patientPhone}` : ""}
+                    </p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={clearPatient}>Change</Button>
                 </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      className="pl-8 h-8 text-sm"
+                      placeholder="Search by name, UHID or phone..."
+                      value={patientSearch}
+                      onChange={(e) => setPatientSearch(e.target.value)}
+                    />
+                    {searchingPatient && <Loader2 className="absolute right-2.5 top-2 h-4 w-4 animate-spin text-muted-foreground" />}
+                  </div>
+                  {patientResults.length > 0 && (
+                    <div className="border rounded-lg divide-y bg-background shadow-sm">
+                      {patientResults.map((p) => (
+                        <button
+                          key={p._id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors"
+                          onClick={() => selectPatient(p)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">{p.name}</span>
+                            <span className="text-xs text-muted-foreground font-mono">{p.uhid}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {p.age}y · {p.gender} · {p.phone}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <F label="Patient UHID *">
+                      <div className="relative flex items-center h-8 border rounded-md overflow-hidden focus-within:ring-1 focus-within:ring-ring">
+                        <span className="px-2 text-xs text-muted-foreground bg-muted border-r h-full flex items-center select-none shrink-0">UHID-</span>
+                        <Input className="border-0 h-full text-sm focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none" value={form.patientId} placeholder="001" inputMode="numeric" required onChange={(e) => set("patientId", e.target.value.replace(/\D/g, ""))} />
+                      </div>
+                    </F>
+                    <F label="Patient Name *">
+                      <SI value={form.patientName} onChange={(v) => set("patientName", v)} placeholder="Full name" required />
+                    </F>
+                    <F label="Age">
+                      <SI value={String(form.patientAge)} onChange={(v) => set("patientAge", v)} placeholder="30" type="number" />
+                    </F>
+                    <F label="Gender">
+                      <Sel value={form.patientGender} onChange={(v) => set("patientGender", v)} opts={["", "M", "F", "O"]} />
+                    </F>
+                    <F label="Phone">
+                      <SI value={form.patientPhone} onChange={(v) => set("patientPhone", v)} placeholder="9876543210" />
+                    </F>
+                  </div>
+                </>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <F label="Patient UHID *">
-                  <SI value={form.patientId} onChange={(v) => set("patientId", v)} placeholder="UHID-001" required />
-                </F>
-                <F label="Patient Name *">
-                  <SI value={form.patientName} onChange={(v) => set("patientName", v)} placeholder="Full name" required />
-                </F>
-                <F label="Age">
-                  <SI value={String(form.patientAge)} onChange={(v) => set("patientAge", v)} placeholder="30" type="number" />
-                </F>
-                <F label="Gender">
-                  <Sel value={form.patientGender} onChange={(v) => set("patientGender", v)} opts={["", "M", "F", "O"]} />
-                </F>
-                <F label="Phone">
-                  <SI value={form.patientPhone} onChange={(v) => set("patientPhone", v)} placeholder="9876543210" />
-                </F>
-                <F label="Visit Type">
-                  <Sel value={form.type} onChange={(v) => set("type", v)} opts={["New","Follow-up","Emergency","Teleconsult","Home Visit"]} />
-                </F>
-              </div>
+
+              <F label="Visit Type">
+                <Sel value={form.type} onChange={(v) => set("type", v)} opts={["New","Follow-up","Emergency","Teleconsult","Home Visit"]} />
+              </F>
             </div>
           )}
 
           {isEdit && (
             <div className="grid grid-cols-2 gap-3">
-              <F label="Patient UHID"><SI value={form.patientId} onChange={(v) => set("patientId", v)} placeholder="UHID-001" /></F>
+              <F label="Patient UHID">
+                <div className="relative flex items-center h-8 border rounded-md overflow-hidden focus-within:ring-1 focus-within:ring-ring">
+                  <span className="px-2 text-xs text-muted-foreground bg-muted border-r h-full flex items-center select-none shrink-0">UHID-</span>
+                  <Input className="border-0 h-full text-sm focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none" value={form.patientId} placeholder="001" inputMode="numeric" onChange={(e) => set("patientId", e.target.value.replace(/\D/g, ""))} />
+                </div>
+              </F>
               <F label="Patient Name *"><SI value={form.patientName} onChange={(v) => set("patientName", v)} placeholder="Full name" required /></F>
               <F label="Type"><Sel value={form.type} onChange={(v) => set("type", v)} opts={["New","Follow-up","Emergency","Teleconsult","Home Visit"]} /></F>
               <F label="Status"><Sel value={form.status} onChange={(v) => set("status", v)} opts={["Scheduled","Confirmed","Waiting","In Consult","Completed","Cancelled"]} /></F>
