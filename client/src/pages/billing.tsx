@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,14 @@ export default function BillingPage() {
   const [view,          setView]         = useState<"list" | "staff">("list");
   const [staffDateFrom, setStaffDateFrom] = useState("");
   const [staffDateTo,   setStaffDateTo]   = useState("");
+  const [expandedStaff, setExpandedStaff] = useState<Set<string>>(new Set());
+
+  const toggleStaffExpand = (name: string) =>
+    setExpandedStaff(prev => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
 
   const { data: staffReport = [], isLoading: staffLoading } = useQuery({
     queryKey: ["billing-by-staff", staffDateFrom, staffDateTo],
@@ -313,22 +321,57 @@ export default function BillingPage() {
                     <thead>
                       <tr className="border-b bg-muted/40">
                         {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received", ""].map((h, i) => (
-                          <th key={i} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : i === 7 ? "text-right" : "text-right"}`}>{h}</th>
+                          <th key={i} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : "text-right"}`}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {staffReport.map((row: any, idx: number) => (
-                        <tr key={row.staffName} className="border-b last:border-b-0 hover:bg-muted/20">
-                          <td className="py-3 px-4 text-muted-foreground">{idx + 1}</td>
-                          <td className="py-3 px-4 font-medium">{row.staffName}</td>
-                          <td className="py-3 px-4 text-right">{row.billsCreated}</td>
-                          <td className="py-3 px-4 text-right font-medium">{formatCurrency(row.totalBilled)}</td>
-                          <td className="py-3 px-4 text-right text-green-600 font-medium">{formatCurrency(row.totalPaid)}</td>
-                          <td className="py-3 px-4 text-right">{row.paymentsCount}</td>
-                          <td className="py-3 px-4 text-right text-teal-600 font-medium">{formatCurrency(row.totalReceived)}</td>
-                        </tr>
-                      ))}
+                      {staffReport.map((row: any, idx: number) => {
+                        const breakdown: Record<string, number> = row.paymentBreakdown || {};
+                        const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
+                          .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
+                          .filter(p => p.amount > 0);
+                        const isExpanded = expandedStaff.has(row.staffName);
+                        return (
+                          <Fragment key={row.staffName}>
+                            <tr className="border-b hover:bg-muted/20">
+                              <td className="py-3 px-4 text-muted-foreground">{idx + 1}</td>
+                              <td className="py-3 px-4 font-medium">{row.staffName}</td>
+                              <td className="py-3 px-4 text-right">{row.billsCreated}</td>
+                              <td className="py-3 px-4 text-right font-medium">{formatCurrency(row.totalBilled)}</td>
+                              <td className="py-3 px-4 text-right text-green-600 font-medium">{formatCurrency(row.totalPaid)}</td>
+                              <td className="py-3 px-4 text-right">{row.paymentsCount}</td>
+                              <td className="py-3 px-4 text-right text-teal-600 font-medium">{formatCurrency(row.totalReceived)}</td>
+                              <td className="py-3 px-4 text-right">
+                                {activeModePairs.length > 0 && (
+                                  <button
+                                    onClick={() => toggleStaffExpand(row.staffName)}
+                                    className="p-1 rounded hover:bg-muted text-muted-foreground"
+                                    title={isExpanded ? "Hide breakdown" : "Show payment breakdown"}
+                                  >
+                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            {isExpanded && activeModePairs.length > 0 && (
+                              <tr className="bg-muted/10 border-b">
+                                <td />
+                                <td colSpan={7} className="py-2 px-4 pb-3">
+                                  <div className="flex flex-wrap gap-x-5 gap-y-1 pl-2 border-l-2 border-muted-foreground/20">
+                                    {activeModePairs.map(({ mode, amount }) => (
+                                      <div key={mode} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <span className="font-medium text-foreground">{mode}</span>
+                                        <span className="text-teal-600 font-semibold">{formatCurrency(amount)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
                       <tr className="border-t bg-muted/40 font-semibold">
                         <td className="py-3 px-4" colSpan={2}>Total</td>
                         <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.billsCreated  || 0), 0)}</td>
@@ -336,6 +379,7 @@ export default function BillingPage() {
                         <td className="py-3 px-4 text-right text-green-600">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0))}</td>
                         <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.paymentsCount || 0), 0)}</td>
                         <td className="py-3 px-4 text-right text-teal-600">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0))}</td>
+                        <td />
                       </tr>
                     </tbody>
                   </table>
