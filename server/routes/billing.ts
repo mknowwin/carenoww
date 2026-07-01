@@ -419,7 +419,10 @@ router.get("/report/by-staff", requireRole("admin", "finance"), async (req: Auth
     const matchStage: any = { tenantId: new mongoose.Types.ObjectId(tenantId) };
     if (from || to) matchStage.createdAt = dateFilter;
 
-    const [byCreator, byReceiver] = await Promise.all([
+    const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
+    const emptyBreakdown = () => Object.fromEntries(PAYMENT_MODES.map(m => [m, 0]));
+
+    const [byCreator, byReceiver, byReceiverMode] = await Promise.all([
       BillingRecord.aggregate([
         { $match: matchStage },
         { $group: {
@@ -440,6 +443,15 @@ router.get("/report/by-staff", requireRole("admin", "finance"), async (req: Auth
           },
         },
       ]),
+      BillingRecord.aggregate([
+        { $match: matchStage },
+        { $unwind: "$payments" },
+        { $group: {
+            _id: { receivedBy: "$payments.receivedBy", paymentMode: "$payments.paymentMode" },
+            amount: { $sum: "$payments.amount" },
+          },
+        },
+      ]),
     ]);
 
     const staffMap = new Map<string, any>();
@@ -447,12 +459,13 @@ router.get("/report/by-staff", requireRole("admin", "finance"), async (req: Auth
     for (const row of byCreator) {
       if (!row._id) continue;
       staffMap.set(row._id, {
-        staffName:     row._id,
-        billsCreated:  row.billsCreated,
-        totalBilled:   row.totalBilled,
-        totalPaid:     row.totalPaid,
-        paymentsCount: 0,
-        totalReceived: 0,
+        staffName:        row._id,
+        billsCreated:     row.billsCreated,
+        totalBilled:      row.totalBilled,
+        totalPaid:        row.totalPaid,
+        paymentsCount:    0,
+        totalReceived:    0,
+        paymentBreakdown: emptyBreakdown(),
       });
     }
 
@@ -464,13 +477,34 @@ router.get("/report/by-staff", requireRole("admin", "finance"), async (req: Auth
         entry.totalReceived = row.totalReceived;
       } else {
         staffMap.set(row._id, {
-          staffName:     row._id,
-          billsCreated:  0,
-          totalBilled:   0,
-          totalPaid:     0,
-          paymentsCount: row.paymentsCount,
-          totalReceived: row.totalReceived,
+          staffName:        row._id,
+          billsCreated:     0,
+          totalBilled:      0,
+          totalPaid:        0,
+          paymentsCount:    row.paymentsCount,
+          totalReceived:    row.totalReceived,
+          paymentBreakdown: emptyBreakdown(),
         });
+      }
+    }
+
+    for (const row of byReceiverMode) {
+      const { receivedBy, paymentMode } = row._id;
+      if (!receivedBy || !paymentMode) continue;
+      if (!staffMap.has(receivedBy)) {
+        staffMap.set(receivedBy, {
+          staffName:        receivedBy,
+          billsCreated:     0,
+          totalBilled:      0,
+          totalPaid:        0,
+          paymentsCount:    0,
+          totalReceived:    0,
+          paymentBreakdown: emptyBreakdown(),
+        });
+      }
+      const entry = staffMap.get(receivedBy);
+      if (paymentMode in entry.paymentBreakdown) {
+        entry.paymentBreakdown[paymentMode] += row.amount;
       }
     }
 

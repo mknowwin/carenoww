@@ -55,10 +55,17 @@ export default function PatientsPage() {
     }
   };
 
+  // Short digit strings (≤6 chars) are treated as UHID numbers and auto-prefixed.
+  // Longer digit strings (7+) are phone numbers and passed through unchanged.
+  const trimmed = search.trim();
+  const effectiveSearch = trimmed && /^\d+$/.test(trimmed) && trimmed.length <= 6
+    ? `UHID-${trimmed.padStart(3, "0")}`
+    : search;
+
   const { data: apiData } = useQuery({
-    queryKey: ["patients", search, statusFilter, riskFilter],
+    queryKey: ["patients", effectiveSearch, statusFilter, riskFilter],
     queryFn: () => patientsApi.list({
-      ...(search ? { search } : {}),
+      ...(effectiveSearch ? { search: effectiveSearch } : {}),
       ...(statusFilter !== "All" ? { status: statusFilter } : {}),
       ...(riskFilter !== "All" ? { riskLevel: riskFilter } : {}),
     }),
@@ -70,8 +77,8 @@ export default function PatientsPage() {
   const PATIENTS = rawPatients.map((p: any) => ({ ...p, id: p.uhid || p._id || p.id }));
 
   const filtered = PATIENTS.filter((p: any) => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.id || "").includes(q) || (p.diagnosis || "").toLowerCase().includes(q) || (p.phone || "").startsWith(q);
+    const q = effectiveSearch.toLowerCase();
+    const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.id || "").toLowerCase().includes(q) || (p.diagnosis || "").toLowerCase().includes(q) || (p.phone || "").startsWith(effectiveSearch);
     const matchStatus = statusFilter === "All" || p.status === statusFilter;
     const matchRisk = riskFilter === "All" || p.riskLevel === riskFilter;
     return matchSearch && matchStatus && matchRisk;
@@ -113,7 +120,7 @@ export default function PatientsPage() {
         <div className="relative flex-1 min-w-48 max-w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search name, UHID, phone, diagnosis..."
+            placeholder="Search name, UHID, phone, diagnosis... (type digits for UHID)"
             className="pl-9 h-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

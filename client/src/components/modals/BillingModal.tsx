@@ -125,7 +125,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   // ── reset / populate on open ──────────────────────────────────────────────
   useEffect(() => {
     if (!open) { setError(""); setSavedBill(null); return; }
-    setPatientId(existing?.patientId   ?? prefill?.patientId   ?? "");
+    // Store only the numeric portion; strip "UHID-" prefix from existing/prefill values.
+    const rawId = existing?.patientId ?? prefill?.patientId ?? "";
+    setPatientId(rawId.replace(/^UHID-/, ""));
     setPatientName(existing?.patientName ?? prefill?.patientName ?? "");
     setType(existing?.type ?? prefill?.type ?? "OPD");
     setDoctorName(existing?.doctor ?? prefill?.doctor ?? "__none__");
@@ -145,15 +147,17 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setSavedBill(null); setError(""); setUhidStatus("idle");
   }, [open]);
 
+  // patientId holds only the numeric portion typed by the user; UHID- prefix is added here.
+  const effectiveUhid = patientId ? `UHID-${patientId.padStart(3, "0")}` : "";
+
   // ── UHID → auto-fill patient name ─────────────────────────────────────────
   useEffect(() => {
-    const uid = patientId.trim();
-    if (!uid || isEdit) { setUhidStatus("idle"); return; }
+    if (!effectiveUhid || isEdit) { setUhidStatus("idle"); return; }
     setUhidStatus("loading");
     const timer = setTimeout(async () => {
       try {
-        const res = await patientsApi.list({ search: uid });
-        const match = (res.patients ?? []).find((p: any) => p.uhid === uid);
+        const res = await patientsApi.list({ search: effectiveUhid });
+        const match = (res.patients ?? []).find((p: any) => p.uhid === effectiveUhid);
         if (match) {
           setPatientName(match.name);
           setUhidStatus("found");
@@ -165,7 +169,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [patientId]);
+  }, [effectiveUhid]);
 
   // ── doctor → auto-fill consulting fee ─────────────────────────────────────
   const handleDoctorChange = (name: string) => {
@@ -230,7 +234,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         });
       } else {
         const payload: any = {
-          patientId, patientName, type,
+          patientId: effectiveUhid, patientName, type,
           doctor: (doctorName && doctorName !== "__none__") ? doctorName : undefined,
           items:  items.map((it) => ({ ...it, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) })),
           amount: totalAmount,
@@ -311,8 +315,15 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
               {!payOnly && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <F label="Patient UHID">
-                    <div className="relative">
-                      <Input className="h-8 text-sm pr-7" value={patientId} placeholder="UHID-001" onChange={(e) => { setPatientId(e.target.value); setUhidStatus("idle"); }} />
+                    <div className="relative flex items-center h-8 border rounded-md overflow-hidden focus-within:ring-1 focus-within:ring-ring">
+                      <span className="px-2 text-xs text-muted-foreground bg-muted border-r h-full flex items-center select-none shrink-0">UHID-</span>
+                      <Input
+                        className="border-0 h-full text-sm pr-7 focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none"
+                        value={patientId}
+                        placeholder="001"
+                        inputMode="numeric"
+                        onChange={(e) => { setPatientId(e.target.value.replace(/\D/g, "")); setUhidStatus("idle"); }}
+                      />
                       {uhidStatus === "loading"   && <Loader2   className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                       {uhidStatus === "found"     && <UserCheck  className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-600" />}
                       {uhidStatus === "not-found" && <span       className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-destructive">?</span>}
@@ -365,7 +376,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                     <div className="relative">
                       <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                       <Input
-                        className="h-6 pl-6 text-xs w-40 bg-background"
+                        className="h-6 pl-6 text-xs w-80 bg-background"
                         placeholder="Filter charges…"
                         value={rateNameFilter}
                         onChange={(e) => setRateNameFilter(e.target.value)}
@@ -373,10 +384,10 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                     </div>
                   </div>
 
-                  {Object.keys(groupedRates).length === 0 ? (
-                    <p className="text-xs text-muted-foreground px-3 py-3">
-                      {rateNameFilter ? `No charges match "${rateNameFilter}".` : "No service rates configured. Add rates in Settings → Service Rates."}
-                    </p>
+                  {rateNameFilter.trim().length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-3 py-3">Type to search service charges…</p>
+                  ) : Object.keys(groupedRates).length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-3 py-3">No charges match "{rateNameFilter}".</p>
                   ) : (
                     <div className="max-h-56 overflow-y-auto divide-y">
                       {allowedCats.filter((cat) => groupedRates[cat]).map((cat) => (
@@ -459,7 +470,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                                   </span>
                                 )}
                               </span>
-                              <Input className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} value={item.quantity} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseFloat(e.target.value) || 1)} />
+                              <Input className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseInt(e.target.value) || 1)} />
                               <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
                               <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
                               <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
@@ -495,7 +506,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                       <select value={item.category} onChange={(e) => updateItem(idx, "category", e.target.value)} className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring">
                         {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <Input className="h-7 text-xs text-center" type="number" min={1} value={item.quantity} onChange={(e) => updateItem(idx, "quantity", parseFloat(e.target.value) || 1)} />
+                      <Input className="h-7 text-xs text-center" type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 1)} />
                       <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" placeholder="₹" value={item.unitPrice || ""} onChange={(e) => updateItem(idx, "unitPrice", parseFloat(e.target.value) || 0)} />
                       <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
                       {items.length > 1 ? (
@@ -536,9 +547,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                           ))}
                         </div>
                         {discountType === "Flat" ? (
-                          <Input className="h-7 text-sm flex-1" type="number" min={0} value={discount || ""} onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)} />
+                          <Input className="h-7 text-sm flex-1" type="number" min={0} step="0.01" value={discount || ""} onChange={(e) => setDiscount(Math.round(parseFloat(e.target.value || "0") * 100) / 100)} />
                         ) : (
-                          <Input className="h-7 text-sm flex-1" type="number" min={0} max={100} value={discountPercent || ""} onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)} />
+                          <Input className="h-7 text-sm flex-1" type="number" min={0} max={100} step="0.01" value={discountPercent || ""} onChange={(e) => setDiscountPercent(Math.round(parseFloat(e.target.value || "0") * 100) / 100)} />
                         )}
                         {discountAmt > 0 && <span className="text-xs text-muted-foreground self-center whitespace-nowrap">= ₹{discountAmt.toLocaleString()}</span>}
                       </div>

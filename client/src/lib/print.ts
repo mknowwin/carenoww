@@ -1073,7 +1073,20 @@ export function printSalesReport(
   const totPayments = rows.reduce((a, r) => a + (r.paymentsCount || 0), 0);
   const totReceived = rows.reduce((a, r) => a + (r.totalReceived || 0), 0);
 
-  const rowHtml = rows.map((r, i) => `
+  const PRINT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
+
+  const rowHtml = rows.map((r, i) => {
+    const breakdown: Record<string, number> = r.paymentBreakdown || {};
+    const activeModes = PRINT_MODES.filter(m => (breakdown[m] || 0) > 0);
+    const breakdownHtml = activeModes.length > 0
+      ? `<tr>
+          <td></td>
+          <td colspan="6" style="padding:2px 8px 6px 28px;color:#555;font-size:11px;border-bottom:1px solid #e5e7eb;">
+            ${activeModes.map(m => `<span style="margin-right:14px;"><span style="color:#374151;font-weight:600;">${m}</span> <span style="color:#0d9488;">₹${(breakdown[m] || 0).toLocaleString("en-IN")}</span></span>`).join("")}
+          </td>
+        </tr>`
+      : "";
+    return `
     <tr>
       <td class="tc">${i + 1}</td>
       <td><strong>${r.staffName || "—"}</strong></td>
@@ -1082,7 +1095,8 @@ export function printSalesReport(
       <td class="tr" style="color:#15803d;">₹${(r.totalPaid || 0).toLocaleString("en-IN")}</td>
       <td class="tr">${r.paymentsCount || 0}</td>
       <td class="tr" style="color:#0d9488;">₹${(r.totalReceived || 0).toLocaleString("en-IN")}</td>
-    </tr>`).join("");
+    </tr>${breakdownHtml}`;
+  }).join("");
 
   const body = `
     ${clinicHeader(clinic)}
