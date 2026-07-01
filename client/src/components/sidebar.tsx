@@ -27,7 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "/ipd",          label: "IPD & Wards",  icon: BedDouble,       description: "Inpatient ward management",     roles: ["admin","doctor","nurse"] },
   { id: "/lab",          label: "Laboratory",   icon: FlaskConical,    description: "Tests, samples & reports",      roles: ["admin","doctor","nurse","lab_tech"] },
   { id: "/pharmacy",     label: "Pharmacy",     icon: Pill,            description: "Dispensing & drug inventory",   roles: ["admin","pharmacist","nurse"] },
-  { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",     roles: ["admin","finance","receptionist"] },
+  { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",     roles: ["admin","finance","receptionist","pharmacist"] },
   { id: "/analytics",    label: "Analytics",    icon: BarChart3,       description: "Clinical & business insights",  roles: ["admin","finance"] },
 ];
 
