@@ -4,11 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { appointments as apptApi, users as usersApi, patients as patientsApi } from "@/lib/api";
+import { appointments as apptApi, users as usersApi, patients as patientsApi, referralDoctors as refDocApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Clock, AlertCircle, Search, Loader2 } from "lucide-react";
+import { CheckCircle2, Clock, AlertCircle, Search, Loader2, X } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -81,6 +81,8 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
     referringDoctor:  existing?.referringDoctor  ?? "",
   });
 
+  const [selectedDoc, setSelectedDoc] = useState<any>(null);
+
   const [patientSearch, setPatientSearch] = useState("");
   const [patientResults, setPatientResults] = useState<any[]>([]);
   const [searchingPatient, setSearchingPatient] = useState(false);
@@ -88,16 +90,22 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Referral doctor combobox state
+  const [refDocSearch, setRefDocSearch] = useState("");
+  const [refDocResults, setRefDocResults] = useState<any[]>([]);
+  const [refDocOpen, setRefDocOpen] = useState(false);
+  const [refDocCreating, setRefDocCreating] = useState(false);
+
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Numeric portion typed by the user → full UHID for API / submission.
   const effectivePatientId = form.patientId ? `UHID-${form.patientId.padStart(3, "0")}` : "";
 
-  // Short digit strings (≤6) are treated as UHID; longer strings are phone numbers.
   const trimmedSearch = patientSearch.trim();
   const effectivePatientSearch = trimmedSearch && /^\d+$/.test(trimmedSearch) && trimmedSearch.length <= 6
     ? `UHID-${trimmedSearch.padStart(3, "0")}`
     : patientSearch;
+
+  const skipTime = selectedDoc?.schedule?.skipTimeSlot === true;
 
   // Load doctors when department or date changes
   const { data: doctorData, isFetching: loadingDoctors } = useQuery({
@@ -113,19 +121,24 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   const { data: slotsData, isFetching: loadingSlots } = useQuery({
     queryKey: ["slots", form.doctor, form.date],
     queryFn:  () => apptApi.slots(form.doctor, form.date),
-    enabled:  open && !!form.doctor && !!form.date && !isEdit,
+    enabled:  open && !!form.doctor && !!form.date && !isEdit && !skipTime,
     retry:    false,
   });
 
   const slots: { time: string; available: boolean }[] = slotsData ?? [];
   const availableSlots = slots.filter((s) => s.available);
 
-  // Auto-select first available slot when slots load
+  // Auto-select first available slot when slots load (only when time slot selection is active)
   useEffect(() => {
-    if (availableSlots.length > 0 && !form.time) {
+    if (!skipTime && availableSlots.length > 0 && !form.time) {
       set("time", availableSlots[0].time);
     }
   }, [slotsData]);
+
+  // Clear time when a doctor with skipTimeSlot is selected
+  useEffect(() => {
+    if (skipTime) set("time", "");
+  }, [skipTime]);
 
   // Search patient by name/UHID
   useEffect(() => {
@@ -143,6 +156,21 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
     }, 300);
     return () => clearTimeout(timer);
   }, [patientSearch]);
+
+  // Search referral doctors
+  useEffect(() => {
+    if (refDocSearch.length < 2) { setRefDocResults([]); setRefDocOpen(false); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await refDocApi.search(refDocSearch);
+        setRefDocResults(res ?? []);
+        setRefDocOpen(true);
+      } catch {
+        setRefDocResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [refDocSearch]);
 
   const selectPatient = (p: any) => {
     setForm((f) => ({
@@ -166,14 +194,45 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   };
 
   const selectDoctor = (doc: any) => {
+    setSelectedDoc(doc);
     setForm((f) => ({ ...f, doctorId: doc._id, doctor: doc.name, time: "" }));
   };
+
+  const selectRefDoc = (name: string) => {
+    set("referringDoctor", name);
+    setRefDocSearch("");
+    setRefDocResults([]);
+    setRefDocOpen(false);
+  };
+
+  const clearRefDoc = () => {
+    set("referringDoctor", "");
+    setRefDocSearch("");
+    setRefDocResults([]);
+    setRefDocOpen(false);
+  };
+
+  const addRefDoc = async () => {
+    if (!refDocSearch.trim()) return;
+    setRefDocCreating(true);
+    try {
+      const doc = await refDocApi.create({ name: refDocSearch.trim() });
+      selectRefDoc(doc.name);
+    } catch {
+      selectRefDoc(refDocSearch.trim());
+    } finally {
+      setRefDocCreating(false);
+    }
+  };
+
+  const hasExactRefDocMatch = refDocResults.some(
+    (d) => d.name.toLowerCase() === refDocSearch.trim().toLowerCase()
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.patientName) { setError("Patient name is required"); return; }
     if (!form.doctor)      { setError("Please select a doctor"); return; }
-    if (!form.time)        { setError("Please select a time slot"); return; }
 
     setLoading(true); setError("");
     try {
@@ -295,7 +354,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
           {/* Department + Date */}
           <div className="grid grid-cols-2 gap-3">
             <F label="Department">
-              <Sel value={form.department} onChange={(v) => { set("department", v); set("doctor", ""); set("doctorId", ""); set("time", ""); }} opts={DEPARTMENTS} />
+              <Sel value={form.department} onChange={(v) => { set("department", v); set("doctor", ""); set("doctorId", ""); set("time", ""); setSelectedDoc(null); }} opts={DEPARTMENTS} />
             </F>
             <F label="Date *">
               <SI value={form.date} onChange={(v) => { set("date", v); set("time", ""); }} type="date" required />
@@ -360,8 +419,8 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
             </F>
           )}
 
-          {/* Time slot selection */}
-          {!isEdit && form.doctor && (
+          {/* Time slot selection — hidden when doctor has skipTimeSlot enabled */}
+          {!isEdit && form.doctor && !skipTime && (
             <div className="bg-muted/40 rounded-xl p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Time Slot</p>
@@ -395,6 +454,14 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
             </div>
           )}
 
+          {/* Walk-in notice when skipTimeSlot is on */}
+          {!isEdit && form.doctor && skipTime && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <p className="text-xs text-amber-700 font-medium">Walk-in / No time slot required</p>
+              <p className="text-xs text-amber-600 mt-0.5">This doctor is configured for walk-in appointments. Time slot selection is skipped.</p>
+            </div>
+          )}
+
           {isEdit && (
             <F label="Time">
               <SI value={form.time} onChange={(v) => set("time", v)} placeholder="09:00 AM" />
@@ -410,16 +477,60 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
             />
           </F>
 
+          {/* Referring Doctor — searchable combobox */}
           <F label="Referring Doctor (optional)">
-            <SI
-              value={form.referringDoctor}
-              onChange={(v) => set("referringDoctor", v)}
-              placeholder="Dr. Name or clinic"
-            />
+            {form.referringDoctor ? (
+              <div className="flex items-center gap-2 h-8 border rounded-md px-3 bg-background">
+                <span className="text-sm flex-1 truncate">{form.referringDoctor}</span>
+                <button type="button" onClick={clearRefDoc} className="shrink-0 text-muted-foreground hover:text-foreground">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Input
+                  className="h-8 text-sm"
+                  placeholder="Search or type doctor name..."
+                  value={refDocSearch}
+                  onChange={(e) => setRefDocSearch(e.target.value)}
+                  onFocus={() => { if (refDocResults.length > 0) setRefDocOpen(true); }}
+                  onBlur={() => setTimeout(() => setRefDocOpen(false), 150)}
+                />
+                {refDocOpen && (refDocResults.length > 0 || refDocSearch.trim().length >= 2) && (
+                  <div className="absolute z-50 top-full mt-1 w-full border rounded-lg bg-background shadow-md divide-y">
+                    {refDocResults.map((d) => (
+                      <button
+                        key={d._id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                        onMouseDown={(e) => { e.preventDefault(); selectRefDoc(d.name); }}
+                      >
+                        <span className="font-medium">{d.name}</span>
+                        {d.specialization && <span className="text-xs text-muted-foreground ml-2">{d.specialization}</span>}
+                        {d.hospital && <span className="text-xs text-muted-foreground ml-1">· {d.hospital}</span>}
+                      </button>
+                    ))}
+                    {!hasExactRefDocMatch && refDocSearch.trim().length >= 2 && (
+                      <button
+                        type="button"
+                        disabled={refDocCreating}
+                        className="w-full text-left px-3 py-2 text-sm text-primary hover:bg-primary/5 transition-colors flex items-center gap-1.5"
+                        onMouseDown={(e) => { e.preventDefault(); addRefDoc(); }}
+                      >
+                        {refDocCreating
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <span className="font-medium">+ Add "{refDocSearch.trim()}"</span>
+                        }
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </F>
 
           {/* Token preview */}
-          {!isEdit && form.doctor && form.time && (
+          {!isEdit && form.doctor && (
             <div className="bg-teal-50 border border-teal-200 rounded-xl px-4 py-3 flex items-center justify-between">
               <div>
                 <p className="text-xs text-teal-600 font-medium">Token will be auto-generated</p>
@@ -427,7 +538,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold text-teal-700">{form.department.slice(0, 2).toUpperCase()}-###</p>
-                <p className="text-xs text-teal-500">{form.date} · {form.time}</p>
+                <p className="text-xs text-teal-500">{form.date} · {form.time || "Walk-in"}</p>
               </div>
             </div>
           )}

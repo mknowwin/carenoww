@@ -40,7 +40,7 @@ const AppointmentSchema = new Schema<IAppointment>(
     doctor:        { type: String, required: true },
     department:    { type: String, required: true },
     date:          { type: String, required: true },
-    time:          { type: String, required: true },
+    time:          { type: String, default: "" },
     type:          { type: String, enum: ["New", "Follow-up", "Emergency", "Teleconsult", "Home Visit"], required: true },
     status:        { type: String, enum: ["Scheduled", "Confirmed", "Waiting", "In Consult", "Completed", "Cancelled"], default: "Scheduled" },
     token:         { type: String, default: "" },

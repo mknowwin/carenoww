@@ -260,10 +260,24 @@ export const prescriptions = {
   update: (id: string, data: any) => put<any>(`/prescriptions/${id}`, data),
 };
 
+// ── Referral Doctors ──────────────────────────────────────────────────────────
+export const referralDoctors = {
+  search: (q: string) => get<any[]>(`/referral-doctors?search=${encodeURIComponent(q)}`),
+  create: (data: { name: string; specialization?: string; phone?: string; hospital?: string }) =>
+    post<any>("/referral-doctors", data),
+};
+
+// ── Suppliers ─────────────────────────────────────────────────────────────────
+export const suppliers = {
+  search: (q: string) => get<any[]>(`/suppliers?search=${encodeURIComponent(q)}`),
+  create: (data: { name: string; phone?: string; email?: string; address?: string; gstNo?: string }) =>
+    post<any>("/suppliers", data),
+};
+
 // ── Public (no auth) ──────────────────────────────────────────────────────────
 export const publicApi = {
   display: (tenantId: string) =>
     fetch(`/api/public/display?tenantId=${encodeURIComponent(tenantId)}`).then((r) => r.json()),
 };
 
-export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, prescriptions, publicApi };
+export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, prescriptions, publicApi, referralDoctors, suppliers };
