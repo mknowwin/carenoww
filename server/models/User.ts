@@ -7,6 +7,7 @@ export interface IDoctorSchedule {
   startTime: string;   // "09:00"
   endTime: string;     // "17:00"
   slotDurationMin: number; // 15
+  skipTimeSlot?: boolean;  // when true, appointments don't require a time slot
 }
 
 export interface IUser extends Document {
@@ -35,6 +36,7 @@ const DoctorScheduleSchema = new Schema<IDoctorSchedule>(
     startTime:       { type: String,   default: "09:00" },
     endTime:         { type: String,   default: "17:00" },
     slotDurationMin: { type: Number,   default: 15 },
+    skipTimeSlot:    { type: Boolean,  default: false },
   },
   { _id: false }
 );

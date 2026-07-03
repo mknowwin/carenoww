@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Trash2, Plus, RefreshCw } from "lucide-react";
-import { pharmacy as pharmApi } from "@/lib/api";
+import { Trash2, Plus, RefreshCw, X, Loader2 } from "lucide-react";
+import { pharmacy as pharmApi, suppliers as suppliersApi } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { DRUG_UNITS } from "@/lib/constants";
 
@@ -47,6 +47,12 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
   const isEdit = !!(existing?._id);
 
   const [supplierName, setSupplierName] = useState("");
+  const [supplierSelected, setSupplierSelected] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierResults, setSupplierResults] = useState<any[]>([]);
+  const [supplierOpen, setSupplierOpen] = useState(false);
+  const [supplierCreating, setSupplierCreating] = useState(false);
+
   const [invoiceNo, setInvoiceNo] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -58,7 +64,9 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
   useEffect(() => {
     if (!open) return;
     if (existing) {
-      setSupplierName(existing.supplierName ?? "");
+      const name = existing.supplierName ?? "";
+      setSupplierName(name);
+      setSupplierSelected(!!name);
       setInvoiceNo(existing.invoiceNo ?? "");
       setInvoiceDate(toDateInput(existing.invoiceDate));
       setNotes(existing.notes ?? "");
@@ -76,11 +84,60 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
         }))
       );
     } else {
-      setSupplierName(""); setInvoiceNo(""); setInvoiceDate(""); setNotes("");
+      setSupplierName(""); setSupplierSelected(false); setSupplierSearch("");
+      setInvoiceNo(""); setInvoiceDate(""); setNotes("");
       setItems([emptyItem()]);
     }
     setError(""); setSuccess(false);
   }, [open, existing]);
+
+  // Debounced supplier search
+  useEffect(() => {
+    if (supplierSearch.length < 2) { setSupplierResults([]); setSupplierOpen(false); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await suppliersApi.search(supplierSearch);
+        setSupplierResults(res ?? []);
+        setSupplierOpen(true);
+      } catch {
+        setSupplierResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [supplierSearch]);
+
+  const selectSupplier = (name: string) => {
+    setSupplierName(name);
+    setSupplierSelected(true);
+    setSupplierSearch("");
+    setSupplierResults([]);
+    setSupplierOpen(false);
+  };
+
+  const clearSupplier = () => {
+    setSupplierName("");
+    setSupplierSelected(false);
+    setSupplierSearch("");
+    setSupplierResults([]);
+    setSupplierOpen(false);
+  };
+
+  const addSupplier = async () => {
+    if (!supplierSearch.trim()) return;
+    setSupplierCreating(true);
+    try {
+      const doc = await suppliersApi.create({ name: supplierSearch.trim() });
+      selectSupplier(doc.name);
+    } catch {
+      selectSupplier(supplierSearch.trim());
+    } finally {
+      setSupplierCreating(false);
+    }
+  };
+
+  const hasExactSupplierMatch = supplierResults.some(
+    (s) => s.name.toLowerCase() === supplierSearch.trim().toLowerCase()
+  );
 
   const setItem = (idx: number, field: keyof GRNItem, value: string | number) => {
     setItems((prev) => {
@@ -145,7 +202,9 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
   };
 
   const handleClose = () => {
-    setSupplierName(""); setInvoiceNo(""); setInvoiceDate(""); setNotes("");
+    setSupplierName(""); setSupplierSelected(false); setSupplierSearch("");
+    setSupplierResults([]); setSupplierOpen(false);
+    setInvoiceNo(""); setInvoiceDate(""); setNotes("");
     setItems([emptyItem()]); setError(""); setSuccess(false);
     onClose();
   };
@@ -172,7 +231,53 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
             {/* Header fields */}
             <div className="grid grid-cols-3 gap-3">
               <F label="Supplier Name *">
-                <Input className="h-8 text-sm" placeholder="e.g. Medline Pharma" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} />
+                {supplierSelected ? (
+                  <div className="flex items-center gap-2 h-8 border rounded-md px-3 bg-background text-sm">
+                    <span className="flex-1 truncate">{supplierName}</span>
+                    <button type="button" onClick={clearSupplier} className="shrink-0 text-muted-foreground hover:text-foreground">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      className="h-8 text-sm"
+                      placeholder="Search or type supplier name…"
+                      value={supplierSearch}
+                      onChange={(e) => setSupplierSearch(e.target.value)}
+                      onFocus={() => { if (supplierResults.length > 0) setSupplierOpen(true); }}
+                      onBlur={() => setTimeout(() => setSupplierOpen(false), 150)}
+                    />
+                    {supplierOpen && (supplierResults.length > 0 || supplierSearch.trim().length >= 2) && (
+                      <div className="absolute z-50 top-full mt-1 w-full border rounded-lg bg-background shadow-md divide-y">
+                        {supplierResults.map((s) => (
+                          <button
+                            key={s._id}
+                            type="button"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                            onMouseDown={(e) => { e.preventDefault(); selectSupplier(s.name); }}
+                          >
+                            {s.name}
+                            {s.gstNo && <span className="text-xs text-muted-foreground ml-2">GST: {s.gstNo}</span>}
+                          </button>
+                        ))}
+                        {!hasExactSupplierMatch && supplierSearch.trim().length >= 2 && (
+                          <button
+                            type="button"
+                            disabled={supplierCreating}
+                            className="w-full text-left px-3 py-2 text-sm text-primary hover:bg-primary/5 transition-colors flex items-center gap-1.5"
+                            onMouseDown={(e) => { e.preventDefault(); addSupplier(); }}
+                          >
+                            {supplierCreating
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <span className="font-medium">+ Add "{supplierSearch.trim()}"</span>
+                            }
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </F>
               <F label="Invoice No">
                 <Input className="h-8 text-sm" placeholder="INV-2026-001" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} />
@@ -192,13 +297,13 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
               </div>
 
               {/* Column headers */}
-              <div className="grid grid-cols-[2fr_0.9fr_1fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 text-xs font-medium text-muted-foreground px-1">
+              <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 text-xs font-medium text-muted-foreground px-1">
                 <span>Drug</span><span>Unit</span><span>Batch No</span><span>Expiry</span>
                 <span>Qty</span><span>Purchase ₹</span><span>MRP ₹</span><span></span>
               </div>
 
               {items.map((item, idx) => (
-                <div key={idx} className="grid grid-cols-[2fr_0.9fr_1fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 items-center">
+                <div key={idx} className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 items-center">
                   <select
                     className="h-8 text-xs border rounded-md px-2 bg-background"
                     value={item.drugId}

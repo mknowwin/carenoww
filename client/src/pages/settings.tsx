@@ -66,6 +66,7 @@ function DoctorForm({
       startTime:       existing?.schedule?.startTime ?? "09:00",
       endTime:         existing?.schedule?.endTime   ?? "17:00",
       slotDurationMin: existing?.schedule?.slotDurationMin ?? 15,
+      skipTimeSlot:    existing?.schedule?.skipTimeSlot ?? false,
     },
   });
 
@@ -184,6 +185,15 @@ function DoctorForm({
             </select>
           </div>
         </div>
+        <label className="flex items-center gap-2 cursor-pointer select-none mt-1">
+          <input
+            type="checkbox"
+            checked={!!form.schedule.skipTimeSlot}
+            onChange={(e) => setForm((f) => ({ ...f, schedule: { ...f.schedule, skipTimeSlot: e.target.checked } }))}
+            className="h-4 w-4 rounded border-input accent-primary"
+          />
+          <span className="text-xs text-muted-foreground">Skip time slot selection (walk-in / TBD appointments)</span>
+        </label>
       </div>
 
       {error && <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{error}</p>}
