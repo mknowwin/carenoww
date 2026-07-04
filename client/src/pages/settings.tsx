@@ -17,6 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/contexts/AuthContext";
 import { auth as authApi, users as usersApi, ratemaster as ratemasterApi } from "@/lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 
 const ROLES = ["admin", "doctor", "nurse", "pharmacist", "pharmacy_admin", "lab_tech", "finance", "receptionist"];
 
@@ -375,13 +377,14 @@ function DepartmentsSection() {
   }
 
   const deactivateDoctor = async (id: string, name: string) => {
-    if (!confirm(`Deactivate ${name}?`)) return;
+    const ok = await confirm({ title: `Deactivate ${name}?`, confirmText: "Deactivate", variant: "destructive" });
+    if (!ok) return;
     try {
       await usersApi.deactivate(id);
       qc.invalidateQueries({ queryKey: ["doctors"] });
       qc.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
-      alert(err.message || "Failed to deactivate");
+      toast({ variant: "destructive", title: "Deactivate failed", description: err.message || "Failed to deactivate." });
     }
   };
 
@@ -523,12 +526,13 @@ function StaffSection() {
   };
 
   const deactivate = async (id: string, name: string) => {
-    if (!confirm(`Deactivate ${name}?`)) return;
+    const ok = await confirm({ title: `Deactivate ${name}?`, confirmText: "Deactivate", variant: "destructive" });
+    if (!ok) return;
     try {
       await usersApi.deactivate(id);
       qc.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
-      alert(err.message || "Failed to deactivate");
+      toast({ variant: "destructive", title: "Deactivate failed", description: err.message || "Failed to deactivate." });
     }
   };
 
@@ -1369,12 +1373,13 @@ export default function SettingsPage() {
   };
 
   const deactivateUser = async (id: string, name: string) => {
-    if (!confirm(`Deactivate ${name}?`)) return;
+    const ok = await confirm({ title: `Deactivate ${name}?`, confirmText: "Deactivate", variant: "destructive" });
+    if (!ok) return;
     try {
       await usersApi.deactivate(id);
       qc.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
-      alert(err.message || "Failed to deactivate");
+      toast({ variant: "destructive", title: "Deactivate failed", description: err.message || "Failed to deactivate." });
     }
   };
 

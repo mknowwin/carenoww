@@ -12,6 +12,7 @@
     "start": "NODE_ENV=production node dist/index.js",
     "seed": "dotenv -- tsx server/seed.ts",
     "migrate:uhid": "dotenv -- tsx server/migrate-uhid-counters.ts",
+    "migrate:drug-isactive": "dotenv -- tsx server/migrate-drug-isactive.ts",
     "check": "tsc",
     "typecheck": "tsc --noEmit"
   },

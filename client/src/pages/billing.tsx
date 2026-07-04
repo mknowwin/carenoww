@@ -17,6 +17,7 @@ import BillingModal from "@/components/modals/BillingModal";
 import ModalErrorBoundary from "@/components/ModalErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
@@ -136,7 +137,12 @@ export default function BillingPage() {
   }));
 
   const markPaid = async (bill: any) => {
-    if (!confirm(`Mark ${bill.id} as fully paid (₹${bill.amount?.toLocaleString()})?`)) return;
+    const ok = await confirm({
+      title: `Mark ${bill.id} as fully paid?`,
+      description: `₹${bill.amount?.toLocaleString()} will be recorded as paid in full.`,
+      confirmText: "Mark Paid",
+    });
+    if (!ok) return;
     setPaying(bill.id);
     try {
       await billingApi.update(bill._id || bill.id, { paid: bill.amount, status: "Paid" });

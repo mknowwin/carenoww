@@ -13,6 +13,7 @@ import { patients as patientsApi } from "@/lib/api";
 import { getInitials } from "@/lib/utils";
 import PatientModal from "@/components/modals/PatientModal";
 import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 
 const STATUS_COLORS: Record<string, string> = {
   OPD:        "bg-blue-100 text-blue-700",
@@ -45,7 +46,8 @@ export default function PatientsPage() {
   const [discharging, setDischarging] = useState<string | null>(null);
 
   const discharge = async (p: any) => {
-    if (!confirm(`Discharge ${p.name}?`)) return;
+    const ok = await confirm({ title: `Discharge ${p.name}?`, confirmText: "Discharge" });
+    if (!ok) return;
     setDischarging(p.id);
     try {
       await patientsApi.update(p._id || p.id, { status: "Discharged" });

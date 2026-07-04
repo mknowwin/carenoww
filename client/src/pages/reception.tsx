@@ -89,7 +89,7 @@ export default function ReceptionPage() {
       setVitalsForm(BLANK_VITALS);
       setVitalsApptId(apt._id);
     } catch (e: any) {
-      alert(e.message || "Check-in failed");
+      toast({ variant: "destructive", title: "Check-in failed", description: e.message || "Failed to check in patient." });
     } finally {
       setActionId(null);
     }
@@ -103,7 +103,7 @@ export default function ReceptionPage() {
       qc.invalidateQueries({ queryKey: ["appointments"] });
       setVitalsApptId(null);
     } catch (e: any) {
-      alert(e.message || "Failed to save vitals");
+      toast({ variant: "destructive", title: "Save failed", description: e.message || "Failed to save vitals." });
     } finally {
       setSavingVitals(false);
     }

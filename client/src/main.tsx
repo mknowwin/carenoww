@@ -4,6 +4,7 @@ import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import { AuthProvider } from "./contexts/AuthContext";
 import { SuperAdminProvider } from "./contexts/SuperAdminContext";
 import { Toaster } from "./components/ui/toaster";
+import { ConfirmDialog } from "./hooks/use-confirm";
 import App from "./App";
 import "./index.css";
 
@@ -18,6 +19,7 @@ createRoot(document.getElementById("root")!).render(
         <AuthProvider>
           <App />
           <Toaster />
+          <ConfirmDialog />
         </AuthProvider>
       </SuperAdminProvider>
     </QueryClientProvider>

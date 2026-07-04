@@ -152,7 +152,7 @@ export default function DoctorQueuePage() {
       qc.invalidateQueries({ queryKey: ["queue"] });
       setSelectedPatient(apt);
     } catch (e: any) {
-      alert(e.message || "Failed to call patient");
+      toast({ variant: "destructive", title: "Call failed", description: e.message || "Failed to call patient." });
     } finally {
       setActionId(null);
     }

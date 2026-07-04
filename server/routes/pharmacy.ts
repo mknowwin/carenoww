@@ -215,7 +215,8 @@ router.get("/inventory", requireRole("admin", "pharmacist", "pharmacy_admin", "n
   try {
     const { search, status, statusIn, includeInactive } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
-    if (includeInactive !== "true") query.isActive = true;
+    // $ne: false (not === true) so drugs created before the isActive field existed still show up
+    if (includeInactive !== "true") query.isActive = { $ne: false };
     if (search) query.name = { $regex: search, $options: "i" };
     if (statusIn) query.status = { $in: statusIn.split(",") };
     else if (status) query.status = status;

@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from "wouter";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { superadmin as saApi } from "../../lib/api";
 import { Shield, LogOut, ArrowLeft, Save, Loader2, Database, Users, CheckCircle2, XCircle } from "lucide-react";
+import { confirm } from "@/hooks/use-confirm";
 
 const PLANS = ["trial", "starter", "professional", "enterprise"];
 const STATUSES = ["trial", "active", "suspended", "cancelled"];
@@ -104,7 +105,14 @@ export default function TenantFormPage() {
   };
 
   const handleSeed = async () => {
-    if (!params.id || !confirm("Seed demo data? Existing data for this tenant will be replaced.")) return;
+    if (!params.id) return;
+    const ok = await confirm({
+      title: "Seed demo data?",
+      description: "Existing data for this tenant will be replaced.",
+      confirmText: "Seed",
+      variant: "destructive",
+    });
+    if (!ok) return;
     setActionLoading("seed");
     try {
       await saApi.seedTenant(params.id);
@@ -117,7 +125,9 @@ export default function TenantFormPage() {
   };
 
   const handleSuspend = async () => {
-    if (!params.id || !confirm("Suspend this tenant?")) return;
+    if (!params.id) return;
+    const ok = await confirm({ title: "Suspend this tenant?", confirmText: "Suspend", variant: "destructive" });
+    if (!ok) return;
     setActionLoading("suspend");
     try {
       await saApi.suspendTenant(params.id);

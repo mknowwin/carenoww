@@ -96,7 +96,7 @@ export default function AppointmentsPage() {
       qc.invalidateQueries({ queryKey: ["appointments"] });
       setVitalsApptId(null);
     } catch (e: any) {
-      alert(e.message || "Failed to save vitals");
+      toast({ variant: "destructive", title: "Save failed", description: e.message || "Failed to save vitals." });
     } finally {
       setSavingVitals(false);
     }

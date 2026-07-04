@@ -6,6 +6,8 @@ import {
   Building2, Plus, Search, ChevronRight, Shield, LogOut,
   CheckCircle2, XCircle, Clock, AlertTriangle, Users, Database
 } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 
 export default function TenantsPage() {
   const { superAdmin, logout } = useSuperAdmin();
@@ -35,7 +37,13 @@ export default function TenantsPage() {
   useEffect(() => { load(); }, [search, statusFilter]);
 
   const handleSuspend = async (id: string) => {
-    if (!confirm("Suspend this tenant? Their users will be locked out immediately.")) return;
+    const ok = await confirm({
+      title: "Suspend this tenant?",
+      description: "Their users will be locked out immediately.",
+      confirmText: "Suspend",
+      variant: "destructive",
+    });
+    if (!ok) return;
     setActionLoading(id);
     try {
       await saApi.suspendTenant(id);
@@ -56,13 +64,19 @@ export default function TenantsPage() {
   };
 
   const handleSeed = async (id: string) => {
-    if (!confirm("Seed demo data for this tenant? Existing data will be replaced.")) return;
+    const ok = await confirm({
+      title: "Seed demo data for this tenant?",
+      description: "Existing data will be replaced.",
+      confirmText: "Seed",
+      variant: "destructive",
+    });
+    if (!ok) return;
     setActionLoading(id);
     try {
       await saApi.seedTenant(id);
-      alert("Demo data seeded successfully!");
+      toast({ title: "Demo data seeded successfully!" });
     } catch (err: any) {
-      alert("Seed failed: " + err.message);
+      toast({ variant: "destructive", title: "Seed failed", description: err.message });
     } finally {
       setActionLoading(null);
     }

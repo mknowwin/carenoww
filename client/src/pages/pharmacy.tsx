@@ -17,6 +17,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { pharmacy as pharmacyApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 import GRNModal from "@/components/modals/GRNModal";
 import StockAdjustmentModal from "@/components/modals/StockAdjustmentModal";
 import DispenseCounterModal from "@/components/modals/DispenseCounterModal";
@@ -57,6 +58,7 @@ interface DrugInventory {
   supplier?: string;
   hsnCode?: string;
   isBatchTracked?: boolean;
+  isActive?: boolean;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -166,6 +168,7 @@ export default function PharmacyPage() {
 
   // Inventory tab
   const [invSearch, setInvSearch]   = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [showAddDrug, setShowAddDrug] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [adjustDrug, setAdjustDrug] = useState<DrugInventory | null>(null);
@@ -205,8 +208,8 @@ export default function PharmacyPage() {
   });
 
   const { data: inventoryData, isLoading: invLoading } = useQuery({
-    queryKey: ["pharmacy-inventory"],
-    queryFn: () => pharmacyApi.inventory.list(),
+    queryKey: ["pharmacy-inventory", showInactive],
+    queryFn: () => pharmacyApi.inventory.list(showInactive ? { includeInactive: "true" } : undefined),
     retry: false,
   });
 
@@ -299,7 +302,13 @@ export default function PharmacyPage() {
   };
 
   const deactivateDrug = async (drug: DrugInventory) => {
-    if (!confirm(`Deactivate ${drug.name}? It will be hidden from inventory but its history is kept.`)) return;
+    const ok = await confirm({
+      title: `Deactivate ${drug.name}?`,
+      description: "It will be hidden from inventory but its history is kept.",
+      confirmText: "Deactivate",
+      variant: "destructive",
+    });
+    if (!ok) return;
     setDeactivatingDrug(drug._id);
     try {
       await pharmacyApi.inventory.remove(drug._id);
@@ -309,8 +318,24 @@ export default function PharmacyPage() {
     } finally { setDeactivatingDrug(null); }
   };
 
+  const reactivateDrug = async (drug: DrugInventory) => {
+    setDeactivatingDrug(drug._id);
+    try {
+      await pharmacyApi.inventory.reactivate(drug._id);
+      qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Reactivate failed", description: err.message || "Failed to reactivate drug." });
+    } finally { setDeactivatingDrug(null); }
+  };
+
   const cancelGrn = async (grnId: string) => {
-    if (!confirm("Cancel this GRN? If received, its stock impact will be reversed.")) return;
+    const ok = await confirm({
+      title: "Cancel this GRN?",
+      description: "If received, its stock impact will be reversed.",
+      confirmText: "Cancel GRN",
+      variant: "destructive",
+    });
+    if (!ok) return;
     setCancellingGrn(grnId);
     try {
       await pharmacyApi.grn.cancel(grnId);
@@ -486,6 +511,18 @@ export default function PharmacyPage() {
             </Button>
           </div>
 
+          {canManageInventory && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer w-fit">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+              />
+              Show deactivated drugs
+            </label>
+          )}
+
           {showAddDrug && <AddDrugForm onDone={() => setShowAddDrug(false)} />}
 
           {invLoading ? (
@@ -494,7 +531,7 @@ export default function PharmacyPage() {
             <div className="text-sm text-muted-foreground py-8 text-center">No drugs found.</div>
           ) : (
             filteredInventory.map((drug) => (
-              <Card key={drug._id} className={drug.status === "Critical" ? "border-red-200" : drug.status === "Low" ? "border-amber-200" : ""}>
+              <Card key={drug._id} className={drug.isActive === false ? "opacity-60" : drug.status === "Critical" ? "border-red-200" : drug.status === "Low" ? "border-amber-200" : ""}>
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${drug.status === "Critical" ? "bg-red-50" : drug.status === "Low" ? "bg-amber-50" : "bg-teal-50"}`}>
@@ -506,6 +543,7 @@ export default function PharmacyPage() {
                         {drug.category && <span className="text-xs text-muted-foreground">{drug.category}</span>}
                         <Badge className={`text-xs ${INVENTORY_STATUS_COLORS[drug.status]}`}>{drug.status}</Badge>
                         {drug.isBatchTracked && <Badge variant="outline" className="text-xs">Batch tracked</Badge>}
+                        {drug.isActive === false && <Badge variant="outline" className="text-xs text-muted-foreground">Deactivated</Badge>}
                       </div>
                       <div className="text-sm mt-0.5">
                         Stock: <span className="font-medium">{drug.stock} {drug.unit}</span>
@@ -523,28 +561,46 @@ export default function PharmacyPage() {
                       )}
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowGRN(true)}>
-                        <Plus className="h-3 w-3" /> GRN
-                      </Button>
-                      {canManageInventory && (
-                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setEditDrug(drug)}>
-                          <Pencil className="h-3 w-3" /> Edit
-                        </Button>
+                      {drug.isActive !== false && (
+                        <>
+                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowGRN(true)}>
+                            <Plus className="h-3 w-3" /> GRN
+                          </Button>
+                          {canManageInventory && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setEditDrug(drug)}>
+                              <Pencil className="h-3 w-3" /> Edit
+                            </Button>
+                          )}
+                        </>
                       )}
                       <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setHistoryDrug(drug)}>
                         <History className="h-3 w-3" /> History
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-orange-600 hover:text-orange-700" onClick={() => setAdjustDrug(drug)}>
-                        <Wrench className="h-3 w-3" /> Adjust
-                      </Button>
-                      {canManageInventory && (
-                        <Button
-                          size="sm" variant="ghost" className="h-7 text-xs gap-1 text-red-600 hover:text-red-700"
-                          disabled={deactivatingDrug === drug._id}
-                          onClick={() => deactivateDrug(drug)}
-                        >
-                          <Trash2 className="h-3 w-3" /> Deactivate
-                        </Button>
+                      {drug.isActive === false ? (
+                        canManageInventory && (
+                          <Button
+                            size="sm" variant="outline" className="h-7 text-xs gap-1 text-green-600 hover:text-green-700"
+                            disabled={deactivatingDrug === drug._id}
+                            onClick={() => reactivateDrug(drug)}
+                          >
+                            <CheckCircle2 className="h-3 w-3" /> Reactivate
+                          </Button>
+                        )
+                      ) : (
+                        <>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-orange-600 hover:text-orange-700" onClick={() => setAdjustDrug(drug)}>
+                            <Wrench className="h-3 w-3" /> Adjust
+                          </Button>
+                          {canManageInventory && (
+                            <Button
+                              size="sm" variant="ghost" className="h-7 text-xs gap-1 text-red-600 hover:text-red-700"
+                              disabled={deactivatingDrug === drug._id}
+                              onClick={() => deactivateDrug(drug)}
+                            >
+                              <Trash2 className="h-3 w-3" /> Deactivate
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
