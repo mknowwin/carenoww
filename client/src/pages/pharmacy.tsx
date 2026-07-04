@@ -9,18 +9,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DRUG_UNITS } from "@/lib/constants";
 import {
   Pill, Search, Plus, AlertTriangle, CheckCircle2,
-  Clock, Package, RefreshCw, FileText, History, ShoppingCart, Wrench, Pencil,
+  Clock, Package, RefreshCw, FileText, History, ShoppingCart, Wrench, Pencil, Trash2,
   BarChart3, Printer, Upload,
 } from "lucide-react";
 import { printLowStockReport, printExpiryReport, printCurrentStockReport } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { pharmacy as pharmacyApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "@/hooks/use-toast";
 import GRNModal from "@/components/modals/GRNModal";
 import StockAdjustmentModal from "@/components/modals/StockAdjustmentModal";
 import DispenseCounterModal from "@/components/modals/DispenseCounterModal";
 import DrugEditModal from "@/components/modals/DrugEditModal";
 import BulkUploadInventoryModal from "@/components/modals/BulkUploadInventoryModal";
+import HistoryModal from "@/components/modals/HistoryModal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -122,11 +124,11 @@ function AddDrugForm({ onDone }: { onDone: () => void }) {
               { label: "Category",       k: "category",     placeholder: "e.g. Diabetes" },
               { label: "Initial Stock",  k: "stock",        placeholder: "0", type: "number" },
               { label: "Reorder Level",  k: "reorderLevel", placeholder: "0", type: "number" },
-              { label: "Default MRP/Unit ₹ (fallback)", k: "mrpPerUnit", placeholder: "0.00", type: "number" },
-            ].map(({ label, k, placeholder, type }) => (
+              { label: "Default MRP/Unit ₹ (fallback)", k: "mrpPerUnit", placeholder: "0.00", type: "number", step: "0.01" },
+            ].map(({ label, k, placeholder, type, step }) => (
               <div key={k} className="space-y-1">
                 <Label className="text-xs">{label}</Label>
-                <Input className="h-8 text-sm" type={type} min={0} placeholder={placeholder} value={form[k as keyof typeof form]} onChange={set(k as keyof typeof form)} />
+                <Input className="h-8 text-sm" type={type} min={0} step={step} placeholder={placeholder} value={form[k as keyof typeof form]} onChange={set(k as keyof typeof form)} />
               </div>
             ))}
             <div className="space-y-1">
@@ -155,6 +157,7 @@ function AddDrugForm({ onDone }: { onDone: () => void }) {
 export default function PharmacyPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const canManageInventory = user?.role === "admin" || user?.role === "pharmacy_admin";
 
   // Orders tab
   const [orderSearch, setOrderSearch]   = useState("");
@@ -173,6 +176,9 @@ export default function PharmacyPage() {
 
   // Inventory edit
   const [editDrug, setEditDrug] = useState<any>(null);
+  const [historyDrug, setHistoryDrug] = useState<any>(null);
+  const [deactivatingDrug, setDeactivatingDrug] = useState<string | null>(null);
+  const [cancellingGrn, setCancellingGrn] = useState<string | null>(null);
 
   // Stock movements tab
   const [movSearch, setMovSearch] = useState("");
@@ -287,7 +293,32 @@ export default function PharmacyPage() {
       await pharmacyApi.orders.update(order._id, { status });
       qc.invalidateQueries({ queryKey: ["pharmacy-orders"] });
       qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Update failed", description: err.message || "Failed to update order." });
     } finally { setUpdating(null); }
+  };
+
+  const deactivateDrug = async (drug: DrugInventory) => {
+    if (!confirm(`Deactivate ${drug.name}? It will be hidden from inventory but its history is kept.`)) return;
+    setDeactivatingDrug(drug._id);
+    try {
+      await pharmacyApi.inventory.remove(drug._id);
+      qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Deactivate failed", description: err.message || "Failed to deactivate drug." });
+    } finally { setDeactivatingDrug(null); }
+  };
+
+  const cancelGrn = async (grnId: string) => {
+    if (!confirm("Cancel this GRN? If received, its stock impact will be reversed.")) return;
+    setCancellingGrn(grnId);
+    try {
+      await pharmacyApi.grn.cancel(grnId);
+      qc.invalidateQueries({ queryKey: ["pharmacy-grn"] });
+      qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Cancel failed", description: err.message || "Failed to cancel GRN." });
+    } finally { setCancellingGrn(null); }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -495,14 +526,26 @@ export default function PharmacyPage() {
                       <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowGRN(true)}>
                         <Plus className="h-3 w-3" /> GRN
                       </Button>
-                      {user?.role === "admin" && (
+                      {canManageInventory && (
                         <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setEditDrug(drug)}>
                           <Pencil className="h-3 w-3" /> Edit
                         </Button>
                       )}
+                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setHistoryDrug(drug)}>
+                        <History className="h-3 w-3" /> History
+                      </Button>
                       <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-orange-600 hover:text-orange-700" onClick={() => setAdjustDrug(drug)}>
                         <Wrench className="h-3 w-3" /> Adjust
                       </Button>
+                      {canManageInventory && (
+                        <Button
+                          size="sm" variant="ghost" className="h-7 text-xs gap-1 text-red-600 hover:text-red-700"
+                          disabled={deactivatingDrug === drug._id}
+                          onClick={() => deactivateDrug(drug)}
+                        >
+                          <Trash2 className="h-3 w-3" /> Deactivate
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -561,9 +604,18 @@ export default function PharmacyPage() {
                         <div className="text-xs text-muted-foreground">Total Value</div>
                         <div className="font-bold text-sm">₹{(grn.totalValue || 0).toLocaleString("en-IN")}</div>
                       </div>
-                      {user?.role === "admin" && (
+                      {canManageInventory && grn.status !== "Cancelled" && (
                         <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => setEditGrn(grn)}>
                           <Pencil className="h-3 w-3" /> Edit
+                        </Button>
+                      )}
+                      {canManageInventory && grn.status !== "Cancelled" && (
+                        <Button
+                          size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 text-red-600 hover:text-red-700"
+                          disabled={cancellingGrn === grn._id}
+                          onClick={() => cancelGrn(grn._id)}
+                        >
+                          <Trash2 className="h-3 w-3" /> Cancel
                         </Button>
                       )}
                     </div>
@@ -889,6 +941,7 @@ export default function PharmacyPage() {
       <DispenseCounterModal open={showCounter} onClose={() => setShowCounter(false)} inventory={inventory} />
       <DrugEditModal open={!!editDrug} onClose={() => setEditDrug(null)} drug={editDrug} />
       <BulkUploadInventoryModal open={showBulkUpload} onClose={() => setShowBulkUpload(false)} />
+      <HistoryModal open={!!historyDrug} onClose={() => setHistoryDrug(null)} drug={historyDrug} />
     </div>
   );
 }

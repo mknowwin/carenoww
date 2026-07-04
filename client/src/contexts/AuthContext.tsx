@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { auth as authApi } from "../lib/api";
 
-export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "lab_tech" | "finance";
+export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "pharmacy_admin" | "lab_tech" | "finance";
 
 export interface User {
   id: string;

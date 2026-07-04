@@ -6,7 +6,7 @@ import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth.js"
 import Tenant from "../models/Tenant.js";
 import { startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { getNextId } from "../lib/counter.js";
-import { fefoDeduct, syncDrugStock } from "../lib/fefo.js";
+import { fefoDeduct, syncDrugStock, getAvailableStock } from "../lib/fefo.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -30,7 +30,7 @@ function calcAmount(items: any[], discount: number, discountType: string, discou
 const FINANCIAL_FIELDS = new Set(["items", "amount", "discount", "discountType", "discountPercent"]);
 
 // ── GET /api/billing ──────────────────────────────────────────────────────────
-router.get("/", requireRole("admin", "finance", "receptionist", "pharmacist"), async (req: AuthRequest, res) => {
+router.get("/", requireRole("admin", "finance", "receptionist", "pharmacist", "pharmacy_admin"), async (req: AuthRequest, res) => {
   try {
     const { status, patientId, type, page = "1", limit = "50" } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };
@@ -54,7 +54,7 @@ router.get("/", requireRole("admin", "finance", "receptionist", "pharmacist"), a
 });
 
 // ── GET /api/billing/:id ──────────────────────────────────────────────────────
-router.get("/:id", requireRole("admin", "finance", "receptionist", "pharmacist"), async (req: AuthRequest, res) => {
+router.get("/:id", requireRole("admin", "finance", "receptionist", "pharmacist", "pharmacy_admin"), async (req: AuthRequest, res) => {
   try {
     const bill = await BillingRecord.findOne({ _id: req.params.id, tenantId: req.user!.tenantId });
     if (!bill) return res.status(404).json({ error: "Bill not found" });
@@ -65,7 +65,7 @@ router.get("/:id", requireRole("admin", "finance", "receptionist", "pharmacist")
 });
 
 // ── POST /api/billing ─────────────────────────────────────────────────────────
-router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist"), async (req: AuthRequest, res) => {
+router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist", "pharmacy_admin"), async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
     const {
@@ -92,6 +92,25 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharm
       finalAmount = calcAmount(items, discount, discountType, discountPercent);
     }
     if (!finalAmount) return res.status(400).json({ error: "amount or items[] required" });
+
+    // Verify stock availability up front — a Pharmacy bill must not be created
+    // if it can't actually be fulfilled from inventory.
+    const pharmacyItems = type === "Pharmacy"
+      ? (items as any[]).filter((it) => it.category === "Pharmacy" && it.drugId)
+      : [];
+    if (pharmacyItems.length) {
+      const shortages: Array<{ drugId: string; name?: string; required: number; available: number }> = [];
+      for (const item of pharmacyItems) {
+        const qty = item.quantity ?? 1;
+        const available = await getAvailableStock(tenantId.toString(), item.drugId);
+        if (available < qty) {
+          shortages.push({ drugId: item.drugId, name: item.name || item.drugName, required: qty, available });
+        }
+      }
+      if (shortages.length) {
+        return res.status(409).json({ error: "Insufficient stock for one or more items", shortages });
+      }
+    }
 
     const paidAmount = Number(paid);
     const balance    = finalAmount - paidAmount;
@@ -137,34 +156,36 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharm
       isLocked:      paidAmount >= finalAmount,
     });
 
-    // Deduct pharmacy stock for items that carry a drugId
-    if (type === "Pharmacy") {
-      const pharmacyItems = (items as any[]).filter((it) => it.category === "Pharmacy" && it.drugId);
-      for (const item of pharmacyItems) {
-        try {
-          const drug = await DrugInventory.findOne({ _id: item.drugId, tenantId });
-          if (!drug) continue;
-          const qty = item.quantity ?? 1;
+    // Deduct pharmacy stock for items that carry a drugId. Availability was
+    // already verified above, so this should only fail on a genuine race
+    // (concurrent bill draining the same batch) — that must not be swallowed
+    // silently, since it means a paid bill went out with no matching deduction.
+    const stockDeductionErrors: Array<{ drugId: string; error: string }> = [];
+    for (const item of pharmacyItems) {
+      try {
+        const drug = await DrugInventory.findOne({ _id: item.drugId, tenantId });
+        if (!drug) continue;
+        const qty = item.quantity ?? 1;
 
-          if (drug.isBatchTracked) {
-            // FEFO batch deduction — syncs DrugInventory.stock from batches
-            await fefoDeduct(tenantId.toString(), item.drugId, qty);
-            await syncDrugStock(tenantId.toString(), item.drugId);
-          } else {
-            // Direct stock decrement on the inventory record
-            const newStock = Math.max(0, drug.stock - qty);
-            const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
-            const ratio = newStock / reorderLevel;
-            const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
-            await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } });
-          }
-        } catch {
-          // best-effort: bill is saved even if stock deduction fails
+        if (drug.isBatchTracked) {
+          // FEFO batch deduction — syncs DrugInventory.stock from batches
+          await fefoDeduct(tenantId.toString(), item.drugId, qty);
+          await syncDrugStock(tenantId.toString(), item.drugId);
+        } else {
+          // Direct stock decrement on the inventory record
+          const newStock = Math.max(0, drug.stock - qty);
+          const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
+          const ratio = newStock / reorderLevel;
+          const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
+          await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } });
         }
+      } catch (err: any) {
+        console.error(`[billing] Stock deduction failed for drug ${item.drugId} on bill ${billId}:`, err);
+        stockDeductionErrors.push({ drugId: item.drugId, error: err.message || "Deduction failed" });
       }
     }
 
-    res.status(201).json(bill);
+    res.status(201).json(stockDeductionErrors.length ? { ...bill.toObject(), stockDeductionErrors } : bill);
   } catch (err: any) {
     if (err.code === 11000) return res.status(409).json({ error: "Bill ID conflict — retry" });
     if (err.name === "ValidationError") return res.status(400).json({ error: err.message });
@@ -173,7 +194,7 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharm
 });
 
 // ── PUT /api/billing/:id — update items / discount / notes ───────────────────
-router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist"), async (req: AuthRequest, res) => {
+router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist", "pharmacy_admin"), async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
     const existing = await BillingRecord.findOne({ _id: req.params.id, tenantId });
@@ -226,7 +247,7 @@ router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pha
 });
 
 // ── POST /api/billing/:id/payments — record a payment installment ─────────────
-router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse", "pharmacist"), async (req: AuthRequest, res) => {
+router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse", "pharmacist", "pharmacy_admin"), async (req: AuthRequest, res) => {
   try {
     const tenantId = req.user!.tenantId;
     const bill = await BillingRecord.findOne({ _id: req.params.id, tenantId });

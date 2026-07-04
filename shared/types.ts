@@ -1,6 +1,6 @@
 // ── Shared types between client and server ────────────────────────────────────
 
-export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "lab_tech" | "finance";
+export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "pharmacy_admin" | "lab_tech" | "finance";
 export type TenantPlan = "trial" | "starter" | "professional" | "enterprise";
 export type TenantStatus = "trial" | "active" | "suspended" | "cancelled";
 
@@ -204,6 +204,7 @@ export interface DrugInventory {
   mrpPerUnit?: number;
   purchasePricePerUnit?: number;
   isBatchTracked?: boolean;
+  isActive?: boolean;
 }
 
 export interface GRNItem {
@@ -228,7 +229,7 @@ export interface GRN {
   receivedBy?: string;
   items: GRNItem[];
   totalValue: number;
-  status: "Draft" | "Received";
+  status: "Draft" | "Received" | "Cancelled";
   notes?: string;
 }
 
@@ -246,6 +247,22 @@ export interface StockAdjustment {
   adjustedBy?: string;
   createdAt?: string;
 }
+
+export interface InventoryAuditLogEntry {
+  _id?: string;
+  drugId: string;
+  action: "Created" | "Updated" | "Deactivated" | "Reactivated";
+  changes: Array<{ field: string; oldValue: any; newValue: any }>;
+  performedBy: string;
+  notes?: string;
+  createdAt?: string;
+}
+
+// Merged per-drug timeline entry returned by GET /pharmacy/inventory/:id/history
+export type DrugHistoryEntry =
+  | ({ type: "GRN"; date: string } & Pick<GRNItem, "batchNo" | "quantityReceived" | "purchasePricePerUnit" | "mrpPerUnit"> & { grnId?: string; grnStatus: GRN["status"]; receivedBy?: string })
+  | ({ type: "Adjustment"; date: string } & Pick<StockAdjustment, "adjustmentId" | "adjustmentType" | "quantityBefore" | "quantityAdjusted" | "quantityAfter" | "reason" | "adjustedBy">)
+  | ({ type: "Edit"; date: string } & Pick<InventoryAuditLogEntry, "action" | "changes" | "performedBy">);
 
 // ── Billing ───────────────────────────────────────────────────────────────────
 export interface BillItem {

@@ -49,6 +49,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   nurse:        "/ipd",
   receptionist: "/reception",
   pharmacist:   "/pharmacy",
+  pharmacy_admin: "/pharmacy",
   lab_tech:     "/lab",
   finance:      "/billing",
 };

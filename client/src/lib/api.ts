@@ -152,6 +152,9 @@ export const pharmacy = {
     },
     create: (data: any)  => post<any>("/pharmacy/inventory", data),
     update: (id: string, data: any) => put<any>(`/pharmacy/inventory/${id}`, data),
+    remove: (id: string) => del<any>(`/pharmacy/inventory/${id}`),
+    reactivate: (id: string) => post<any>(`/pharmacy/inventory/${id}/reactivate`, {}),
+    history: (id: string) => get<any>(`/pharmacy/inventory/${id}/history`),
     lowStock: (filter?: "Low" | "Critical" | "both") => {
       const params: Record<string, string> = (!filter || filter === "both") ? { statusIn: "Low,Critical" } : { status: filter };
       return get<any[]>(`/pharmacy/inventory?${new URLSearchParams(params).toString()}`);
@@ -175,6 +178,7 @@ export const pharmacy = {
     get:    (id: string) => get<any>(`/pharmacy/grn/${id}`),
     create: (data: any)  => post<any>("/pharmacy/grn", data),
     update: (id: string, data: any) => put<any>(`/pharmacy/grn/${id}`, data),
+    cancel: (id: string) => del<any>(`/pharmacy/grn/${id}`),
   },
   adjustments: {
     list:   (params?: Record<string, string>) => {

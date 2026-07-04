@@ -10,6 +10,7 @@ import { appointments as apptApi, users as usersApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 import AppointmentModal from "@/components/modals/AppointmentModal";
+import { toast } from "@/hooks/use-toast";
 import {
   Search, CheckCircle2, Clock, UserCheck, Users, Stethoscope,
   Plus, Hash, Phone, Calendar, ChevronRight, Loader2, Activity,
@@ -113,6 +114,8 @@ export default function ReceptionPage() {
     try {
       await apptApi.update(apt._id, { status: "Confirmed" });
       qc.invalidateQueries({ queryKey: ["appointments"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Confirm failed", description: err.message || "Failed to confirm appointment." });
     } finally {
       setActionId(null);
     }

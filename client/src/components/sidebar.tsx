@@ -26,8 +26,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: "/opd",          label: "OPD / Queue",  icon: Stethoscope,     description: "Consultation, queue & clinical notes", roles: ["admin","doctor","nurse"] },
   { id: "/ipd",          label: "IPD & Wards",  icon: BedDouble,       description: "Inpatient ward management",     roles: ["admin","doctor","nurse"] },
   { id: "/lab",          label: "Laboratory",   icon: FlaskConical,    description: "Tests, samples & reports",      roles: ["admin","doctor","nurse","lab_tech"] },
-  { id: "/pharmacy",     label: "Pharmacy",     icon: Pill,            description: "Dispensing & drug inventory",   roles: ["admin","pharmacist","nurse"] },
-  { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",     roles: ["admin","finance","receptionist","pharmacist"] },
+  { id: "/pharmacy",     label: "Pharmacy",     icon: Pill,            description: "Dispensing & drug inventory",   roles: ["admin","pharmacist","pharmacy_admin","nurse"] },
+  { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",     roles: ["admin","finance","receptionist","pharmacist","pharmacy_admin"] },
   { id: "/analytics",    label: "Analytics",    icon: BarChart3,       description: "Clinical & business insights",  roles: ["admin","finance"] },
 ];
 
@@ -37,6 +37,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   nurse:        "Nursing Staff",
   receptionist: "Front Desk",
   pharmacist:   "Pharmacist",
+  pharmacy_admin: "Pharmacy Admin",
   lab_tech:     "Lab Technician",
   finance:      "Finance Officer",
 };
@@ -47,6 +48,7 @@ const ROLE_COLORS: Record<UserRole, string> = {
   nurse:        "bg-emerald-100 text-emerald-700",
   receptionist: "bg-violet-100 text-violet-700",
   pharmacist:   "bg-amber-100 text-amber-700",
+  pharmacy_admin: "bg-amber-200 text-amber-800",
   lab_tech:     "bg-indigo-100 text-indigo-700",
   finance:      "bg-rose-100 text-rose-700",
 };

@@ -16,6 +16,7 @@ import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
 import ModalErrorBoundary from "@/components/ModalErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "@/hooks/use-toast";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
@@ -140,6 +141,8 @@ export default function BillingPage() {
     try {
       await billingApi.update(bill._id || bill.id, { paid: bill.amount, status: "Paid" });
       qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Payment failed", description: err.message || "Failed to mark bill as paid." });
     } finally {
       setPaying(null);
     }

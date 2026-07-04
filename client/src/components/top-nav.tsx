@@ -29,6 +29,7 @@ const ROLE_BADGE: Record<UserRole, { label: string; color: string }> = {
   nurse:        { label: "Nurse",      color: "bg-emerald-100 text-emerald-700" },
   receptionist: { label: "Front Desk", color: "bg-violet-100 text-violet-700" },
   pharmacist:   { label: "Pharmacist", color: "bg-amber-100 text-amber-700" },
+  pharmacy_admin: { label: "Pharmacy Admin", color: "bg-amber-200 text-amber-800" },
   lab_tech:     { label: "Lab Tech",   color: "bg-indigo-100 text-indigo-700" },
   finance:      { label: "Finance",    color: "bg-rose-100 text-rose-700" },
 };

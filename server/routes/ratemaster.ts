@@ -6,7 +6,7 @@ const router = Router();
 router.use(authMiddleware);
 
 // GET /api/ratemaster
-router.get("/", requireRole("admin", "finance", "receptionist", "doctor", "nurse", "lab_tech", "pharmacist"), async (req: AuthRequest, res) => {
+router.get("/", requireRole("admin", "finance", "receptionist", "doctor", "nurse", "lab_tech", "pharmacist", "pharmacy_admin"), async (req: AuthRequest, res) => {
   try {
     const { category, search } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId, isActive: true };

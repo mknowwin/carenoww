@@ -8,7 +8,7 @@ const router = Router();
 router.use(authMiddleware);
 
 // ── GET /api/prescriptions ────────────────────────────────────────────────────
-router.get("/", requireRole("admin", "doctor", "nurse", "pharmacist"), async (req: AuthRequest, res) => {
+router.get("/", requireRole("admin", "doctor", "nurse", "pharmacist", "pharmacy_admin"), async (req: AuthRequest, res) => {
   try {
     const { patientId, appointmentId, admissionId, status } = req.query as Record<string, string>;
     const query: any = { tenantId: req.user!.tenantId };

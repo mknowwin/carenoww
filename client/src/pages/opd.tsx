@@ -16,6 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import LabOrderModal from "@/components/modals/LabOrderModal";
 import PrescriptionModal from "@/components/modals/PrescriptionModal";
 import AdmitModal from "@/components/modals/AdmitModal";
+import { toast } from "@/hooks/use-toast";
 
 // ── DICOM Renderer ────────────────────────────────────────────────────────────
 async function renderDicom(base64: string, canvas: HTMLCanvasElement) {
@@ -736,6 +737,8 @@ export default function OPDPage() {
         qc.invalidateQueries({ queryKey: ["appointments"] });
         qc.invalidateQueries({ queryKey: ["queue"] });
       }
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Sign-off failed", description: err.message || "Failed to complete and sign consultation." });
     } finally {
       setSigning(false);
     }

@@ -13,7 +13,7 @@ export interface IDrugBatch extends Document {
   purchasePricePerUnit: number;
   mrpPerUnit: number;
   grnId?: mongoose.Types.ObjectId;
-  status: "Active" | "Exhausted" | "Expired" | "Quarantine";
+  status: "Active" | "Exhausted" | "Expired" | "Quarantine" | "Cancelled";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -32,7 +32,7 @@ const DrugBatchSchema = new Schema<IDrugBatch>(
     purchasePricePerUnit: { type: Number, default: 0 },
     mrpPerUnit:           { type: Number, default: 0 },
     grnId:                { type: Schema.Types.ObjectId, ref: "GRN" },
-    status:               { type: String, enum: ["Active", "Exhausted", "Expired", "Quarantine"], default: "Active" },
+    status:               { type: String, enum: ["Active", "Exhausted", "Expired", "Quarantine", "Cancelled"], default: "Active" },
   },
   { timestamps: true }
 );

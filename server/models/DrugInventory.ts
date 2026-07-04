@@ -14,6 +14,7 @@ export interface IDrugInventory extends Document {
   mrpPerUnit: number;
   purchasePricePerUnit: number;
   isBatchTracked: boolean;
+  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,6 +34,7 @@ const DrugInventorySchema = new Schema<IDrugInventory>(
     mrpPerUnit:           { type: Number, default: 0 },
     purchasePricePerUnit: { type: Number, default: 0 },
     isBatchTracked:       { type: Boolean, default: false },
+    isActive:             { type: Boolean, default: true, index: true },
   },
   { timestamps: true }
 );

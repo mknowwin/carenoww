@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { appointments as apptApi, patients as patientsApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 import {
   User, Clock, CheckCircle2, Phone, Hash, ChevronRight,
   Stethoscope, AlertCircle, RefreshCw, Loader2, CalendarDays,
@@ -163,6 +164,8 @@ export default function DoctorQueuePage() {
       await apptApi.update(apt._id, { status: "Completed" });
       qc.invalidateQueries({ queryKey: ["queue"] });
       setSelectedPatient(null);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Complete failed", description: err.message || "Failed to complete consultation." });
     } finally {
       setActionId(null);
     }

@@ -15,6 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 import { printLabReport } from "@/lib/print";
 import { buildParameterTemplate } from "@/lib/labTestMaster";
+import { toast } from "@/hooks/use-toast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface LabParam {
@@ -420,6 +421,8 @@ export default function LabPage() {
     try {
       await labApi.update(id, payload);
       qc.invalidateQueries({ queryKey: ["lab-orders"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Update failed", description: err.message || "Failed to update lab order." });
     } finally {
       setBusy(null);
     }
