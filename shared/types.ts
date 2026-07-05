@@ -21,10 +21,40 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface ApiError {
-  error: string;
-  message?: string;
+export type ErrorCode =
+  | "VALIDATION_ERROR"
+  | "BAD_REQUEST"
+  | "UNAUTHORIZED"
+  | "INVALID_TOKEN"
+  | "TOKEN_EXPIRED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "ROUTE_NOT_FOUND"
+  | "CONFLICT"
+  | "DUPLICATE_KEY"
+  | "RATE_LIMITED"
+  | "INTERNAL_ERROR"
+  | "DB_ERROR"
+  | "NETWORK_ERROR"; // frontend-only: fetch itself failed, no HTTP response
+
+export interface ApiErrorBody {
+  code: ErrorCode;
+  message: string;
+  details?: unknown;
 }
+
+export interface ApiErrorResponse {
+  success: false;
+  requestId: string;
+  error: ApiErrorBody;
+}
+
+export interface ApiSuccessResponse<T> {
+  success: true;
+  data: T;
+}
+
+export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 
 // ── Tenant (Hospital) ─────────────────────────────────────────────────────────
 export interface TaxConfig {

@@ -9,10 +9,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DRUG_UNITS } from "@/lib/constants";
 import {
   Pill, Search, Plus, AlertTriangle, CheckCircle2,
-  Clock, Package, RefreshCw, FileText, History, ShoppingCart, Wrench, Pencil, Trash2,
-  BarChart3, Printer, Upload,
+  Clock, Package, RefreshCw, FileText, History, ShoppingCart, SlidersHorizontal, Pencil, Trash2,
+  BarChart3, Printer, Upload, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { printLowStockReport, printExpiryReport, printCurrentStockReport } from "@/lib/print";
+import { printExpiryReport, printCurrentStockReport } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { pharmacy as pharmacyApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -74,6 +74,33 @@ const INVENTORY_STATUS_COLORS: Record<string, string> = {
   Low:      "bg-amber-100 text-amber-700",
   Critical: "bg-red-100 text-red-700",
 };
+
+const INVENTORY_STATUS_ACCENT: Record<string, string> = {
+  OK:       "border-l-green-500",
+  Low:      "border-l-amber-500",
+  Critical: "border-l-red-500",
+};
+
+const INVENTORY_STATUS_ICON_BG: Record<string, string> = {
+  OK:       "bg-green-50 text-green-600",
+  Low:      "bg-amber-50 text-amber-600",
+  Critical: "bg-red-50 text-red-600",
+};
+
+const INVENTORY_STATUS_BAR: Record<string, string> = {
+  OK:       "bg-green-500",
+  Low:      "bg-amber-500",
+  Critical: "bg-red-500",
+};
+
+// Windowed page numbers around `current`, capped at `size` entries, clamped to [1, total]
+function getPageWindow(current: number, total: number, size = 5): number[] {
+  if (total <= size) return Array.from({ length: total }, (_, i) => i + 1);
+  let start = Math.max(1, current - Math.floor(size / 2));
+  let end = start + size - 1;
+  if (end > total) { end = total; start = end - size + 1; }
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
 
 const TYPE_COLORS: Record<string, string> = {
   OPD: "bg-teal-100 text-teal-700",
@@ -168,6 +195,8 @@ export default function PharmacyPage() {
 
   // Inventory tab
   const [invSearch, setInvSearch]   = useState("");
+  const [invPage, setInvPage]       = useState(1);
+  const [invLimit, setInvLimit]     = useState(10);
   const [showInactive, setShowInactive] = useState(false);
   const [showAddDrug, setShowAddDrug] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
@@ -194,7 +223,6 @@ export default function PharmacyPage() {
   const [activeTab, setActiveTab]           = useState("prescriptions");
   const [stockStatusFilter, setStockStatusFilter] = useState<"All" | "OK" | "Low" | "Critical">("All");
   const [stockSearch, setStockSearch]       = useState("");
-  const [lowStockFilter, setLowStockFilter] = useState<"Low" | "Critical" | "both">("both");
   const [expiryWithin, setExpiryWithin]     = useState("90");
   const [includeExpired, setIncludeExpired] = useState(true);
 
@@ -207,9 +235,22 @@ export default function PharmacyPage() {
     refetchInterval: 20_000,
   });
 
+  // Paginated + server-side searched list backing the Inventory tab table
   const { data: inventoryData, isLoading: invLoading } = useQuery({
-    queryKey: ["pharmacy-inventory", showInactive],
-    queryFn: () => pharmacyApi.inventory.list(showInactive ? { includeInactive: "true" } : undefined),
+    queryKey: ["pharmacy-inventory", "table", showInactive, invSearch, invPage, invLimit],
+    queryFn: () => pharmacyApi.inventory.list({
+      ...(showInactive ? { includeInactive: "true" } : {}),
+      ...(invSearch.trim() ? { search: invSearch.trim() } : {}),
+      page: String(invPage),
+      limit: String(invLimit),
+    }),
+    retry: false,
+  });
+
+  // Full active catalog — feeds stock stats and drug-picker dropdowns (GRN, Dispense-at-Counter)
+  const { data: inventoryFullData } = useQuery({
+    queryKey: ["pharmacy-inventory", "full"],
+    queryFn: () => pharmacyApi.inventory.list({ limit: "1000" }),
     retry: false,
   });
 
@@ -225,13 +266,6 @@ export default function PharmacyPage() {
     retry: false,
   });
 
-  const { data: lowStockData, isLoading: lowStockLoading } = useQuery({
-    queryKey: ["pharmacy-low-stock", lowStockFilter],
-    queryFn: () => pharmacyApi.inventory.lowStock(lowStockFilter),
-    enabled: activeTab === "reports",
-    retry: false,
-  });
-
   const { data: expiryData, isLoading: expiryLoading } = useQuery({
     queryKey: ["pharmacy-expiry", expiryWithin, includeExpired],
     queryFn: () => pharmacyApi.batches.expiryReport({ expiryWithin, includeExpired: String(includeExpired) }),
@@ -241,18 +275,24 @@ export default function PharmacyPage() {
 
   const { data: stockReportData = [], isLoading: stockReportLoading } = useQuery({
     queryKey: ["pharmacy-stock-report", stockStatusFilter, stockSearch],
-    queryFn: () => {
-      const params: Record<string, string> = {};
+    queryFn: async () => {
+      const params: Record<string, string> = { limit: "1000" };
       if (stockStatusFilter !== "All") params.status = stockStatusFilter;
       if (stockSearch.trim()) params.search = stockSearch.trim();
-      return pharmacyApi.inventory.list(params) as Promise<any[]>;
+      const data = await pharmacyApi.inventory.list(params);
+      return (data?.drugs ?? []) as any[];
     },
     enabled: activeTab === "reports",
     retry: false,
   });
 
   const orders: PharmacyOrder[]   = ordersData?.orders  ?? [];
-  const inventory: DrugInventory[] = inventoryData       ?? [];
+  // Full active catalog: drives stock stats and the GRN/Dispense drug-picker dropdowns
+  const inventory: DrugInventory[] = inventoryFullData?.drugs ?? [];
+  // Current page of the (server-searched) Inventory tab table
+  const tableInventory: DrugInventory[] = inventoryData?.drugs ?? [];
+  const invTotal       = inventoryData?.total ?? 0;
+  const invTotalPages  = Math.max(1, Math.ceil(invTotal / invLimit));
   const grns: any[]               = grnData?.grns        ?? [];
   const adjustments: any[]        = adjData?.adjustments ?? [];
 
@@ -270,11 +310,6 @@ export default function PharmacyPage() {
     const q = orderSearch.toLowerCase();
     const matchSearch = !q || o.patientName.toLowerCase().includes(q) || o.rxId.toLowerCase().includes(q) || o.drug.toLowerCase().includes(q);
     return matchSearch && (statusFilter === "All" || o.status === statusFilter);
-  });
-
-  const filteredInventory = inventory.filter((d) => {
-    const q = invSearch.toLowerCase();
-    return !q || d.name.toLowerCase().includes(q) || (d.category || "").toLowerCase().includes(q);
   });
 
   const filteredGrns = grns.filter((g) => {
@@ -495,10 +530,30 @@ export default function PharmacyPage() {
 
         {/* ── Tab 2: Inventory ─────────────────────────────────────────────── */}
         <TabsContent value="inventory" className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold">Inventory</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {invTotal} active item{invTotal !== 1 ? "s" : ""} · {criticalCount + lowCount} need attention
+              </p>
+            </div>
+            {canManageInventory && (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer w-fit shrink-0">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5"
+                  checked={showInactive}
+                  onChange={(e) => { setShowInactive(e.target.checked); setInvPage(1); }}
+                />
+                Show deactivated
+              </label>
+            )}
+          </div>
+
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search drug name or category…" className="pl-9 h-9" value={invSearch} onChange={(e) => setInvSearch(e.target.value)} />
+              <Input placeholder="Search drug name or category…" className="pl-9 h-9" value={invSearch} onChange={(e) => { setInvSearch(e.target.value); setInvPage(1); }} />
             </div>
             <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => setShowGRN(true)}>
               <FileText className="h-4 w-4" /> Receive Stock
@@ -511,102 +566,135 @@ export default function PharmacyPage() {
             </Button>
           </div>
 
-          {canManageInventory && (
-            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer w-fit">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5"
-                checked={showInactive}
-                onChange={(e) => setShowInactive(e.target.checked)}
-              />
-              Show deactivated drugs
-            </label>
-          )}
-
           {showAddDrug && <AddDrugForm onDone={() => setShowAddDrug(false)} />}
 
           {invLoading ? (
             <div className="text-sm text-muted-foreground py-8 text-center">Loading inventory…</div>
-          ) : filteredInventory.length === 0 ? (
+          ) : tableInventory.length === 0 ? (
             <div className="text-sm text-muted-foreground py-8 text-center">No drugs found.</div>
           ) : (
-            filteredInventory.map((drug) => (
-              <Card key={drug._id} className={drug.isActive === false ? "opacity-60" : drug.status === "Critical" ? "border-red-200" : drug.status === "Low" ? "border-amber-200" : ""}>
-                <CardContent className="p-4">
-                  <div className="flex items-start gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${drug.status === "Critical" ? "bg-red-50" : drug.status === "Low" ? "bg-amber-50" : "bg-teal-50"}`}>
-                      <Package className={`h-5 w-5 ${drug.status === "Critical" ? "text-red-600" : drug.status === "Low" ? "text-amber-600" : "text-teal-600"}`} />
+            <div className="space-y-2">
+              {tableInventory.map((drug) => (
+                <div
+                  key={drug._id}
+                  className={`flex items-center gap-3 rounded-xl border border-l-4 bg-card p-3.5 ${INVENTORY_STATUS_ACCENT[drug.status] ?? "border-l-gray-300"} ${drug.isActive === false ? "opacity-60" : ""}`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${INVENTORY_STATUS_ICON_BG[drug.status] ?? "bg-gray-50 text-gray-600"}`}>
+                    <Package className="h-5 w-5" />
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm">{drug.name}</span>
+                      <Badge className={`text-xs ${INVENTORY_STATUS_COLORS[drug.status]}`}>{drug.status}</Badge>
+                      {drug.isBatchTracked && <Badge variant="outline" className="text-xs">Batch tracked</Badge>}
+                      {drug.isActive === false && <Badge variant="outline" className="text-xs text-muted-foreground">Deactivated</Badge>}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm">{drug.name}</span>
-                        {drug.category && <span className="text-xs text-muted-foreground">{drug.category}</span>}
-                        <Badge className={`text-xs ${INVENTORY_STATUS_COLORS[drug.status]}`}>{drug.status}</Badge>
-                        {drug.isBatchTracked && <Badge variant="outline" className="text-xs">Batch tracked</Badge>}
-                        {drug.isActive === false && <Badge variant="outline" className="text-xs text-muted-foreground">Deactivated</Badge>}
-                      </div>
-                      <div className="text-sm mt-0.5">
-                        Stock: <span className="font-medium">{drug.stock} {drug.unit}</span>
-                        <span className="text-muted-foreground text-xs ml-2">· Reorder at {drug.reorderLevel} {drug.unit}</span>
-                      </div>
-                      {drug.mrpPerUnit ? (
-                        <div className="text-xs text-muted-foreground">MRP: ₹{drug.mrpPerUnit}/{drug.unit}{drug.purchasePricePerUnit ? ` · Cost: ₹${drug.purchasePricePerUnit}` : ""}</div>
-                      ) : null}
-                      {(drug.supplier || drug.hsnCode) && (
-                        <div className="text-xs text-muted-foreground">
-                          {drug.supplier && <span>{drug.supplier}</span>}
-                          {drug.supplier && drug.hsnCode && <span> · </span>}
-                          {drug.hsnCode && <span>HSN: {drug.hsnCode}</span>}
-                        </div>
-                      )}
+                    {drug.supplier && <div className="text-xs text-muted-foreground mt-0.5">{drug.supplier}</div>}
+                  </div>
+
+                  <div className="w-40 shrink-0">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-semibold text-sm">{drug.stock.toLocaleString()} {drug.unit}</span>
                     </div>
-                    <div className="flex flex-col gap-1.5 shrink-0 items-end">
-                      {drug.isActive !== false && (
-                        <>
-                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setShowGRN(true)}>
-                            <Plus className="h-3 w-3" /> GRN
-                          </Button>
-                          {canManageInventory && (
-                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setEditDrug(drug)}>
-                              <Pencil className="h-3 w-3" /> Edit
-                            </Button>
-                          )}
-                        </>
-                      )}
-                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setHistoryDrug(drug)}>
-                        <History className="h-3 w-3" /> History
-                      </Button>
-                      {drug.isActive === false ? (
-                        canManageInventory && (
-                          <Button
-                            size="sm" variant="outline" className="h-7 text-xs gap-1 text-green-600 hover:text-green-700"
-                            disabled={deactivatingDrug === drug._id}
-                            onClick={() => reactivateDrug(drug)}
-                          >
-                            <CheckCircle2 className="h-3 w-3" /> Reactivate
-                          </Button>
-                        )
-                      ) : (
-                        <>
-                          <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-orange-600 hover:text-orange-700" onClick={() => setAdjustDrug(drug)}>
-                            <Wrench className="h-3 w-3" /> Adjust
-                          </Button>
-                          {canManageInventory && (
-                            <Button
-                              size="sm" variant="ghost" className="h-7 text-xs gap-1 text-red-600 hover:text-red-700"
-                              disabled={deactivatingDrug === drug._id}
-                              onClick={() => deactivateDrug(drug)}
-                            >
-                              <Trash2 className="h-3 w-3" /> Deactivate
-                            </Button>
-                          )}
-                        </>
-                      )}
+                    <div className="text-xs text-muted-foreground">reorder {drug.reorderLevel.toLocaleString()} {drug.unit}</div>
+                    <div className="h-1.5 w-full rounded-full bg-gray-100 mt-1.5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${INVENTORY_STATUS_BAR[drug.status] ?? "bg-gray-400"}`}
+                        style={{ width: `${Math.min(100, (drug.stock / (drug.reorderLevel || 1)) * 100)}%` }}
+                      />
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {canManageInventory && drug.isActive !== false && (
+                      <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setEditDrug(drug)} title="Edit">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setHistoryDrug(drug)} title="History">
+                      <History className="h-3.5 w-3.5" />
+                    </Button>
+                    {drug.isActive === false ? (
+                      canManageInventory && (
+                        <Button
+                          size="icon" variant="outline" className="h-8 w-8 text-green-600 hover:text-green-700"
+                          disabled={deactivatingDrug === drug._id}
+                          onClick={() => reactivateDrug(drug)}
+                          title="Reactivate"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )
+                    ) : (
+                      <>
+                        <Button size="icon" variant="outline" className="h-8 w-8 text-orange-600 hover:text-orange-700" onClick={() => setAdjustDrug(drug)} title="Adjust stock">
+                          <SlidersHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                        {canManageInventory && (
+                          <Button
+                            size="icon" variant="outline" className="h-8 w-8 text-red-600 hover:text-red-700 border-red-200"
+                            disabled={deactivatingDrug === drug._id}
+                            onClick={() => deactivateDrug(drug)}
+                            title="Deactivate"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!invLoading && invTotal > 0 && (
+            <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">
+                  Showing {(invPage - 1) * invLimit + 1}–{Math.min(invPage * invLimit, invTotal)} of {invTotal}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">Per page</span>
+                  <Select value={String(invLimit)} onValueChange={(v) => { setInvLimit(Number(v)); setInvPage(1); }}>
+                    <SelectTrigger className="h-8 w-[68px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm" variant="outline" className="h-8 gap-1 text-xs"
+                  disabled={invPage <= 1}
+                  onClick={() => setInvPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" /> Prev
+                </Button>
+                {getPageWindow(invPage, invTotalPages).map((p) => (
+                  <Button
+                    key={p}
+                    size="sm"
+                    variant={p === invPage ? "default" : "outline"}
+                    className={`h-8 w-8 p-0 text-xs ${p === invPage ? "bg-teal-700 hover:bg-teal-800" : ""}`}
+                    onClick={() => setInvPage(p)}
+                  >
+                    {p}
+                  </Button>
+                ))}
+                <Button
+                  size="sm" variant="outline" className="h-8 gap-1 text-xs"
+                  disabled={invPage >= invTotalPages}
+                  onClick={() => setInvPage((p) => Math.min(invTotalPages, p + 1))}
+                >
+                  Next <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
           )}
         </TabsContent>
 
@@ -810,87 +898,6 @@ export default function PharmacyPage() {
                   </Card>
                 )}
               </div>
-
-          <div className="border-t" />
-
-          {/* Section C: Low Stock Report */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="font-semibold text-sm">Low Stock Report</h3>
-                <p className="text-xs text-muted-foreground">Drugs below or near reorder level</p>
-              </div>
-              <Button size="sm" variant="outline" className="h-9 gap-1.5 shrink-0"
-                onClick={() => printLowStockReport(lowStockData ?? [], lowStockFilter)}>
-                <Printer className="h-4 w-4" /> Print
-              </Button>
-            </div>
-
-            <div className="flex gap-1.5 flex-wrap">
-              {([["both", "All (Low + Critical)"], ["Low", "Low Only"], ["Critical", "Critical Only"]] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => setLowStockFilter(key)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
-                    lowStockFilter === key
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                  }`}
-                >
-                  {label}
-                  {key !== "both" && (
-                    <span className="ml-1.5 opacity-70">
-                      {key === "Low" ? lowCount : criticalCount}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {lowStockLoading ? (
-              <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
-            ) : (lowStockData ?? []).length === 0 ? (
-              <Card>
-                <CardContent className="py-10 text-center">
-                  <Package className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No low stock items found</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardContent className="p-0 overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b bg-muted/40">
-                          {["#", "Drug Name", "Category", "Stock", "Reorder Level", "Status"].map((h, i) => (
-                            <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 3 ? "text-left" : "text-right"} ${i === 5 ? "text-center" : ""}`}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(lowStockData ?? []).map((drug: any, idx: number) => (
-                          <tr key={drug._id} className="border-b last:border-0 hover:bg-muted/20">
-                            <td className="py-2.5 px-4 text-muted-foreground">{idx + 1}</td>
-                            <td className="py-2.5 px-4 font-medium">{drug.name}</td>
-                            <td className="py-2.5 px-4 text-muted-foreground">{drug.category || "—"}</td>
-                            <td className="py-2.5 px-4 text-right">{drug.stock} {drug.unit}</td>
-                            <td className="py-2.5 px-4 text-right text-muted-foreground">{drug.reorderLevel} {drug.unit}</td>
-                            <td className="py-2.5 px-4 text-center">
-                              <Badge className={`text-xs ${INVENTORY_STATUS_COLORS[drug.status]}`}>{drug.status}</Badge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="px-4 py-2 text-xs text-muted-foreground border-t">
-                    {(lowStockData ?? []).length} item{(lowStockData ?? []).length !== 1 ? "s" : ""}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
 
           <div className="border-t" />
 

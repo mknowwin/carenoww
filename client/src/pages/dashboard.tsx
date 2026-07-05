@@ -378,7 +378,7 @@ export default function DashboardPage() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Referral Stats</CardTitle>
+            <CardTitle className="text-base">Doctor Referral Stats</CardTitle>
             <div className="flex items-center gap-2">
               <input
                 type="month"

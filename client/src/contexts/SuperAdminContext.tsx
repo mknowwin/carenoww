@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { superadmin as saApi } from "../lib/api";
+import { superadmin as saApi, registerUnauthorizedHandler } from "../lib/api";
+import { toast } from "../hooks/use-toast";
 
 export interface SuperAdmin {
   email: string;
@@ -40,6 +41,14 @@ export function SuperAdminProvider({ children }: { children: ReactNode }) {
     setSuperAdmin(null);
     localStorage.removeItem(SA_STORAGE_KEY);
   };
+
+  useEffect(() => {
+    registerUnauthorizedHandler("superadmin", () => {
+      logout();
+      toast({ variant: "destructive", title: "Session expired", description: "Please log in again." });
+    });
+    return () => registerUnauthorizedHandler("superadmin", null);
+  }, []);
 
   return (
     <SuperAdminContext.Provider value={{ superAdmin, isLoading, login, logout }}>

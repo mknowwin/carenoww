@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { AppError } from "../lib/AppError.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "carenoww_dev_secret_change_in_prod";
 
@@ -17,26 +18,26 @@ export interface AuthRequest extends Request {
 export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers["authorization"];
   if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return next(AppError.unauthorized("Unauthorized"));
   }
   const token = authHeader.slice(7);
   try {
     const payload = jwt.verify(token, JWT_SECRET) as any;
     if (payload.role === "superadmin") {
-      return res.status(403).json({ error: "Use superadmin endpoints" });
+      return next(AppError.forbidden("Use superadmin endpoints"));
     }
     req.user = payload;
     next();
   } catch {
-    return res.status(401).json({ error: "Invalid or expired token" });
+    return next(new AppError("INVALID_TOKEN", { message: "Invalid or expired token" }));
   }
 }
 
 export function requireRole(...roles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    if (!req.user) return next(AppError.unauthorized("Unauthorized"));
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: "Insufficient permissions" });
+      return next(AppError.forbidden("Insufficient permissions"));
     }
     next();
   };

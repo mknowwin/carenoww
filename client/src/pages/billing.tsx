@@ -14,7 +14,7 @@ import { billing as billingApi } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
-import ModalErrorBoundary from "@/components/ModalErrorBoundary";
+import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
@@ -664,14 +664,14 @@ export default function BillingPage() {
       </div>}
 
 
-      <ModalErrorBoundary>
+      <AppErrorBoundary>
         <BillingModal
           open={modalOpen}
           onClose={() => { setModalOpen(false); setEditBill(null); setPayOnly(false); }}
           existing={editBill}
           payOnly={payOnly}
         />
-      </ModalErrorBoundary>
+      </AppErrorBoundary>
     </div>
   );
 }

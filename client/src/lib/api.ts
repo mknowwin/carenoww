@@ -2,31 +2,82 @@
 
 const BASE = "/api";
 
-function getToken(): string | null {
+/** Typed error thrown by request() for both HTTP failures and network-level failures. */
+export class ApiError extends Error {
+  readonly statusCode: number;
+  readonly code: string;
+  readonly requestId?: string;
+  readonly details?: unknown;
+
+  constructor(message: string, opts: { statusCode: number; code: string; requestId?: string; details?: unknown }) {
+    super(message);
+    this.name = "ApiError";
+    this.statusCode = opts.statusCode;
+    this.code = opts.code;
+    this.requestId = opts.requestId;
+    this.details = opts.details;
+  }
+}
+
+type AuthSource = "user" | "superadmin";
+
+function getAuth(): { token: string; source: AuthSource } | null {
   try {
     const stored = localStorage.getItem("carenoww_user");
-    if (stored) return JSON.parse(stored).token || null;
+    if (stored) {
+      const token = JSON.parse(stored).token;
+      if (token) return { token, source: "user" };
+    }
     const sa = localStorage.getItem("carenoww_superadmin");
-    if (sa) return JSON.parse(sa).token || null;
+    if (sa) {
+      const token = JSON.parse(sa).token;
+      if (token) return { token, source: "superadmin" };
+    }
   } catch {}
   return null;
 }
 
+// Lets AuthContext / SuperAdminContext react to a 401 (clear session, redirect to
+// login) without api.ts importing React context — avoids a circular dependency.
+type UnauthorizedHandler = () => void;
+const unauthorizedHandlers: Record<AuthSource, UnauthorizedHandler | null> = { user: null, superadmin: null };
+export function registerUnauthorizedHandler(source: AuthSource, handler: UnauthorizedHandler | null) {
+  unauthorizedHandlers[source] = handler;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
+  const auth = getAuth();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (auth) headers["Authorization"] = `Bearer ${auth.token}`;
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...options, headers });
+  } catch {
+    throw new ApiError("Unable to reach the server. Check your connection.", { statusCode: 0, code: "NETWORK_ERROR" });
+  }
+
+  const headerRequestId = res.headers.get("X-Request-Id") ?? undefined;
+  const data = await res.json().catch(() => ({} as any));
 
   if (!res.ok) {
-    throw new Error(data.error || data.message || `HTTP ${res.status}`);
+    const code = data?.error?.code ?? "INTERNAL_ERROR";
+    const message = data?.error?.message ?? data?.message ?? `HTTP ${res.status}`;
+    if (res.status === 401) unauthorizedHandlers[auth?.source ?? "user"]?.();
+    throw new ApiError(message, {
+      statusCode: res.status,
+      code,
+      requestId: data?.requestId ?? headerRequestId,
+      details: data?.error?.details,
+    });
   }
-  return data as T;
+
+  // Backend responses are wrapped as {success: true, data}; unwrap so every
+  // existing call site below keeps working against the same shape as before.
+  return (data && data.success === true ? data.data : data) as T;
 }
 
 const get  = <T>(path: string) => request<T>(path);
@@ -155,9 +206,11 @@ export const pharmacy = {
     remove: (id: string) => del<any>(`/pharmacy/inventory/${id}`),
     reactivate: (id: string) => post<any>(`/pharmacy/inventory/${id}/reactivate`, {}),
     history: (id: string) => get<any>(`/pharmacy/inventory/${id}/history`),
-    lowStock: (filter?: "Low" | "Critical" | "both") => {
+    lowStock: async (filter?: "Low" | "Critical" | "both") => {
       const params: Record<string, string> = (!filter || filter === "both") ? { statusIn: "Low,Critical" } : { status: filter };
-      return get<any[]>(`/pharmacy/inventory?${new URLSearchParams(params).toString()}`);
+      params.limit = "1000";
+      const data = await get<any>(`/pharmacy/inventory?${new URLSearchParams(params).toString()}`);
+      return (data?.drugs ?? []) as any[];
     },
   },
   batches: {
@@ -280,8 +333,7 @@ export const suppliers = {
 
 // ── Public (no auth) ──────────────────────────────────────────────────────────
 export const publicApi = {
-  display: (tenantId: string) =>
-    fetch(`/api/public/display?tenantId=${encodeURIComponent(tenantId)}`).then((r) => r.json()),
+  display: (tenantId: string) => get<any>(`/public/display?tenantId=${encodeURIComponent(tenantId)}`),
 };
 
 export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, prescriptions, publicApi, referralDoctors, suppliers };
