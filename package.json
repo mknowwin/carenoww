@@ -13,6 +13,7 @@
     "seed": "dotenv -- tsx server/seed.ts",
     "migrate:uhid": "dotenv -- tsx server/migrate-uhid-counters.ts",
     "migrate:drug-isactive": "dotenv -- tsx server/migrate-drug-isactive.ts",
+    "migrate:masters": "dotenv -- tsx server/migrate-backfill-masters.ts",
     "check": "tsc",
     "typecheck": "tsc --noEmit"
   },
