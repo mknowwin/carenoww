@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import GRN from "../models/GRN.js";
 import DrugBatch from "../models/DrugBatch.js";
 import DrugInventory from "../models/DrugInventory.js";
@@ -39,52 +40,65 @@ export async function createGRN(tenantId: string, userName: string, body: Record
     throw AppError.badRequest("supplierName and items[] are required");
   }
 
-  const grnId = await getNextId(tenantId, "grn", "GRN-");
   const totalValue = items.reduce((s: number, it: any) => s + (it.totalCost || 0), 0);
 
-  let grn;
+  const session = await mongoose.startSession();
+  let grn: any;
   try {
-    grn = await GRN.create({
-      tenantId,
-      grnId,
-      supplierName,
-      invoiceNo: invoiceNo || "",
-      invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
-      receivedDate: receivedDate ? new Date(receivedDate) : new Date(),
-      receivedBy: userName,
-      items,
-      totalValue,
-      status,
-      notes: notes || "",
+    await session.withTransaction(async () => {
+      const grnId = await getNextId(tenantId, "grn", "GRN-", session);
+
+      const [created] = await GRN.create(
+        [{
+          tenantId,
+          grnId,
+          supplierName,
+          invoiceNo: invoiceNo || "",
+          invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
+          receivedDate: receivedDate ? new Date(receivedDate) : new Date(),
+          receivedBy: userName,
+          items,
+          totalValue,
+          status,
+          notes: notes || "",
+        }],
+        { session }
+      );
+      grn = created;
+
+      // Create DrugBatch records and update inventory for each item
+      if (status === "Received") {
+        for (const item of items) {
+          if (!item.drugId || !item.batchNo || !item.expiryDate || !item.quantityReceived) continue;
+
+          await DrugBatch.create(
+            [{
+              tenantId,
+              drugId: item.drugId,
+              batchNo: item.batchNo,
+              supplierName,
+              expiryDate: new Date(item.expiryDate),
+              quantityReceived: item.quantityReceived,
+              quantityRemaining: item.quantityReceived,
+              purchasePricePerUnit: item.purchasePricePerUnit || 0,
+              mrpPerUnit: item.mrpPerUnit || 0,
+              grnId: grn._id,
+              status: "Active",
+            }],
+            { session }
+          );
+
+          // Mark drug as batch-tracked and sync stock
+          await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { isBatchTracked: true } }, { session });
+          await syncDrugStock(tenantId, item.drugId, session);
+        }
+      }
     });
   } catch (err: any) {
     if (err.code === 11000) throw AppError.conflict("Batch number already exists");
     throw err;
-  }
-
-  // Create DrugBatch records and update inventory for each item
-  if (status === "Received") {
-    for (const item of items) {
-      if (!item.drugId || !item.batchNo || !item.expiryDate || !item.quantityReceived) continue;
-
-      await DrugBatch.create({
-        tenantId,
-        drugId: item.drugId,
-        batchNo: item.batchNo,
-        supplierName,
-        expiryDate: new Date(item.expiryDate),
-        quantityReceived: item.quantityReceived,
-        quantityRemaining: item.quantityReceived,
-        purchasePricePerUnit: item.purchasePricePerUnit || 0,
-        mrpPerUnit: item.mrpPerUnit || 0,
-        grnId: grn._id,
-        status: "Active",
-      });
-
-      // Mark drug as batch-tracked and sync stock
-      await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { isBatchTracked: true } });
-      await syncDrugStock(tenantId, item.drugId);
-    }
+  } finally {
+    await session.endSession();
   }
 
   return grn;
@@ -98,32 +112,46 @@ export async function updateGRN(tenantId: string, id: string, body: Record<strin
   const wasReceived = grn.status === "Received";
   const becomeReceived = body.status === "Received" && !wasReceived;
 
-  const updated = await GRN.findOneAndUpdate(
-    { _id: id, tenantId },
-    { $set: body },
-    { new: true }
-  );
+  const session = await mongoose.startSession();
+  let updated: any;
+  try {
+    await session.withTransaction(async () => {
+      updated = await GRN.findOneAndUpdate(
+        { _id: id, tenantId },
+        { $set: body },
+        { new: true, session }
+      );
 
-  // If transitioning Draft → Received, create batches now
-  if (becomeReceived && updated) {
-    for (const item of updated.items) {
-      if (!item.drugId || !item.batchNo || !item.quantityReceived) continue;
-      await DrugBatch.create({
-        tenantId,
-        drugId: item.drugId,
-        batchNo: item.batchNo,
-        supplierName: updated.supplierName,
-        expiryDate: item.expiryDate,
-        quantityReceived: item.quantityReceived,
-        quantityRemaining: item.quantityReceived,
-        purchasePricePerUnit: item.purchasePricePerUnit || 0,
-        mrpPerUnit: item.mrpPerUnit || 0,
-        grnId: updated._id,
-        status: "Active",
-      });
-      await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { isBatchTracked: true } });
-      await syncDrugStock(tenantId, item.drugId.toString());
-    }
+      // If transitioning Draft → Received, create batches now
+      if (becomeReceived && updated) {
+        for (const item of updated.items) {
+          if (!item.drugId || !item.batchNo || !item.quantityReceived) continue;
+          await DrugBatch.create(
+            [{
+              tenantId,
+              drugId: item.drugId,
+              batchNo: item.batchNo,
+              supplierName: updated.supplierName,
+              expiryDate: item.expiryDate,
+              quantityReceived: item.quantityReceived,
+              quantityRemaining: item.quantityReceived,
+              purchasePricePerUnit: item.purchasePricePerUnit || 0,
+              mrpPerUnit: item.mrpPerUnit || 0,
+              grnId: updated._id,
+              status: "Active",
+            }],
+            { session }
+          );
+          await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { isBatchTracked: true } }, { session });
+          await syncDrugStock(tenantId, item.drugId.toString(), session);
+        }
+      }
+    });
+  } catch (err: any) {
+    if (err.code === 11000) throw AppError.conflict("Batch number already exists");
+    throw err;
+  } finally {
+    await session.endSession();
   }
 
   return updated;

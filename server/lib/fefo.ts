@@ -2,43 +2,44 @@ import mongoose from "mongoose";
 import DrugInventory from "../models/DrugInventory.js";
 import DrugBatch from "../models/DrugBatch.js";
 
-export async function getAvailableStock(tenantId: string, drugId: string): Promise<number> {
-  const drug = await DrugInventory.findOne({ _id: drugId, tenantId });
+export async function getAvailableStock(tenantId: string, drugId: string, session?: mongoose.ClientSession): Promise<number> {
+  const drug = await DrugInventory.findOne({ _id: drugId, tenantId }).session(session ?? null);
   if (!drug) return 0;
   if (!drug.isBatchTracked) return drug.stock;
 
   const agg = await DrugBatch.aggregate([
     { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), drugId: new mongoose.Types.ObjectId(drugId), status: "Active" } },
     { $group: { _id: null, total: { $sum: "$quantityRemaining" } } },
-  ]);
+  ]).session(session ?? null);
   return agg[0]?.total ?? 0;
 }
 
-export async function syncDrugStock(tenantId: string, drugId: string) {
+export async function syncDrugStock(tenantId: string, drugId: string, session?: mongoose.ClientSession) {
   const agg = await DrugBatch.aggregate([
     { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), drugId: new mongoose.Types.ObjectId(drugId), status: "Active" } },
     { $group: { _id: null, total: { $sum: "$quantityRemaining" } } },
-  ]);
+  ]).session(session ?? null);
   const stock = agg[0]?.total ?? 0;
-  const drug = await DrugInventory.findById(drugId);
+  const drug = await DrugInventory.findById(drugId).session(session ?? null);
   if (!drug) return;
   const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
   const ratio = stock / reorderLevel;
   const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
-  await DrugInventory.findByIdAndUpdate(drugId, { $set: { stock, status } });
+  await DrugInventory.findByIdAndUpdate(drugId, { $set: { stock, status } }, { session });
 }
 
 export async function fefoDeduct(
   tenantId: string,
   drugId: string,
-  quantity: number
+  quantity: number,
+  session?: mongoose.ClientSession
 ): Promise<Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number }>> {
   const batches = await DrugBatch.find({
     tenantId: new mongoose.Types.ObjectId(tenantId),
     drugId: new mongoose.Types.ObjectId(drugId),
     status: "Active",
     quantityRemaining: { $gt: 0 },
-  }).sort({ expiryDate: 1 });
+  }).sort({ expiryDate: 1 }).session(session ?? null);
 
   const available = batches.reduce((s, b) => s + b.quantityRemaining, 0);
   if (available < quantity) {
@@ -60,7 +61,7 @@ export async function fefoDeduct(
         quantityRemaining: newQty,
         status: newQty === 0 ? "Exhausted" : "Active",
       },
-    });
+    }, { session });
     used.push({ batchId: batch._id as mongoose.Types.ObjectId, batchNo: batch.batchNo, deducted: take, mrpPerUnit: batch.mrpPerUnit ?? 0 });
     remaining -= take;
   }

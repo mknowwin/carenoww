@@ -365,7 +365,7 @@ export interface BillingRecord {
   totalAdvance?: number;
   advances?: AdvanceEntry[];
   payments?: PaymentEntry[];
-  status: "Paid" | "Partial" | "Pending" | "Claimed";
+  status: "Draft" | "Paid" | "Partial" | "Pending" | "Claimed";
   payer: string;
   paymentMode?: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
   type: string;

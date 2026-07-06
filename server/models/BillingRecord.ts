@@ -70,7 +70,7 @@ export interface IBillingRecord extends Document {
   totalAdvance: number;
   advances: IAdvanceEntry[];
   payments: IPaymentEntry[];
-  status: "Paid" | "Partial" | "Pending" | "Claimed";
+  status: "Draft" | "Paid" | "Partial" | "Pending" | "Claimed";
   payer: string;
   paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
   type: "OPD" | "IPD" | "Emergency" | "Lab" | "Pharmacy";
@@ -89,11 +89,11 @@ export interface IBillingRecord extends Document {
 }
 
 const BillItemSchema = new Schema<IBillItem>({
-  description:  { type: String, required: true },
+  description:  { type: String, default: "" },
   category:     { type: String, enum: ["Consultation", "Lab", "Pharmacy", "Procedure", "Diagnosis", "Room", "Other"], default: "Other" },
   quantity:     { type: Number, default: 1 },
-  unitPrice:    { type: Number, required: true },
-  total:        { type: Number, required: true },
+  unitPrice:    { type: Number, default: 0 },
+  total:        { type: Number, default: 0 },
   hsnCode:      { type: String, default: "" },
   taxRate:      { type: Number, default: 0 },
   cgst:         { type: Number, default: 0 },
@@ -150,7 +150,7 @@ const BillingRecordSchema = new Schema<IBillingRecord>(
     admissionId:    { type: String },
     date:           { type: Date, default: Date.now },
     items:          { type: [BillItemSchema], default: [] },
-    amount:         { type: Number, required: true },
+    amount:         { type: Number, default: 0 },
     paid:           { type: Number, default: 0 },
     balance:        { type: Number, default: 0 },
     discount:       { type: Number, default: 0 },
@@ -159,7 +159,7 @@ const BillingRecordSchema = new Schema<IBillingRecord>(
     totalAdvance:   { type: Number, default: 0 },
     advances:       { type: [AdvanceEntrySchema], default: [] },
     payments:       { type: [PaymentEntrySchema], default: [] },
-    status:         { type: String, enum: ["Paid", "Partial", "Pending", "Claimed"], default: "Pending" },
+    status:         { type: String, enum: ["Draft", "Paid", "Partial", "Pending", "Claimed"], default: "Pending" },
     payer:          { type: String, default: "Self" },
     paymentMode:    { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online"], default: "Cash" },
     type:           { type: String, enum: ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"], default: "OPD" },

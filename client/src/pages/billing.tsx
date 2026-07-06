@@ -21,6 +21,7 @@ import { confirm } from "@/hooks/use-confirm";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
+  Draft:   "bg-slate-100 text-slate-600",
   Paid:    "bg-green-100 text-green-700",
   Partial: "bg-amber-100 text-amber-700",
   Pending: "bg-red-100 text-red-700",
@@ -120,11 +121,14 @@ export default function BillingPage() {
   });
 
   // ── summary stats ─────────────────────────────────────────────────────────
-  const totalBilled    = ALL_BILLS.reduce((a, b) => a + (b.amount || 0), 0);
-  const totalCollected = ALL_BILLS.reduce((a, b) => a + (b.paid   || 0), 0);
-  const totalPending   = ALL_BILLS.reduce((a, b) => a + (b.balance || 0), 0);
+  // Drafts can carry a non-zero computed amount before they're finalized — exclude
+  // them from financial totals so "Total Billed"/"Balance Due" only reflect real invoices.
+  const billableBills  = ALL_BILLS.filter((b) => b.status !== "Draft");
+  const totalBilled    = billableBills.reduce((a, b) => a + (b.amount || 0), 0);
+  const totalCollected = billableBills.reduce((a, b) => a + (b.paid   || 0), 0);
+  const totalPending   = billableBills.reduce((a, b) => a + (b.balance || 0), 0);
   const collectionRate = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
-  const todayRevenue   = ALL_BILLS.filter(withinDate).filter((b) => dateFilter === "all"
+  const todayRevenue   = billableBills.filter(withinDate).filter((b) => dateFilter === "all"
     ? new Date(b.createdAt).toDateString() === new Date().toDateString()
     : true
   ).reduce((a, b) => a + (b.paid || 0), 0);
@@ -132,8 +136,8 @@ export default function BillingPage() {
   // type breakdown
   const byType = TYPE_TABS.slice(1).map((t) => ({
     type: t,
-    count:  ALL_BILLS.filter((b) => b.type === t).length,
-    amount: ALL_BILLS.filter((b) => b.type === t).reduce((a, b) => a + (b.amount || 0), 0),
+    count:  billableBills.filter((b) => b.type === t).length,
+    amount: billableBills.filter((b) => b.type === t).reduce((a, b) => a + (b.amount || 0), 0),
   }));
 
   const markPaid = async (bill: any) => {
@@ -489,7 +493,7 @@ export default function BillingPage() {
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="flex gap-1.5 flex-wrap">
-            {["All","Paid","Partial","Pending","Claimed"].map((s) => (
+            {["All","Draft","Paid","Partial","Pending","Claimed"].map((s) => (
               <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" className="h-9"
                 onClick={() => setStatusFilter(s)}>
                 {s}

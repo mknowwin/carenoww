@@ -39,7 +39,8 @@ const DrugBatchSchema = new Schema<IDrugBatch>(
 
 // FEFO queries: get batches for a drug ordered by expiry
 DrugBatchSchema.index({ tenantId: 1, drugId: 1, expiryDate: 1 });
-// Unique batch number per tenant
-DrugBatchSchema.index({ tenantId: 1, batchNo: 1 }, { unique: true });
+// Prevent duplicate line items within the same GRN; the same drug + batch number
+// is allowed to recur across different GRNs (e.g. repeat deliveries of one batch).
+DrugBatchSchema.index({ tenantId: 1, grnId: 1, drugId: 1, batchNo: 1 }, { unique: true });
 
 export default mongoose.model<IDrugBatch>("DrugBatch", DrugBatchSchema);

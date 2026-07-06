@@ -9,7 +9,7 @@ import { AppError } from "../lib/AppError.js";
 
 function computeStatus(amount: number, paid: number): "Paid" | "Partial" | "Pending" {
   if (paid >= amount) return "Paid";
-  if (paid > 0)       return "Partial";
+  if (paid > 0) return "Partial";
   return "Pending";
 }
 
@@ -23,6 +23,55 @@ function calcAmount(items: any[], discount: number, discountType: string, discou
 
 const FINANCIAL_FIELDS = new Set(["items", "amount", "discount", "discountType", "discountPercent"]);
 
+// Verify stock availability up front — a Pharmacy bill must not be created or
+// finalized if it can't actually be fulfilled from inventory. Deferred for
+// Drafts until they're finalized, since draft items may still change.
+async function checkPharmacyStock(tenantId: string, pharmacyItems: any[], session?: mongoose.ClientSession) {
+  const shortages: Array<{ drugId: string; name?: string; required: number; available: number }> = [];
+  for (const item of pharmacyItems) {
+    const qty = item.quantity ?? 1;
+    const available = await getAvailableStock(tenantId.toString(), item.drugId, session);
+    if (available < qty) {
+      shortages.push({ drugId: item.drugId, name: item.name || item.drugName, required: qty, available });
+    }
+  }
+  return shortages;
+}
+
+// Deduct pharmacy stock for items that carry a drugId. Availability was
+// already verified above, so this should only fail on a genuine race
+// (concurrent bill draining the same batch). Always called inside the
+// caller's transaction: throwing here aborts the whole bill create/finalize,
+// so a bill is never left committed with no matching deduction.
+async function deductPharmacyStock(tenantId: string, pharmacyItems: any[], session: mongoose.ClientSession) {
+  for (const item of pharmacyItems) {
+    const drug = await DrugInventory.findOne({ _id: item.drugId, tenantId }).session(session);
+    if (!drug) continue;
+    const qty = item.quantity ?? 1;
+
+    if (drug.isBatchTracked) {
+      // FEFO batch deduction — syncs DrugInventory.stock from batches
+      await fefoDeduct(tenantId.toString(), item.drugId, qty, session);
+      await syncDrugStock(tenantId.toString(), item.drugId, session);
+    } else {
+      if (drug.stock < qty) {
+        const err: any = new Error("Insufficient stock");
+        err.insufficientStock = true;
+        err.drugId = item.drugId;
+        err.available = drug.stock;
+        throw err;
+      }
+      // Direct stock decrement on the inventory record
+      const newStock = drug.stock - qty;
+      console.log(`Deducting ${qty} from ${item.drugId} stock ${drug.stock} → ${newStock}`);
+      const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
+      const ratio = newStock / reorderLevel;
+      const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
+      await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } }, { session });
+    }
+  }
+}
+
 export interface BillListFilters {
   status?: string;
   patientId?: string;
@@ -34,9 +83,9 @@ export interface BillListFilters {
 export async function listBills(tenantId: string, user: { id: string; role: string }, filters: BillListFilters) {
   const { status, patientId, type, page = "1", limit = "50" } = filters;
   const query: any = { tenantId };
-  if (status)    query.status    = status;
+  if (status) query.status = status;
   if (patientId) query.patientId = patientId;
-  if (type)      query.type      = type;
+  if (type) query.type = type;
   // Non-admin/finance users see only their own bills
   if (!["admin", "finance"].includes(user.role)) {
     query.createdById = user.id;
@@ -61,14 +110,17 @@ export async function createBill(tenantId: string, user: { name: string; id: str
     patientId, patientName, appointmentId, admissionId,
     items = [], amount, paid = 0,
     discount = 0, discountType = "Flat", discountPercent = 0,
-    payer, paymentMode, type, notes,
+    payer, paymentMode, type, notes, status = "Pending",
   } = body;
+
+  const isDraft = status === "Draft";
 
   if (!patientId || !patientName) {
     throw AppError.badRequest("patientId and patientName required");
   }
 
-  // Duplicate check: one bill per appointment (not for Pharmacy/Lab standalone bills)
+  // Duplicate check: one bill per appointment (not for Pharmacy/Lab standalone bills).
+  // Runs for Drafts too — a draft still reserves the appointment's bill slot.
   if (appointmentId && type !== "Pharmacy" && type !== "Lab") {
     const dupe = await BillingRecord.findOne({ tenantId, appointmentId, status: { $ne: "Claimed" } });
     if (dupe) {
@@ -80,107 +132,109 @@ export async function createBill(tenantId: string, user: { name: string; id: str
   if (!finalAmount && items.length) {
     finalAmount = calcAmount(items, discount, discountType, discountPercent);
   }
-  if (!finalAmount) throw AppError.badRequest("amount or items[] required");
+  if (!isDraft && !finalAmount) throw AppError.badRequest("amount or items[] required");
 
   // Verify stock availability up front — a Pharmacy bill must not be created
-  // if it can't actually be fulfilled from inventory.
+  // if it can't actually be fulfilled from inventory. Deferred to finalize time
+  // for Drafts (see updateBill), since items may still change before then.
   const pharmacyItems = type === "Pharmacy"
     ? (items as any[]).filter((it) => it.category === "Pharmacy" && it.drugId)
     : [];
-  if (pharmacyItems.length) {
-    const shortages: Array<{ drugId: string; name?: string; required: number; available: number }> = [];
-    for (const item of pharmacyItems) {
-      const qty = item.quantity ?? 1;
-      const available = await getAvailableStock(tenantId.toString(), item.drugId);
-      if (available < qty) {
-        shortages.push({ drugId: item.drugId, name: item.name || item.drugName, required: qty, available });
-      }
-    }
+  if (!isDraft && pharmacyItems.length) {
+    const shortages = await checkPharmacyStock(tenantId, pharmacyItems);
     if (shortages.length) {
       throw AppError.conflict("Insufficient stock for one or more items", { shortages });
     }
   }
 
-  const paidAmount = Number(paid);
-  const balance    = finalAmount - paidAmount;
-  const tenant     = await Tenant.findById(tenantId).select("settings.invoicePrefix").lean();
-  const invoicePrefix = ((tenant as any)?.settings?.invoicePrefix || "BILL").toString().trim();
-  const billId     = await getNextId(tenantId, "bill", `${invoicePrefix}-`);
+  // Drafts never carry a payment — money is only recorded once a bill is finalized.
+  const paidAmount = isDraft ? 0 : Number(paid);
+  const balance = finalAmount - paidAmount;
 
-  // Record initial payment entry if paid > 0
-  const payments: any[] = [];
-  if (paidAmount > 0) {
-    const paymentId = await getNextId(tenantId, `pay-${billId}`, "PAY-");
-    payments.push({
-      paymentId,
-      amount:      paidAmount,
-      paymentMode: paymentMode || "Cash",
-      payer:       payer       || "Self",
-      receivedBy:  user.name,
-      paidAt:      new Date(),
-    });
-  }
+  const buildDoc = (billId: string, payments: any[]) => ({
+    tenantId,
+    billId,
+    patientId, patientName,
+    appointmentId: appointmentId || undefined,
+    admissionId: admissionId || undefined,
+    items,
+    amount: finalAmount,
+    paid: paidAmount,
+    balance,
+    discount,
+    discountType,
+    discountPercent,
+    status: isDraft ? "Draft" : computeStatus(finalAmount, paidAmount),
+    payer: payer || "Self",
+    paymentMode: paymentMode || "Cash",
+    type: type || "OPD",
+    notes: notes || "",
+    createdBy: user.name,
+    createdById: user.id,
+    payments,
+    isLocked: isDraft ? false : paidAmount >= finalAmount,
+  });
 
-  let bill;
-  try {
-    bill = await BillingRecord.create({
-      tenantId,
-      billId,
-      patientId,     patientName,
-      appointmentId: appointmentId || undefined,
-      admissionId:   admissionId   || undefined,
-      items,
-      amount:         finalAmount,
-      paid:           paidAmount,
-      balance,
-      discount,
-      discountType,
-      discountPercent,
-      status:        computeStatus(finalAmount, paidAmount),
-      payer:         payer       || "Self",
-      paymentMode:   paymentMode || "Cash",
-      type:          type        || "OPD",
-      notes:         notes       || "",
-      createdBy:     user.name,
-      createdById:   user.id,
-      payments,
-      isLocked:      paidAmount >= finalAmount,
-    });
-  } catch (err: any) {
-    if (err.code === 11000) throw AppError.conflict("Bill ID conflict — retry");
-    throw err;
-  }
-
-  // Deduct pharmacy stock for items that carry a drugId. Availability was
-  // already verified above, so this should only fail on a genuine race
-  // (concurrent bill draining the same batch) — that must not be swallowed
-  // silently, since it means a paid bill went out with no matching deduction.
-  const stockDeductionErrors: Array<{ drugId: string; error: string }> = [];
-  for (const item of pharmacyItems) {
+  if (isDraft) {
+    // Drafts get a placeholder, non-fiscal id from a separate counter so an
+    // abandoned draft never leaves a gap in the real GST invoice sequence. The
+    // real BILL-xxxx number is only drawn from the tenant's fiscal counter when
+    // the draft is finalized (see updateBill).
+    const billId = await getNextId(tenantId, "bill-draft", "DFT-");
     try {
-      const drug = await DrugInventory.findOne({ _id: item.drugId, tenantId });
-      if (!drug) continue;
-      const qty = item.quantity ?? 1;
-
-      if (drug.isBatchTracked) {
-        // FEFO batch deduction — syncs DrugInventory.stock from batches
-        await fefoDeduct(tenantId.toString(), item.drugId, qty);
-        await syncDrugStock(tenantId.toString(), item.drugId);
-      } else {
-        // Direct stock decrement on the inventory record
-        const newStock = Math.max(0, drug.stock - qty);
-        const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
-        const ratio = newStock / reorderLevel;
-        const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
-        await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } });
-      }
+      return await BillingRecord.create(buildDoc(billId, []));
     } catch (err: any) {
-      console.error(`[billing] Stock deduction failed for drug ${item.drugId} on bill ${billId}:`, err);
-      stockDeductionErrors.push({ drugId: item.drugId, error: err.message || "Deduction failed" });
+      if (err.code === 11000) throw AppError.conflict("Bill ID conflict — retry");
+      throw err;
     }
   }
 
-  return stockDeductionErrors.length ? { ...bill.toObject(), stockDeductionErrors } : bill;
+  // Non-draft: fiscal billId/paymentId allocation, bill creation, and pharmacy
+  // stock deduction must all commit or all roll back together. Otherwise a
+  // stock-deduction failure could leave a committed bill with no matching
+  // deduction, or (since counters increment even on rollback outside a
+  // transaction) burn a fiscal invoice number for a bill that never went out.
+  const session = await mongoose.startSession();
+  let bill: any;
+  try {
+    await session.withTransaction(async () => {
+      const tenant = await Tenant.findById(tenantId).select("settings.invoicePrefix").session(session).lean();
+      const invoicePrefix = ((tenant as any)?.settings?.invoicePrefix || "BILL").toString().trim();
+      const billId = await getNextId(tenantId, "bill", `${invoicePrefix}-`, session);
+
+      const payments: any[] = [];
+      if (paidAmount > 0) {
+        const paymentId = await getNextId(tenantId, `pay-${billId}`, "PAY-", session);
+        payments.push({
+          paymentId,
+          amount: paidAmount,
+          paymentMode: paymentMode || "Cash",
+          payer: payer || "Self",
+          receivedBy: user.name,
+          paidAt: new Date(),
+        });
+      }
+
+      const [created] = await BillingRecord.create([buildDoc(billId, payments)], { session });
+      bill = created;
+
+      if (pharmacyItems.length) {
+        await deductPharmacyStock(tenantId, pharmacyItems, session);
+      }
+    });
+  } catch (err: any) {
+    if (err.code === 11000) throw AppError.conflict("Bill ID conflict — retry");
+    if (err.insufficientStock) {
+      throw AppError.conflict("Insufficient stock for one or more items", {
+        shortages: [{ drugId: err.drugId, available: err.available }],
+      });
+    }
+    throw err;
+  } finally {
+    await session.endSession();
+  }
+
+  return bill;
 }
 
 export async function updateBill(tenantId: string, id: string, body: Record<string, any>) {
@@ -199,34 +253,97 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
   const update: any = {};
 
   if (paymentMode !== undefined) update.paymentMode = paymentMode;
-  if (payer   !== undefined)     update.payer   = payer;
-  if (notes   !== undefined)     update.notes   = notes;
-  if (status  !== undefined)     update.status  = status;
-  if (discountType    !== undefined) update.discountType    = discountType;
+  if (payer !== undefined) update.payer = payer;
+  if (notes !== undefined) update.notes = notes;
+  if (status !== undefined) update.status = status;
+  if (discountType !== undefined) update.discountType = discountType;
   if (discountPercent !== undefined) update.discountPercent = discountPercent;
 
-  const finalItems         = items    !== undefined ? items    : existing.items;
-  const finalDiscount      = discount !== undefined ? discount : existing.discount;
-  const finalDiscountType  = discountType  ?? existing.discountType;
-  const finalDiscountPct   = discountPercent ?? existing.discountPercent;
-  const finalPaid          = paid     !== undefined ? paid     : existing.paid;
+  const finalItems = items !== undefined ? items : existing.items;
+  const finalDiscount = discount !== undefined ? discount : existing.discount;
+  const finalDiscountType = discountType ?? existing.discountType;
+  const finalDiscountPct = discountPercent ?? existing.discountPercent;
+  const finalPaid = paid !== undefined ? paid : existing.paid;
   const finalAmount = finalItems.length
     ? calcAmount(finalItems, finalDiscount, finalDiscountType, finalDiscountPct)
     : existing.amount;
 
-  update.items    = finalItems;
-  update.amount   = finalAmount;
-  update.paid     = finalPaid;
+  update.items = finalItems;
+  update.amount = finalAmount;
+  update.paid = finalPaid;
   update.discount = finalDiscount;
-  update.balance  = finalAmount - finalPaid;
+  update.balance = finalAmount - finalPaid;
   update.isLocked = finalPaid >= finalAmount;
   if (!status) update.status = computeStatus(finalAmount, finalPaid);
 
-  return BillingRecord.findOneAndUpdate(
-    { _id: id, tenantId },
-    { $set: update },
-    { new: true }
-  );
+  // Draft → finalize transition: any update to an open Draft that doesn't
+  // explicitly resend status: "Draft" finalizes it. This mirrors GRN's
+  // Draft → Received transition — the checks/side-effects deferred at draft
+  // creation (full amount/items validation, pharmacy stock, real billId) all
+  // happen right here instead of a dedicated sub-route.
+  const wasDraft = existing.status === "Draft";
+  const stayingDraft = status === "Draft";
+  const becomingFinal = wasDraft && !stayingDraft;
+
+  if (becomingFinal && !finalAmount) {
+    throw AppError.badRequest("Cannot finalize an empty draft — amount or items[] required");
+  }
+
+  const pharmacyItems = existing.type === "Pharmacy"
+    ? (finalItems as any[]).filter((it: any) => it.category === "Pharmacy" && it.drugId)
+    : [];
+
+  if (becomingFinal && pharmacyItems.length) {
+    const shortages = await checkPharmacyStock(tenantId, pharmacyItems);
+    if (shortages.length) {
+      throw AppError.conflict("Insufficient stock for one or more items", { shortages });
+    }
+  }
+
+  if (stayingDraft) {
+    update.status = "Draft";
+    update.isLocked = false;
+  }
+
+  if (!becomingFinal) {
+    return BillingRecord.findOneAndUpdate({ _id: id, tenantId }, { $set: update }, { new: true });
+  }
+
+  // Finalizing a draft draws a real fiscal invoice number and, for Pharmacy
+  // bills, deducts stock — both must commit or roll back together, so a
+  // failed deduction never leaves the draft holding a burned invoice number.
+  const session = await mongoose.startSession();
+  let updated: any;
+  try {
+    await session.withTransaction(async () => {
+      // Draw a real, sequential fiscal invoice number now — the draft only ever
+      // held a non-fiscal DFT- placeholder, so finalizing never skips a number.
+      const tenant = await Tenant.findById(tenantId).select("settings.invoicePrefix").session(session).lean();
+      const invoicePrefix = ((tenant as any)?.settings?.invoicePrefix || "BILL").toString().trim();
+      update.billId = await getNextId(tenantId, "bill", `${invoicePrefix}-`, session);
+
+      updated = await BillingRecord.findOneAndUpdate(
+        { _id: id, tenantId },
+        { $set: update },
+        { new: true, session }
+      );
+
+      if (pharmacyItems.length) {
+        await deductPharmacyStock(tenantId, pharmacyItems, session);
+      }
+    });
+  } catch (err: any) {
+    if (err.insufficientStock) {
+      throw AppError.conflict("Insufficient stock for one or more items", {
+        shortages: [{ drugId: err.drugId, available: err.available }],
+      });
+    }
+    throw err;
+  } finally {
+    await session.endSession();
+  }
+
+  return updated;
 }
 
 export async function postPayment(tenantId: string, userName: string, id: string, body: Record<string, any>) {
@@ -241,30 +358,30 @@ export async function postPayment(tenantId: string, userName: string, id: string
   const paymentId = await getNextId(tenantId, `pay-${bill.billId}`, "PAY-");
   const entry = {
     paymentId,
-    amount:       payAmt,
+    amount: payAmt,
     paymentMode,
-    payer:        payer       || bill.payer,
+    payer: payer || bill.payer,
     transactionRef: transactionRef || "",
-    receivedBy:   userName,
-    notes:        notes || "",
-    paidAt:       new Date(),
+    receivedBy: userName,
+    notes: notes || "",
+    paidAt: new Date(),
   };
 
-  const newPaid    = bill.paid + payAmt;
+  const newPaid = bill.paid + payAmt;
   const newBalance = bill.amount - newPaid;
-  const newStatus  = computeStatus(bill.amount, newPaid);
+  const newStatus = computeStatus(bill.amount, newPaid);
 
   return BillingRecord.findByIdAndUpdate(
     bill._id,
     {
-      $push:  { payments: entry },
+      $push: { payments: entry },
       $set: {
-        paid:       newPaid,
-        balance:    newBalance,
-        status:     newStatus,
+        paid: newPaid,
+        balance: newBalance,
+        status: newStatus,
         paymentMode,
-        payer:      payer || bill.payer,
-        isLocked:   newPaid >= bill.amount,
+        payer: payer || bill.payer,
+        isLocked: newPaid >= bill.amount,
       },
     },
     { new: true }
@@ -287,11 +404,11 @@ export async function submitPreAuth(tenantId: string, id: string, body: Record<s
     { _id: id, tenantId },
     {
       $set: {
-        status:                    "Claimed",
-        "insurance.tpaName":       tpaName    || "",
-        "insurance.policyNo":      policyNo   || "",
-        "insurance.memberNo":      memberNo   || "",
-        "insurance.preAuthNo":     preAuthNo  || "",
+        status: "Claimed",
+        "insurance.tpaName": tpaName || "",
+        "insurance.policyNo": policyNo || "",
+        "insurance.memberNo": memberNo || "",
+        "insurance.preAuthNo": preAuthNo || "",
         "insurance.preAuthStatus": "Pending",
       },
     },
@@ -327,10 +444,10 @@ export async function fileClaim(tenantId: string, id: string, body: Record<strin
     bill._id,
     {
       $set: {
-        status:                    "Claimed",
-        "insurance.claimNo":       claimNo,
-        "insurance.claimStatus":   "Filed",
-        "insurance.claimAmount":   claimAmount ?? bill.balance,
+        status: "Claimed",
+        "insurance.claimNo": claimNo,
+        "insurance.claimStatus": "Filed",
+        "insurance.claimAmount": claimAmount ?? bill.balance,
         "insurance.submittedDate": new Date(),
       },
     },
@@ -353,19 +470,19 @@ export async function updateClaim(tenantId: string, userName: string, id: string
     const settled = Number(settledAmount);
     const paymentId = await getNextId(tenantId, `pay-${bill.billId}`, "PAY-");
     insUpdate["insurance.settledAmount"] = settled;
-    insUpdate["insurance.settledDate"]   = new Date();
+    insUpdate["insurance.settledDate"] = new Date();
     insUpdate.status = computeStatus(bill.amount, bill.paid + settled);
-    insUpdate.paid   = bill.paid + settled;
+    insUpdate.paid = bill.paid + settled;
     insUpdate.balance = Math.max(0, bill.balance - settled);
     insUpdate.isLocked = (bill.paid + settled) >= bill.amount;
     updates.$push = {
       payments: {
         paymentId,
-        amount:      settled,
+        amount: settled,
         paymentMode: "Insurance",
-        payer:       bill.insurance?.tpaName || "Insurance",
-        receivedBy:  userName,
-        paidAt:      new Date(),
+        payer: bill.insurance?.tpaName || "Insurance",
+        receivedBy: userName,
+        paidAt: new Date(),
       },
     };
   }
@@ -378,9 +495,9 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
 
   const dateFilter: any = {};
   if (from) dateFilter.$gte = startOfDayUtc(from, timezone);
-  if (to)   dateFilter.$lte = endOfDayUtc(to, timezone);
+  if (to) dateFilter.$lte = endOfDayUtc(to, timezone);
 
-  const matchStage: any = { tenantId: new mongoose.Types.ObjectId(tenantId) };
+  const matchStage: any = { tenantId: new mongoose.Types.ObjectId(tenantId), status: { $ne: "Draft" } };
   if (from || to) matchStage.createdAt = dateFilter;
 
   const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
@@ -389,18 +506,20 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
   const [byCreator, byReceiver, byReceiverMode] = await Promise.all([
     BillingRecord.aggregate([
       { $match: matchStage },
-      { $group: {
+      {
+        $group: {
           _id: "$createdBy",
           billsCreated: { $sum: 1 },
-          totalBilled:  { $sum: "$amount" },
-          totalPaid:    { $sum: "$paid" },
+          totalBilled: { $sum: "$amount" },
+          totalPaid: { $sum: "$paid" },
         },
       },
     ]),
     BillingRecord.aggregate([
       { $match: matchStage },
       { $unwind: "$payments" },
-      { $group: {
+      {
+        $group: {
           _id: "$payments.receivedBy",
           paymentsCount: { $sum: 1 },
           totalReceived: { $sum: "$payments.amount" },
@@ -410,7 +529,8 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
     BillingRecord.aggregate([
       { $match: matchStage },
       { $unwind: "$payments" },
-      { $group: {
+      {
+        $group: {
           _id: { receivedBy: "$payments.receivedBy", paymentMode: "$payments.paymentMode" },
           amount: { $sum: "$payments.amount" },
         },
@@ -423,12 +543,12 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
   for (const row of byCreator) {
     if (!row._id) continue;
     staffMap.set(row._id, {
-      staffName:        row._id,
-      billsCreated:     row.billsCreated,
-      totalBilled:      row.totalBilled,
-      totalPaid:        row.totalPaid,
-      paymentsCount:    0,
-      totalReceived:    0,
+      staffName: row._id,
+      billsCreated: row.billsCreated,
+      totalBilled: row.totalBilled,
+      totalPaid: row.totalPaid,
+      paymentsCount: 0,
+      totalReceived: 0,
       paymentBreakdown: emptyBreakdown(),
     });
   }
@@ -441,12 +561,12 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
       entry.totalReceived = row.totalReceived;
     } else {
       staffMap.set(row._id, {
-        staffName:        row._id,
-        billsCreated:     0,
-        totalBilled:      0,
-        totalPaid:        0,
-        paymentsCount:    row.paymentsCount,
-        totalReceived:    row.totalReceived,
+        staffName: row._id,
+        billsCreated: 0,
+        totalBilled: 0,
+        totalPaid: 0,
+        paymentsCount: row.paymentsCount,
+        totalReceived: row.totalReceived,
         paymentBreakdown: emptyBreakdown(),
       });
     }
@@ -457,12 +577,12 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
     if (!receivedBy || !paymentMode) continue;
     if (!staffMap.has(receivedBy)) {
       staffMap.set(receivedBy, {
-        staffName:        receivedBy,
-        billsCreated:     0,
-        totalBilled:      0,
-        totalPaid:        0,
-        paymentsCount:    0,
-        totalReceived:    0,
+        staffName: receivedBy,
+        billsCreated: 0,
+        totalBilled: 0,
+        totalPaid: 0,
+        paymentsCount: 0,
+        totalReceived: 0,
         paymentBreakdown: emptyBreakdown(),
       });
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,6 +96,15 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   });
   const drugList: any[] = Array.isArray(drugResults) ? drugResults : (drugResults as any)?.drugs ?? [];
 
+  const qtyInputRef = useRef<HTMLInputElement | null>(null);
+  const [justAddedItem, setJustAddedItem] = useState<BillItem | null>(null);
+  useEffect(() => {
+    if (justAddedItem) {
+      qtyInputRef.current?.focus();
+      qtyInputRef.current?.select();
+    }
+  }, [justAddedItem]);
+
   const addDrugItem = async (drug: any) => {
     let unitPrice = drug.mrpPerUnit ?? 0;
     let batchNo: string | undefined;
@@ -115,11 +124,13 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     } catch {
       // fall back to inventory-level values
     }
+    const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, drugId: drug._id, availableQty };
     setItems((prev) => [
       ...prev.filter((it) => it.description !== "" || it.unitPrice > 0),
-      { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, drugId: drug._id, availableQty },
+      newItem,
     ]);
     setDrugSearch("");
+    setJustAddedItem(newItem);
   };
 
   // ── reset / populate on open ──────────────────────────────────────────────
@@ -144,6 +155,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setRateNameFilter("");
     setDrugSearch("");
     setManualPharmacy(false);
+    setJustAddedItem(null);
     setSavedBill(null); setError(""); setUhidStatus("idle");
   }, [open]);
 
@@ -212,11 +224,15 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   const balance     = totalAmount - paid;
 
   // ── submit ─────────────────────────────────────────────────────────────────
-  const handleSubmit = async (e: React.FormEvent) => {
+  // isDraft-in-progress (existing.status === "Draft") never disappears just because
+  // the user is now filling in more fields — only the button clicked decides whether
+  // this save stays a Draft or finalizes it.
+  const handleSubmit = async (e: React.SyntheticEvent, opts: { asDraft?: boolean } = {}) => {
     e.preventDefault();
+    const asDraft = opts.asDraft ?? false;
     if (!patientName.trim()) { setError("Patient name is required"); return; }
-    if (!payOnly && items.some((it) => !it.description.trim())) { setError("All items need a description"); return; }
-    const overStock = !payOnly && items.find((it) => it.availableQty != null && it.quantity > it.availableQty);
+    if (!asDraft && !payOnly && items.some((it) => !it.description.trim())) { setError("All items need a description"); return; }
+    const overStock = !asDraft && !payOnly && items.find((it) => it.availableQty != null && it.quantity > it.availableQty);
     if (overStock) { setError(`Quantity for "${overStock.description}" exceeds available stock (${overStock.availableQty})`); return; }
 
     setLoading(true); setError("");
@@ -241,7 +257,10 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
           discount: discountAmt,
           discountType,
           discountPercent,
-          paid, payer, paymentMode, notes,
+          paid: asDraft ? 0 : paid, payer, paymentMode, notes,
+          // Omitted (not "Draft") when finalizing — the server then always
+          // recomputes a real Paid/Partial/Pending status from amount vs paid.
+          status: asDraft ? "Draft" : undefined,
         };
         // Attach insurance info when mode is Insurance
         if (paymentMode === "Insurance") {
@@ -258,9 +277,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         billId:      result?.billId,
         patientName: patientName || existing?.patientName,
         amount:      payOnly ? existing?.amount : totalAmount,
-        paid:        payOnly ? (existing?.paid ?? 0) + paid : paid,
-        balance:     payOnly ? Math.max(0, (existing?.balance ?? 0) - paid) : balance,
-        ...result,
+        paid:        payOnly ? (existing?.paid ?? 0) + paid : (asDraft ? 0 : paid),
+        balance:     payOnly ? Math.max(0, (existing?.balance ?? 0) - paid) : (asDraft ? totalAmount : balance),
+        ...result, // includes the server-authoritative `status` (e.g. "Draft")
       });
     } catch (err: any) {
       setError(err.message || "Failed to save");
@@ -282,7 +301,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-green-700">
                 <CheckCircle2 className="h-5 w-5" />
-                {payOnly ? "Payment Recorded" : isEdit ? "Bill Updated" : "Bill Generated"}
+                {payOnly ? "Payment Recorded" : savedBill.status === "Draft" ? "Draft Saved" : isEdit ? "Bill Updated" : "Bill Generated"}
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-2">
@@ -294,9 +313,11 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                 {(savedBill.balance ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Balance</span><span className="font-bold text-amber-600">₹{savedBill.balance.toLocaleString()}</span></div>}
               </div>
               <div className="flex gap-2">
-                <Button className="flex-1 gap-2" onClick={() => { printBill(savedBill); handleClose(); }}>
-                  <Printer className="h-4 w-4" /> Print Receipt
-                </Button>
+                {savedBill.status !== "Draft" && (
+                  <Button className="flex-1 gap-2" onClick={() => { printBill(savedBill); handleClose(); }}>
+                    <Printer className="h-4 w-4" /> Print Receipt
+                  </Button>
+                )}
                 <Button variant="outline" className="flex-1" onClick={handleClose}>Close</Button>
               </div>
             </div>
@@ -306,7 +327,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <IndianRupee className="h-4 w-4 text-teal-600" />
-                {isEdit ? (payOnly ? "Record Payment" : "Edit Bill") : "Generate Bill"}
+                {isEdit ? (payOnly ? "Record Payment" : existing?.status === "Draft" ? "Complete Draft" : "Edit Bill") : "Generate Bill"}
               </DialogTitle>
             </DialogHeader>
 
@@ -470,7 +491,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                                   </span>
                                 )}
                               </span>
-                              <Input className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseInt(e.target.value) || 1)} />
+                              <Input ref={item === justAddedItem ? qtyInputRef : undefined} className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseInt(e.target.value) || 1)} />
                               <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
                               <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
                               <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
@@ -613,9 +634,15 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
 
               <div className="flex justify-end gap-2 pt-1 border-t">
                 <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
+                {!payOnly && (!isEdit || existing?.status === "Draft") && (
+                  <Button type="button" variant="secondary" disabled={loading} className="gap-2"
+                    onClick={(e) => handleSubmit(e, { asDraft: true })}>
+                    Save as Draft
+                  </Button>
+                )}
                 <Button type="submit" disabled={loading} className="gap-2 min-w-[150px]">
                   <IndianRupee className="h-3.5 w-3.5" />
-                  {loading ? "Saving…" : isEdit ? (payOnly ? "Record Payment" : "Update Bill") : "Generate Bill"}
+                  {loading ? "Saving…" : isEdit ? (payOnly ? "Record Payment" : existing?.status === "Draft" ? "Generate Bill" : "Update Bill") : "Generate Bill"}
                 </Button>
               </div>
             </form>
