@@ -61,6 +61,9 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
+  const [drugSearch, setDrugSearch] = useState<string[]>([""]);
+  const [openDrugIdx, setOpenDrugIdx] = useState<number | null>(null);
+
   useEffect(() => {
     if (!open) return;
     if (existing) {
@@ -70,24 +73,26 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
       setInvoiceNo(existing.invoiceNo ?? "");
       setInvoiceDate(toDateInput(existing.invoiceDate));
       setNotes(existing.notes ?? "");
-      setItems(
-        (existing.items ?? []).map((it: any) => ({
-          drugName:            it.drugName ?? "",
-          drugId:              it.drugId ?? "",
-          unit:                it.unit ?? "Tab",
-          batchNo:             it.batchNo ?? "",
-          expiryDate:          toDateInput(it.expiryDate),
-          quantityReceived:    it.quantityReceived ?? 0,
-          purchasePricePerUnit: it.purchasePricePerUnit ?? 0,
-          mrpPerUnit:          it.mrpPerUnit ?? 0,
-          totalCost:           it.totalCost ?? 0,
-        }))
-      );
+      const loadedItems = (existing.items ?? []).map((it: any) => ({
+        drugName:            it.drugName ?? "",
+        drugId:              it.drugId ?? "",
+        unit:                it.unit ?? "Tab",
+        batchNo:             it.batchNo ?? "",
+        expiryDate:          toDateInput(it.expiryDate),
+        quantityReceived:    it.quantityReceived ?? 0,
+        purchasePricePerUnit: it.purchasePricePerUnit ?? 0,
+        mrpPerUnit:          it.mrpPerUnit ?? 0,
+        totalCost:           it.totalCost ?? 0,
+      }));
+      setItems(loadedItems.length ? loadedItems : [emptyItem()]);
+      setDrugSearch((loadedItems.length ? loadedItems : [emptyItem()]).map(() => ""));
     } else {
       setSupplierName(""); setSupplierSelected(false); setSupplierSearch("");
       setInvoiceNo(""); setInvoiceDate(""); setNotes("");
       setItems([emptyItem()]);
+      setDrugSearch([""]);
     }
+    setOpenDrugIdx(null);
     setError(""); setSuccess(false);
   }, [open, existing]);
 
@@ -164,6 +169,30 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
       };
       return next;
     });
+    setOpenDrugIdx(null);
+  };
+
+  const clearDrug = (idx: number) => {
+    setItems((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], drugId: "", drugName: "" };
+      return next;
+    });
+    setDrugSearch((prev) => {
+      const next = [...prev];
+      next[idx] = "";
+      return next;
+    });
+  };
+
+  const addRow = () => {
+    setItems((p) => [...p, emptyItem()]);
+    setDrugSearch((p) => [...p, ""]);
+  };
+
+  const removeRow = (idx: number) => {
+    setItems((p) => p.filter((_, i) => i !== idx));
+    setDrugSearch((p) => p.filter((_, i) => i !== idx));
   };
 
   const totalValue = items.reduce((s, it) => s + it.totalCost, 0);
@@ -291,7 +320,7 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold">Drug Items *</Label>
-                <Button type="button" size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setItems((p) => [...p, emptyItem()])}>
+                <Button type="button" size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={addRow}>
                   <Plus className="h-3 w-3" /> Add Row
                 </Button>
               </div>
@@ -302,18 +331,53 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                 <span>Qty</span><span>Purchase ₹</span><span>MRP ₹</span><span></span>
               </div>
 
-              {items.map((item, idx) => (
+              {items.map((item, idx) => {
+                const search = drugSearch[idx] ?? "";
+                const filteredDrugs = search.trim().length > 0
+                  ? inventory.filter((d) => d.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 50)
+                  : inventory.slice(0, 50);
+                return (
                 <div key={idx} className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 items-center">
-                  <select
-                    className="h-8 text-xs border rounded-md px-2 bg-background"
-                    value={item.drugId}
-                    onChange={(e) => pickDrug(idx, e.target.value)}
-                  >
-                    <option value="">Select drug…</option>
-                    {inventory.map((d) => (
-                      <option key={d._id} value={d._id}>{d.name}</option>
-                    ))}
-                  </select>
+                  {item.drugId ? (
+                    <div className="flex items-center gap-1.5 h-8 border rounded-md px-2 bg-background text-xs">
+                      <span className="flex-1 truncate">{item.drugName}</span>
+                      <button type="button" onClick={() => clearDrug(idx)} className="shrink-0 text-muted-foreground hover:text-foreground">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <Input
+                        className="h-8 text-xs"
+                        placeholder="Search drug…"
+                        value={search}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDrugSearch((prev) => { const next = [...prev]; next[idx] = val; return next; });
+                        }}
+                        onFocus={() => setOpenDrugIdx(idx)}
+                        onBlur={() => setTimeout(() => setOpenDrugIdx((cur) => (cur === idx ? null : cur)), 150)}
+                      />
+                      {openDrugIdx === idx && (
+                        <div className="absolute z-50 top-full mt-1 w-56 max-h-56 overflow-y-auto border rounded-lg bg-background shadow-md divide-y">
+                          {filteredDrugs.length > 0 ? (
+                            filteredDrugs.map((d) => (
+                              <button
+                                key={d._id}
+                                type="button"
+                                className="w-full text-left px-3 py-2 text-xs hover:bg-muted/50 transition-colors truncate"
+                                onMouseDown={(e) => { e.preventDefault(); pickDrug(idx, d._id); }}
+                              >
+                                {d.name}
+                              </button>
+                            ))
+                          ) : (
+                            <div className="px-3 py-2 text-xs text-muted-foreground">No matching drugs</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <Select value={item.unit} onValueChange={(v) => setItem(idx, "unit", v)}>
                     <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>{DRUG_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
@@ -323,11 +387,11 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                   <Input type="number" min={1} className="h-8 text-xs" placeholder="0" value={item.quantityReceived || ""} onChange={(e) => setItem(idx, "quantityReceived", Number(e.target.value))} />
                   <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.purchasePricePerUnit || ""} onChange={(e) => setItem(idx, "purchasePricePerUnit", Number(e.target.value))} />
                   <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.mrpPerUnit || ""} onChange={(e) => setItem(idx, "mrpPerUnit", Number(e.target.value))} />
-                  <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600" disabled={items.length === 1} onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}>
+                  <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600" disabled={items.length === 1} onClick={() => removeRow(idx)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-              ))}
+              );})}
             </div>
 
             {/* Notes + Total */}

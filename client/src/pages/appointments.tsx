@@ -15,6 +15,7 @@ import { appointments as apptApi, users as usersApi, dashboard as dashApi } from
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 import AppointmentModal from "@/components/modals/AppointmentModal";
+import { toast } from "@/hooks/use-toast";
 
 const BLANK_VITALS = { bp: "", pulse: "", temp: "", spo2: "", weight: "", height: "" };
 
@@ -95,7 +96,7 @@ export default function AppointmentsPage() {
       qc.invalidateQueries({ queryKey: ["appointments"] });
       setVitalsApptId(null);
     } catch (e: any) {
-      alert(e.message || "Failed to save vitals");
+      toast({ variant: "destructive", title: "Save failed", description: e.message || "Failed to save vitals." });
     } finally {
       setSavingVitals(false);
     }
@@ -108,6 +109,8 @@ export default function AppointmentsPage() {
     try {
       await apptApi.update(mongoId, { status });
       qc.invalidateQueries({ queryKey: ["appointments"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Update failed", description: err.message || "Failed to update appointment." });
     } finally {
       setUpdating(null);
     }

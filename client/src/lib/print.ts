@@ -1,5 +1,6 @@
 // ── Print utilities — opens a formatted page in a new window and auto-prints ──
 import { LAB_TEST_MASTER } from "./labTestMaster";
+import { toast } from "@/hooks/use-toast";
 
 export type InvoiceStyle = "classic" | "modern" | "minimal" | "thermal" | "compact";
 
@@ -1319,14 +1320,14 @@ export function printReferralStats(
 // ── helpers ───────────────────────────────────────────────────────────────────
 function open(title: string, body: string) {
   const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
-  if (!win) { alert("Pop-ups are blocked. Please allow pop-ups for this site to print."); return; }
+  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
   win.document.write(base(title, body));
   win.document.close();
 }
 
 function openA5(title: string, body: string) {
   const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
-  if (!win) { alert("Pop-ups are blocked. Please allow pop-ups for this site to print."); return; }
+  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
   win.document.write(baseA5(title, body));
   win.document.close();
 }

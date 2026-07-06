@@ -10,6 +10,7 @@ import { appointments as apptApi, users as usersApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 import AppointmentModal from "@/components/modals/AppointmentModal";
+import { toast } from "@/hooks/use-toast";
 import {
   Search, CheckCircle2, Clock, UserCheck, Users, Stethoscope,
   Plus, Hash, Phone, Calendar, ChevronRight, Loader2, Activity,
@@ -88,7 +89,7 @@ export default function ReceptionPage() {
       setVitalsForm(BLANK_VITALS);
       setVitalsApptId(apt._id);
     } catch (e: any) {
-      alert(e.message || "Check-in failed");
+      toast({ variant: "destructive", title: "Check-in failed", description: e.message || "Failed to check in patient." });
     } finally {
       setActionId(null);
     }
@@ -102,7 +103,7 @@ export default function ReceptionPage() {
       qc.invalidateQueries({ queryKey: ["appointments"] });
       setVitalsApptId(null);
     } catch (e: any) {
-      alert(e.message || "Failed to save vitals");
+      toast({ variant: "destructive", title: "Save failed", description: e.message || "Failed to save vitals." });
     } finally {
       setSavingVitals(false);
     }
@@ -113,6 +114,8 @@ export default function ReceptionPage() {
     try {
       await apptApi.update(apt._id, { status: "Confirmed" });
       qc.invalidateQueries({ queryKey: ["appointments"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Confirm failed", description: err.message || "Failed to confirm appointment." });
     } finally {
       setActionId(null);
     }

@@ -17,8 +17,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/contexts/AuthContext";
 import { auth as authApi, users as usersApi, ratemaster as ratemasterApi } from "@/lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 
-const ROLES = ["admin", "doctor", "nurse", "pharmacist", "lab_tech", "finance", "receptionist"];
+const ROLES = ["admin", "doctor", "nurse", "pharmacist", "pharmacy_admin", "lab_tech", "finance", "receptionist"];
 
 const ALL_DEPARTMENTS = [
   "Cardiology", "Orthopedics", "Neurology", "Obstetrics", "Nephrology",
@@ -35,6 +37,7 @@ const ROLE_COLORS: Record<string, string> = {
   nurse:        "bg-emerald-100 text-emerald-700",
   receptionist: "bg-violet-100 text-violet-700",
   pharmacist:   "bg-amber-100 text-amber-700",
+  pharmacy_admin: "bg-amber-200 text-amber-800",
   lab_tech:     "bg-indigo-100 text-indigo-700",
   finance:      "bg-rose-100 text-rose-700",
 };
@@ -374,13 +377,14 @@ function DepartmentsSection() {
   }
 
   const deactivateDoctor = async (id: string, name: string) => {
-    if (!confirm(`Deactivate ${name}?`)) return;
+    const ok = await confirm({ title: `Deactivate ${name}?`, confirmText: "Deactivate", variant: "destructive" });
+    if (!ok) return;
     try {
       await usersApi.deactivate(id);
       qc.invalidateQueries({ queryKey: ["doctors"] });
       qc.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
-      alert(err.message || "Failed to deactivate");
+      toast({ variant: "destructive", title: "Deactivate failed", description: err.message || "Failed to deactivate." });
     }
   };
 
@@ -472,6 +476,7 @@ const STAFF_ROLES = [
   { key: "receptionist", label: "Receptionist",plural: "Reception",       icon: UserCheck  },
   { key: "lab_tech",     label: "Lab Tech",    plural: "Lab Technicians", icon: FlaskConical },
   { key: "pharmacist",   label: "Pharmacist",  plural: "Pharmacists",     icon: Pill       },
+  { key: "pharmacy_admin", label: "Pharmacy Admin", plural: "Pharmacy Admins", icon: Pill },
   { key: "finance",      label: "Finance",     plural: "Finance Staff",   icon: CreditCard },
 ] as const;
 
@@ -521,12 +526,13 @@ function StaffSection() {
   };
 
   const deactivate = async (id: string, name: string) => {
-    if (!confirm(`Deactivate ${name}?`)) return;
+    const ok = await confirm({ title: `Deactivate ${name}?`, confirmText: "Deactivate", variant: "destructive" });
+    if (!ok) return;
     try {
       await usersApi.deactivate(id);
       qc.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
-      alert(err.message || "Failed to deactivate");
+      toast({ variant: "destructive", title: "Deactivate failed", description: err.message || "Failed to deactivate." });
     }
   };
 
@@ -1367,12 +1373,13 @@ export default function SettingsPage() {
   };
 
   const deactivateUser = async (id: string, name: string) => {
-    if (!confirm(`Deactivate ${name}?`)) return;
+    const ok = await confirm({ title: `Deactivate ${name}?`, confirmText: "Deactivate", variant: "destructive" });
+    if (!ok) return;
     try {
       await usersApi.deactivate(id);
       qc.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
-      alert(err.message || "Failed to deactivate");
+      toast({ variant: "destructive", title: "Deactivate failed", description: err.message || "Failed to deactivate." });
     }
   };
 

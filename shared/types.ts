@@ -1,6 +1,6 @@
 // ── Shared types between client and server ────────────────────────────────────
 
-export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "lab_tech" | "finance";
+export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "pharmacy_admin" | "lab_tech" | "finance";
 export type TenantPlan = "trial" | "starter" | "professional" | "enterprise";
 export type TenantStatus = "trial" | "active" | "suspended" | "cancelled";
 
@@ -21,10 +21,40 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface ApiError {
-  error: string;
-  message?: string;
+export type ErrorCode =
+  | "VALIDATION_ERROR"
+  | "BAD_REQUEST"
+  | "UNAUTHORIZED"
+  | "INVALID_TOKEN"
+  | "TOKEN_EXPIRED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "ROUTE_NOT_FOUND"
+  | "CONFLICT"
+  | "DUPLICATE_KEY"
+  | "RATE_LIMITED"
+  | "INTERNAL_ERROR"
+  | "DB_ERROR"
+  | "NETWORK_ERROR"; // frontend-only: fetch itself failed, no HTTP response
+
+export interface ApiErrorBody {
+  code: ErrorCode;
+  message: string;
+  details?: unknown;
 }
+
+export interface ApiErrorResponse {
+  success: false;
+  requestId: string;
+  error: ApiErrorBody;
+}
+
+export interface ApiSuccessResponse<T> {
+  success: true;
+  data: T;
+}
+
+export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 
 // ── Tenant (Hospital) ─────────────────────────────────────────────────────────
 export interface TaxConfig {
@@ -204,6 +234,7 @@ export interface DrugInventory {
   mrpPerUnit?: number;
   purchasePricePerUnit?: number;
   isBatchTracked?: boolean;
+  isActive?: boolean;
 }
 
 export interface GRNItem {
@@ -228,7 +259,7 @@ export interface GRN {
   receivedBy?: string;
   items: GRNItem[];
   totalValue: number;
-  status: "Draft" | "Received";
+  status: "Draft" | "Received" | "Cancelled";
   notes?: string;
 }
 
@@ -246,6 +277,22 @@ export interface StockAdjustment {
   adjustedBy?: string;
   createdAt?: string;
 }
+
+export interface InventoryAuditLogEntry {
+  _id?: string;
+  drugId: string;
+  action: "Created" | "Updated" | "Deactivated" | "Reactivated";
+  changes: Array<{ field: string; oldValue: any; newValue: any }>;
+  performedBy: string;
+  notes?: string;
+  createdAt?: string;
+}
+
+// Merged per-drug timeline entry returned by GET /pharmacy/inventory/:id/history
+export type DrugHistoryEntry =
+  | ({ type: "GRN"; date: string } & Pick<GRNItem, "batchNo" | "quantityReceived" | "purchasePricePerUnit" | "mrpPerUnit"> & { grnId?: string; grnStatus: GRN["status"]; receivedBy?: string })
+  | ({ type: "Adjustment"; date: string } & Pick<StockAdjustment, "adjustmentId" | "adjustmentType" | "quantityBefore" | "quantityAdjusted" | "quantityAfter" | "reason" | "adjustedBy">)
+  | ({ type: "Edit"; date: string } & Pick<InventoryAuditLogEntry, "action" | "changes" | "performedBy">);
 
 // ── Billing ───────────────────────────────────────────────────────────────────
 export interface BillItem {

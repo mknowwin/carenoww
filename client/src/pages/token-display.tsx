@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { publicApi } from "@/lib/api";
+import { publicApi, ApiError } from "@/lib/api";
 import { Heart, Clock, Monitor, Wifi, WifiOff } from "lucide-react";
 
 interface ConsultEntry {
@@ -114,13 +114,16 @@ export default function TokenDisplayPage() {
     if (!tid) return;
     try {
       const result = await publicApi.display(tid);
-      if (result.error) { setError(result.error); return; }
       setData(result);
       setOnline(true);
       setLastRefresh(new Date());
       setError("");
-    } catch {
-      setOnline(false);
+    } catch (e) {
+      if (e instanceof ApiError && e.code !== "NETWORK_ERROR") {
+        setError(e.message);
+      } else {
+        setOnline(false);
+      }
     }
   };
 

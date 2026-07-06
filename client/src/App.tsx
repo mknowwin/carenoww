@@ -2,6 +2,7 @@ import { Switch, Route, Redirect } from "wouter";
 import { useAuth } from "./contexts/AuthContext";
 import { useSuperAdmin } from "./contexts/SuperAdminContext";
 import AdminLayout from "./components/layout";
+import AppErrorBoundary from "./components/AppErrorBoundary";
 import LoginPage from "./pages/login";
 import DashboardPage from "./pages/dashboard";
 import PatientsPage from "./pages/patients";
@@ -39,7 +40,9 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   if (!user) return <Redirect to="/login" />;
   return (
     <AdminLayout>
-      <Component />
+      <AppErrorBoundary>
+        <Component />
+      </AppErrorBoundary>
     </AdminLayout>
   );
 }
@@ -49,6 +52,7 @@ const ROLE_REDIRECTS: Record<string, string> = {
   nurse:        "/ipd",
   receptionist: "/reception",
   pharmacist:   "/pharmacy",
+  pharmacy_admin: "/pharmacy",
   lab_tech:     "/lab",
   finance:      "/billing",
 };
@@ -60,7 +64,9 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
   if (user.role !== "admin") return <Redirect to={ROLE_REDIRECTS[user.role] ?? "/login"} />;
   return (
     <AdminLayout>
-      <Component />
+      <AppErrorBoundary>
+        <Component />
+      </AppErrorBoundary>
     </AdminLayout>
   );
 }
@@ -69,7 +75,11 @@ function SuperAdminRoute({ component: Component }: { component: React.ComponentT
   const { superAdmin, isLoading } = useSuperAdmin();
   if (isLoading) return <LoadingScreen />;
   if (!superAdmin) return <Redirect to="/superadmin/login" />;
-  return <Component />;
+  return (
+    <AppErrorBoundary>
+      <Component />
+    </AppErrorBoundary>
+  );
 }
 
 export default function App() {

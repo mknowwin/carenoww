@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "lab_tech" | "finance";
+export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "pharmacy_admin" | "lab_tech" | "finance";
 
 export interface IDoctorSchedule {
   days: string[];      // e.g. ["Mon","Tue","Wed","Thu","Fri"]
@@ -49,7 +49,7 @@ const UserSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true },
     role: {
       type: String,
-      enum: ["admin", "doctor", "nurse", "receptionist", "pharmacist", "lab_tech", "finance"],
+      enum: ["admin", "doctor", "nurse", "receptionist", "pharmacist", "pharmacy_admin", "lab_tech", "finance"],
       required: true,
     },
     department: { type: String, default: "" },

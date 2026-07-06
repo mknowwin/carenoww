@@ -12,6 +12,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { patients as patientsApi } from "@/lib/api";
 import { getInitials } from "@/lib/utils";
 import PatientModal from "@/components/modals/PatientModal";
+import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 
 const STATUS_COLORS: Record<string, string> = {
   OPD:        "bg-blue-100 text-blue-700",
@@ -44,12 +46,15 @@ export default function PatientsPage() {
   const [discharging, setDischarging] = useState<string | null>(null);
 
   const discharge = async (p: any) => {
-    if (!confirm(`Discharge ${p.name}?`)) return;
+    const ok = await confirm({ title: `Discharge ${p.name}?`, confirmText: "Discharge" });
+    if (!ok) return;
     setDischarging(p.id);
     try {
       await patientsApi.update(p._id || p.id, { status: "Discharged" });
       qc.invalidateQueries({ queryKey: ["patients"] });
       if (selected === p.id) setSelected(null);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Discharge failed", description: err.message || "Failed to discharge patient." });
     } finally {
       setDischarging(null);
     }

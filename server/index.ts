@@ -14,19 +14,25 @@ import pharmacyRouter from "./routes/pharmacy.js";
 import billingRouter from "./routes/billing.js";
 import dashboardRouter from "./routes/dashboard.js";
 import usersRouter from "./routes/users.js";
-import Appointment from "./models/Appointment.js";
-import Tenant from "./models/Tenant.js";
-import { todayInTz } from "./lib/dateUtils.js";
 import reportsRouter from "./routes/reports.js";
 import ipdRouter from "./routes/ipd.js";
 import prescriptionsRouter from "./routes/prescriptions.js";
 import ratemasterRouter from "./routes/ratemaster.js";
 import referralDoctorsRouter from "./routes/referralDoctors.js";
 import suppliersRouter from "./routes/suppliers.js";
+import { requestIdMiddleware } from "./middleware/requestId.js";
+import { notFoundHandler } from "./middleware/notFoundHandler.js";
+import { errorHandler } from "./middleware/errorHandler.js";
+import { asyncHandler } from "./lib/asyncHandler.js";
+import * as publicDisplayService from "./services/publicDisplayService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3201;
+
+// ── Request tracing ───────────────────────────────────────────────────────────
+// Must be first so every response — even ones rejected by CORS/rate-limiting — carries an X-Request-Id.
+app.use(requestIdMiddleware);
 
 // ── Security ──────────────────────────────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -37,9 +43,20 @@ const allowedOrigins = process.env.CORS_ORIGIN
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { error: "Too many login attempts" } });
-const apiLimiter   = rateLimit({ windowMs: 60 * 1000, max: 300 });
-const publicLimiter = rateLimit({ windowMs: 60 * 1000, max: 600 });
+const rateLimitHandler = (code: "RATE_LIMITED", message: string) => (req: express.Request, res: express.Response) => {
+  res.status(429).json({
+    success: false,
+    requestId: req.requestId,
+    error: { code, message },
+  });
+};
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  handler: rateLimitHandler("RATE_LIMITED", "Too many login attempts. Please try again later."),
+});
+const apiLimiter   = rateLimit({ windowMs: 60 * 1000, max: 300, handler: rateLimitHandler("RATE_LIMITED", "Too many requests. Please try again later.") });
+const publicLimiter = rateLimit({ windowMs: 60 * 1000, max: 600, handler: rateLimitHandler("RATE_LIMITED", "Too many requests. Please try again later.") });
 
 app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: false }));
@@ -52,61 +69,11 @@ connectDB().catch((err) => {
 
 // ── Public display route (no auth — for TV/kiosk token display) ───────────────
 // GET /api/public/display?tenantId=xxx  OR  ?slug=xxx
-app.get("/api/public/display", publicLimiter, async (req, res) => {
-  try {
-    const { tenantId, slug } = req.query as Record<string, string>;
-    let resolvedTenantId = tenantId;
-    let resolvedTenant: any = null;
-
-    if (!resolvedTenantId && slug) {
-      resolvedTenant = await (Tenant as any).findOne({ slug });
-      if (!resolvedTenant) return res.status(404).json({ error: "Clinic not found" });
-      resolvedTenantId = resolvedTenant._id.toString();
-    }
-
-    if (!resolvedTenantId) return res.status(400).json({ error: "tenantId or slug required" });
-
-    if (!resolvedTenant) resolvedTenant = await (Tenant as any).findById(resolvedTenantId);
-    const tz = resolvedTenant?.settings?.timezone || "Asia/Kolkata";
-    const today = todayInTz(tz);
-
-    const [inConsult, waiting] = await Promise.all([
-      Appointment.find({
-        tenantId: resolvedTenantId,
-        date: today,
-        status: "In Consult",
-      }).select("token tokenNumber doctor department patientName calledAt"),
-      Appointment.aggregate([
-        {
-          $match: {
-            tenantId: { $eq: resolvedTenantId } as any,
-            date: today,
-            status: "Waiting",
-          },
-        },
-        { $group: { _id: "$doctor", count: { $sum: 1 }, department: { $first: "$department" } } },
-      ]),
-    ]);
-
-    const waitingMap: Record<string, number> = {};
-    waiting.forEach((w: any) => { waitingMap[w._id] = w.count; });
-
-    res.json({
-      date: today,
-      inConsult: inConsult.map((a) => ({
-        token:       a.token,
-        tokenNumber: a.tokenNumber,
-        doctor:      a.doctor,
-        department:  a.department,
-        patientName: a.patientName,
-        calledAt:    a.calledAt,
-      })),
-      waitingByDoctor: waitingMap,
-    });
-  } catch {
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+app.get("/api/public/display", publicLimiter, asyncHandler(async (req, res) => {
+  const { tenantId, slug } = req.query as Record<string, string>;
+  const data = await publicDisplayService.getDisplayData(tenantId, slug);
+  res.json({ success: true, data });
+}));
 
 // ── API Routes ────────────────────────────────────────────────────────────────
 app.use("/api/auth/login",       loginLimiter);
@@ -140,6 +107,10 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+// ── 404 for unmatched API routes ──────────────────────────────────────────────
+// Scoped to /api so it never shadows the SPA static fallback below.
+app.use("/api", notFoundHandler);
+
 // ── Serve static files in production ─────────────────────────────────────────
 if (process.env.NODE_ENV === "production") {
   const publicDir = path.join(__dirname, "public");
@@ -148,6 +119,10 @@ if (process.env.NODE_ENV === "production") {
     res.sendFile(path.join(publicDir, "index.html"));
   });
 }
+
+// ── Centralized error handler ─────────────────────────────────────────────────
+// Must be the last middleware registered.
+app.use(errorHandler);
 
 // ── Start server ──────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

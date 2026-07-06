@@ -2,6 +2,18 @@ import mongoose from "mongoose";
 import DrugInventory from "../models/DrugInventory.js";
 import DrugBatch from "../models/DrugBatch.js";
 
+export async function getAvailableStock(tenantId: string, drugId: string): Promise<number> {
+  const drug = await DrugInventory.findOne({ _id: drugId, tenantId });
+  if (!drug) return 0;
+  if (!drug.isBatchTracked) return drug.stock;
+
+  const agg = await DrugBatch.aggregate([
+    { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), drugId: new mongoose.Types.ObjectId(drugId), status: "Active" } },
+    { $group: { _id: null, total: { $sum: "$quantityRemaining" } } },
+  ]);
+  return agg[0]?.total ?? 0;
+}
+
 export async function syncDrugStock(tenantId: string, drugId: string) {
   const agg = await DrugBatch.aggregate([
     { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), drugId: new mongoose.Types.ObjectId(drugId), status: "Active" } },

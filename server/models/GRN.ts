@@ -21,7 +21,7 @@ export interface IGRN extends Document {
   receivedBy: string;
   items: IGRNItem[];
   totalValue: number;
-  status: "Draft" | "Received";
+  status: "Draft" | "Received" | "Cancelled";
   notes: string;
   createdAt: Date;
   updatedAt: Date;
@@ -49,7 +49,7 @@ const GRNSchema = new Schema<IGRN>(
     receivedBy:   { type: String, default: "" },
     items:        { type: [GRNItemSchema], default: [] },
     totalValue:   { type: Number, default: 0 },
-    status:       { type: String, enum: ["Draft", "Received"], default: "Draft" },
+    status:       { type: String, enum: ["Draft", "Received", "Cancelled"], default: "Draft" },
     notes:        { type: String, default: "" },
   },
   { timestamps: true }

@@ -92,7 +92,7 @@ function DrugAutocomplete({
     debounceRef.current = setTimeout(async () => {
       try {
         const data = await pharmacyApi.inventory.list({ search: q });
-        const items: InventoryDrug[] = (data ?? []).slice(0, 10);
+        const items: InventoryDrug[] = (data?.drugs ?? []).slice(0, 10);
         setSuggestions(items);
         if (items.length > 0 && inputRef.current) {
           const r = inputRef.current.getBoundingClientRect();

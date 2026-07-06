@@ -1,50 +1,22 @@
 import { Router } from "express";
-import ReferralDoctor from "../models/ReferralDoctor.js";
 import { authMiddleware, AuthRequest } from "../middleware/auth.js";
+import { asyncHandler } from "../lib/asyncHandler.js";
+import * as referralDoctorService from "../services/referralDoctorService.js";
 
 const router = Router();
 router.use(authMiddleware);
 
 // GET /api/referral-doctors?search=term
-router.get("/", async (req, res) => {
-  try {
-    const tenantId = (req as AuthRequest).user!.tenantId;
-    const { search } = req.query as { search?: string };
-    const filter: any = { tenantId };
-    if (search?.trim()) {
-      filter.name = { $regex: search.trim(), $options: "i" };
-    }
-    const docs = await ReferralDoctor.find(filter).sort({ name: 1 }).limit(10).lean();
-    res.json(docs);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get("/", asyncHandler(async (req: AuthRequest, res) => {
+  const { search } = req.query as { search?: string };
+  const docs = await referralDoctorService.searchReferralDoctors(req.user!.tenantId, search);
+  res.json({ success: true, data: docs });
+}));
 
 // POST /api/referral-doctors
-router.post("/", async (req, res) => {
-  try {
-    const tenantId = (req as AuthRequest).user!.tenantId;
-    const { name, specialization, phone, hospital } = req.body;
-    if (!name?.trim()) return res.status(400).json({ error: "Name is required" });
-
-    const existing = await ReferralDoctor.findOne({
-      tenantId,
-      name: { $regex: `^${name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
-    });
-    if (existing) return res.json(existing);
-
-    const doc = await ReferralDoctor.create({
-      tenantId,
-      name: name.trim(),
-      specialization: specialization?.trim() ?? "",
-      phone: phone?.trim() ?? "",
-      hospital: hospital?.trim() ?? "",
-    });
-    res.status(201).json(doc);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.post("/", asyncHandler(async (req: AuthRequest, res) => {
+  const { doctor, created } = await referralDoctorService.createReferralDoctor(req.user!.tenantId, req.body);
+  res.status(created ? 201 : 200).json({ success: true, data: doctor });
+}));
 
 export default router;

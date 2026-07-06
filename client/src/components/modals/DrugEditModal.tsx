@@ -27,6 +27,7 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
   const [supplier, setSupplier]                   = useState("");
   const [hsnCode, setHsnCode]                     = useState("");
   const [unit, setUnit]                           = useState("Tab");
+  const [stock, setStock]                         = useState("");
   const [reorderLevel, setReorderLevel]           = useState("");
   const [mrpPerUnit, setMrpPerUnit]               = useState("");
   const [purchasePricePerUnit, setPurchasePrice]  = useState("");
@@ -40,6 +41,7 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
     setSupplier(drug.supplier ?? "");
     setHsnCode(drug.hsnCode ?? "");
     setUnit(drug.unit ?? "Tab");
+    setStock(drug.stock != null ? String(drug.stock) : "");
     setReorderLevel(drug.reorderLevel != null ? String(drug.reorderLevel) : "");
     setMrpPerUnit(drug.mrpPerUnit != null ? String(drug.mrpPerUnit) : "");
     setPurchasePrice(drug.purchasePricePerUnit != null ? String(drug.purchasePricePerUnit) : "");
@@ -57,6 +59,7 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
         supplier:             supplier.trim(),
         hsnCode:              hsnCode.trim(),
         unit,
+        stock:                parseFloat(stock) || 0,
         reorderLevel:         parseFloat(reorderLevel) || 0,
         mrpPerUnit:           parseFloat(mrpPerUnit) || 0,
         purchasePricePerUnit: parseFloat(purchasePricePerUnit) || 0,
@@ -107,6 +110,21 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
 
             <F label="Reorder Level">
               <Input type="number" min={0} className="h-8 text-sm" placeholder="0" value={reorderLevel} onChange={(e) => setReorderLevel(e.target.value)} />
+            </F>
+
+            <F label="Stock">
+              <Input
+                type="number"
+                min={0}
+                className="h-8 text-sm"
+                placeholder="0"
+                value={stock}
+                disabled={!!drug?.isBatchTracked}
+                onChange={(e) => setStock(e.target.value)}
+              />
+              {drug?.isBatchTracked && (
+                <p className="text-[11px] text-muted-foreground">Derived from batch quantities — use GRN or Stock Adjustment.</p>
+              )}
             </F>
 
             <F label="MRP / Unit (₹)">

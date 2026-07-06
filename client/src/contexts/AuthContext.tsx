@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { auth as authApi } from "../lib/api";
+import { auth as authApi, registerUnauthorizedHandler } from "../lib/api";
+import { toast } from "../hooks/use-toast";
 
-export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "lab_tech" | "finance";
+export type UserRole = "admin" | "doctor" | "nurse" | "receptionist" | "pharmacist" | "pharmacy_admin" | "lab_tech" | "finance";
 
 export interface User {
   id: string;
@@ -53,6 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
   };
+
+  useEffect(() => {
+    registerUnauthorizedHandler("user", () => {
+      logout();
+      toast({ variant: "destructive", title: "Session expired", description: "Please log in again." });
+    });
+    return () => registerUnauthorizedHandler("user", null);
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, isLoading, login, logout }}>

@@ -16,6 +16,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import LabOrderModal from "@/components/modals/LabOrderModal";
 import PrescriptionModal from "@/components/modals/PrescriptionModal";
 import AdmitModal from "@/components/modals/AdmitModal";
+import { toast } from "@/hooks/use-toast";
+import { confirm } from "@/hooks/use-confirm";
 
 // ── DICOM Renderer ────────────────────────────────────────────────────────────
 async function renderDicom(base64: string, canvas: HTMLCanvasElement) {
@@ -355,17 +357,18 @@ function ReportsTab({ patient, activeAppt }: { patient: any; patientId: string; 
       link.download = res.fileName;
       link.click();
     } catch (err: any) {
-      alert(err.message || "Download failed");
+      toast({ variant: "destructive", title: "Download failed", description: err.message || "Failed to download report." });
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this report?")) return;
+    const ok = await confirm({ title: "Delete this report?", confirmText: "Delete", variant: "destructive" });
+    if (!ok) return;
     try {
       await reportsApi.remove(id);
       qc.invalidateQueries({ queryKey: ["reports", pid] });
     } catch (err: any) {
-      alert(err.message || "Delete failed");
+      toast({ variant: "destructive", title: "Delete failed", description: err.message || "Failed to delete report." });
     }
   };
 
@@ -375,7 +378,7 @@ function ReportsTab({ patient, activeAppt }: { patient: any; patientId: string; 
       qc.invalidateQueries({ queryKey: ["reports", pid] });
       setEditingId(null);
     } catch (err: any) {
-      alert(err.message || "Failed to save note");
+      toast({ variant: "destructive", title: "Save failed", description: err.message || "Failed to save note." });
     }
   };
 
@@ -736,6 +739,8 @@ export default function OPDPage() {
         qc.invalidateQueries({ queryKey: ["appointments"] });
         qc.invalidateQueries({ queryKey: ["queue"] });
       }
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Sign-off failed", description: err.message || "Failed to complete and sign consultation." });
     } finally {
       setSigning(false);
     }
@@ -746,7 +751,9 @@ export default function OPDPage() {
       await apptApi.call(apt._id);
       qc.invalidateQueries({ queryKey: ["opd-queue"] });
       setSelectedApptId(apt._id);
-    } catch (e: any) { alert(e.message || "Failed to call patient"); }
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Call failed", description: e.message || "Failed to call patient." });
+    }
   };
 
   const handleComplete = async (apt: any) => {
@@ -754,7 +761,9 @@ export default function OPDPage() {
       await apptApi.update(apt._id, { status: "Completed" });
       qc.invalidateQueries({ queryKey: ["opd-queue"] });
       qc.invalidateQueries({ queryKey: ["appointments"] });
-    } catch (e: any) { alert(e.message || "Failed to complete"); }
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Update failed", description: e.message || "Failed to complete consultation." });
+    }
   };
 
   const stopScribe = useCallback(() => {
@@ -782,7 +791,7 @@ export default function OPDPage() {
     try {
       const me = await authApi.me();
       if (!me.aiScribeEnabled || !me.aiScribeApiKey) {
-        alert("AI Scribe not configured. Go to Settings → AI Features to add your API key.");
+        toast({ variant: "destructive", title: "AI Scribe not configured", description: "Go to Settings → AI Features to add your API key." });
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -830,7 +839,7 @@ export default function OPDPage() {
       ws.onerror = () => stopScribe();
       setIsRecording(true);
     } catch (err: any) {
-      alert("Microphone access denied or connection failed: " + err.message);
+      toast({ variant: "destructive", title: "Microphone error", description: "Access denied or connection failed: " + err.message });
     }
   };
 
