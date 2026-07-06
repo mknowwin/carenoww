@@ -19,7 +19,7 @@ const SIGNED_TYPES: AdjustmentType[] = ["Damage", "Expiry-Writeoff", "Theft", "R
 interface Props {
   open: boolean;
   onClose: () => void;
-  drug: { _id: string; name: string; stock: number; unit: string } | null;
+  drug: { _id: string; name: string; stock: number; unit: string; isBatchTracked?: boolean } | null;
 }
 
 function F({ label, children }: { label: string; children: React.ReactNode }) {
@@ -33,6 +33,7 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
   const [quantity, setQuantity] = useState("");
   const [batchId, setBatchId] = useState("");
   const [reason, setReason] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -46,11 +47,19 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
   const isReduction = SIGNED_TYPES.includes(adjustmentType);
   const signedQty = isReduction ? -Math.abs(Number(quantity)) : Math.abs(Number(quantity));
   const projectedStock = drug ? Math.max(0, drug.stock + signedQty) : 0;
+  // Adding stock with no batch picked, on a drug that's already batch-tracked,
+  // needs a real batch behind it — otherwise it's silently discarded the next
+  // time stock is resynced from batches (see stockAdjustmentService.ts).
+  const needsOpeningExpiry = !isReduction && !batchId && !!drug?.isBatchTracked;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quantity || Number(quantity) <= 0) { setError("Quantity must be greater than 0."); return; }
     if (!reason.trim()) { setError("Reason is required."); return; }
+    if (needsOpeningExpiry && !expiryDate) {
+      setError(`"${drug!.name}" is batch-tracked. Provide an expiry date for this added stock.`);
+      return;
+    }
     setLoading(true); setError("");
     try {
       await pharmApi.adjustments.create({
@@ -59,6 +68,7 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
         adjustmentType,
         quantityAdjusted: signedQty,
         reason: reason.trim(),
+        expiryDate: needsOpeningExpiry ? expiryDate : undefined,
       });
       qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
       qc.invalidateQueries({ queryKey: ["pharmacy-adjustments"] });
@@ -72,7 +82,7 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
 
   const handleClose = () => {
     setAdjustmentType("Count-Correction"); setQuantity(""); setBatchId("");
-    setReason(""); setError(""); setSuccess(false);
+    setReason(""); setExpiryDate(""); setError(""); setSuccess(false);
     onClose();
   };
 
@@ -140,6 +150,23 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
                 onChange={(e) => setQuantity(e.target.value)}
               />
             </F>
+
+            {needsOpeningExpiry && (
+              <F label="Opening Stock Expiry *">
+                <div className="space-y-1.5">
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    "{drug.name}" is batch-tracked. Enter an expiry for this added stock so it's tracked as a
+                    real batch. If you're not sure of the real expiry, enter today's date so this stock is used
+                    up first.
+                  </p>
+                  <Input
+                    type="date" className="h-9"
+                    value={expiryDate}
+                    onChange={(e) => setExpiryDate(e.target.value)}
+                  />
+                </div>
+              </F>
+            )}
 
             {quantity && Number(quantity) > 0 && (
               <div className={`text-xs rounded px-3 py-2 ${isReduction ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>

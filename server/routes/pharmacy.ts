@@ -100,7 +100,7 @@ router.post("/grn", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncH
 
 // PUT /api/pharmacy/grn/:id — update GRN (Draft → Received triggers batch creation)
 router.put("/grn/:id", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
-  const grn = await grnService.updateGRN(req.user!.tenantId, req.params.id, req.body);
+  const grn = await grnService.updateGRN(req.user!.tenantId, req.user!.name, req.params.id, req.body);
   res.json({ success: true, data: grn });
 }));
 

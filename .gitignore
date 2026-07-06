@@ -9,6 +9,7 @@ node_modules/
 .env.*.local
 .env.production
 .env.staging
+.env-*
 
 # ── Build output ──────────────────────────────────────────────────────────────
 dist/

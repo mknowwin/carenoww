@@ -1,7 +1,6 @@
 import PharmacyOrder from "../models/PharmacyOrder.js";
 import { getNextId } from "../lib/counter.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
-import { fefoDeduct, syncDrugStock } from "../lib/fefo.js";
 import { AppError } from "../lib/AppError.js";
 
 export interface PharmacyOrderListFilters {
@@ -28,7 +27,8 @@ export async function listOrders(tenantId: string, filters: PharmacyOrderListFil
 }
 
 // Create order (digital auto-order OR manual counter/paper-Rx).
-// When status is "Dispensed" at creation (OTC), FEFO deduction happens immediately.
+// Stock is never deducted here — only the Pharmacy bill (billingService) deducts stock,
+// so a dispensed order and its auto-bill can't double-deduct the same sale.
 export async function createOrder(tenantId: string, userName: string, body: Record<string, any>) {
   const {
     patientId, patientName, drug, qty, unit,
@@ -69,31 +69,9 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
     status: reqStatus || "Pending",
   };
 
-  // If immediately dispensing (OTC counter sale), run FEFO and mark metadata
-  if (reqStatus === "Dispensed" && Array.isArray(items) && items.length > 0 && process.env.PHARMACY_DEDUCT_ON_DISPENSE === "true") {
-    for (const item of items) {
-      if (!item.drugId) continue;
-      try {
-        const used = await fefoDeduct(tenantId, item.drugId, item.quantity);
-        if (used.length > 0) {
-          item.batchId    = used[0].batchId;
-          item.batchNo    = used[0].batchNo;
-          // Override with actual batch MRP so billing reflects the correct price
-          item.mrpPerUnit  = used[0].mrpPerUnit;
-          item.totalAmount = item.quantity * used[0].mrpPerUnit;
-        }
-        await syncDrugStock(tenantId, item.drugId);
-      } catch (err: any) {
-        if (err.insufficientStock) {
-          throw AppError.conflict("Insufficient stock", {
-            drug: item.drugName,
-            required: item.quantity,
-            available: err.available,
-          });
-        }
-        throw err;
-      }
-    }
+  // If immediately dispensing (OTC counter sale), just mark dispense metadata —
+  // stock is deducted when the auto-created Pharmacy bill is billed, not here.
+  if (reqStatus === "Dispensed" && Array.isArray(items) && items.length > 0) {
     orderData.dispensedBy = userName;
     orderData.dispensedAt = new Date();
   }
@@ -101,7 +79,8 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
   return PharmacyOrder.create(orderData);
 }
 
-// Update status / dispense with FEFO stock deduction
+// Update status / dispense — stock is deducted when the auto-created Pharmacy
+// bill is billed (billingService), not here, so a dispense can't double-deduct.
 export async function updateOrder(tenantId: string, userName: string, id: string, body: Record<string, any>) {
   const order = await PharmacyOrder.findOne({ _id: id, tenantId });
   if (!order) throw AppError.notFound("Order not found");
@@ -110,37 +89,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
   const update: any = {};
   allowed.forEach((k) => { if (body[k] !== undefined) update[k] = body[k]; });
 
-  // FEFO stock deduction on dispense
   if (update.status === "Dispensed" && order.status !== "Dispensed") {
-    const itemsToDispense = update.items?.length ? update.items : order.items;
-
-    if (itemsToDispense.length > 0 && process.env.PHARMACY_DEDUCT_ON_DISPENSE === "true") {
-      for (const item of itemsToDispense) {
-        if (!item.drugId) continue;
-        try {
-          const used = await fefoDeduct(tenantId, item.drugId.toString(), item.quantity);
-          if (used.length > 0) {
-            item.batchId    = used[0].batchId;
-            item.batchNo    = used[0].batchNo;
-            // Override with actual batch MRP so billing reflects the correct price
-            item.mrpPerUnit  = used[0].mrpPerUnit;
-            item.totalAmount = item.quantity * used[0].mrpPerUnit;
-          }
-          await syncDrugStock(tenantId, item.drugId.toString());
-        } catch (err: any) {
-          if (err.insufficientStock) {
-            throw AppError.conflict("Insufficient stock", {
-              drug: item.drugName,
-              required: item.quantity,
-              available: err.available,
-            });
-          }
-          throw err;
-        }
-      }
-      if (itemsToDispense !== order.items) update.items = itemsToDispense;
-    }
-
     update.dispensedBy = update.dispensedBy || userName;
     update.dispensedAt = update.dispensedAt || new Date();
   }

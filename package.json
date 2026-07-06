@@ -14,6 +14,7 @@
     "migrate:uhid": "dotenv -- tsx server/migrate-uhid-counters.ts",
     "migrate:drug-isactive": "dotenv -- tsx server/migrate-drug-isactive.ts",
     "migrate:masters": "dotenv -- tsx server/migrate-backfill-masters.ts",
+    "migrate:drugbatch-index": "dotenv -- tsx server/migrate-drugbatch-index.ts",
     "check": "tsc",
     "typecheck": "tsc --noEmit"
   },
