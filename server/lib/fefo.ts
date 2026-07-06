@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import DrugInventory from "../models/DrugInventory.js";
 import DrugBatch from "../models/DrugBatch.js";
+import InventoryAuditLog from "../models/InventoryAuditLog.js";
 
 export async function getAvailableStock(tenantId: string, drugId: string, session?: mongoose.ClientSession): Promise<number> {
   const drug = await DrugInventory.findOne({ _id: drugId, tenantId }).session(session ?? null);
@@ -12,6 +13,51 @@ export async function getAvailableStock(tenantId: string, drugId: string, sessio
     { $group: { _id: null, total: { $sum: "$quantityRemaining" } } },
   ]).session(session ?? null);
   return agg[0]?.total ?? 0;
+}
+
+// Carries a drug's pre-existing manual stock into a real batch the first time it
+// transitions to batch tracking, so syncDrugStock's sum-of-batches doesn't silently
+// discard stock that was never represented as a DrugBatch. No-ops once the drug is
+// already batch-tracked (subsequent GRNs just add new batches normally).
+export async function seedOpeningBatchIfNeeded(
+  tenantId: string,
+  drugId: string,
+  openingExpiryDate: string | undefined,
+  performedBy: string,
+  session: mongoose.ClientSession
+) {
+  const drug = await DrugInventory.findOne({ _id: drugId, tenantId }).session(session);
+  if (!drug || drug.isBatchTracked || drug.stock <= 0) return;
+
+  if (!openingExpiryDate) {
+    const err: any = new Error("Opening stock expiry required");
+    err.requiresOpeningExpiry = true;
+    err.drugId = drugId;
+    err.drugName = drug.name;
+    err.existingStock = drug.stock;
+    throw err;
+  }
+
+  await DrugBatch.create([{
+    tenantId,
+    drugId,
+    batchNo: "OPENING-BAL",
+    supplierName: "Opening Balance",
+    expiryDate: new Date(openingExpiryDate),
+    quantityReceived: drug.stock,
+    quantityRemaining: drug.stock,
+    status: "Active",
+  }], { session });
+
+  // Traceable migration event, same pattern as the GRN-cancellation reversal log.
+  await InventoryAuditLog.create([{
+    tenantId,
+    drugId,
+    action: "Updated",
+    changes: [{ field: "isBatchTracked", oldValue: false, newValue: true }],
+    performedBy,
+    notes: `Migrated ${drug.stock} pre-existing unit(s) to batch tracking as OPENING-BAL, expiry set to ${openingExpiryDate}`,
+  }], { session });
 }
 
 export async function syncDrugStock(tenantId: string, drugId: string, session?: mongoose.ClientSession) {

@@ -19,12 +19,13 @@ interface GRNItem {
   purchasePricePerUnit: number;
   mrpPerUnit: number;
   totalCost: number;
+  openingExpiryDate: string;
 }
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  inventory: Array<{ _id: string; name: string; unit: string }>;
+  inventory: Array<{ _id: string; name: string; unit: string; stock?: number; isBatchTracked?: boolean }>;
   existing?: any;
 }
 
@@ -35,7 +36,15 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
 const emptyItem = (): GRNItem => ({
   drugName: "", drugId: "", unit: "Tab", batchNo: "", expiryDate: "",
   quantityReceived: 0, purchasePricePerUnit: 0, mrpPerUnit: 0, totalCost: 0,
+  openingExpiryDate: "",
 });
+
+// A drug that's not yet batch-tracked but already has manual stock on hand needs
+// an opening-balance expiry before it can be migrated to batch tracking via GRN —
+// otherwise that pre-existing stock would be silently discarded (see fefo.ts's
+// seedOpeningBatchIfNeeded).
+const needsOpeningExpiry = (drug: Props["inventory"][number] | undefined) =>
+  !!drug && !drug.isBatchTracked && (drug.stock ?? 0) > 0;
 
 const toDateInput = (val: string | undefined) => {
   if (!val) return "";
@@ -83,6 +92,7 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
         purchasePricePerUnit: it.purchasePricePerUnit ?? 0,
         mrpPerUnit:          it.mrpPerUnit ?? 0,
         totalCost:           it.totalCost ?? 0,
+        openingExpiryDate:   toDateInput(it.openingExpiryDate),
       }));
       setItems(loadedItems.length ? loadedItems : [emptyItem()]);
       setDrugSearch((loadedItems.length ? loadedItems : [emptyItem()]).map(() => ""));
@@ -202,6 +212,13 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
     if (!supplierName.trim()) { setError("Supplier name is required."); return; }
     if (items.some((it) => !it.drugId || !it.batchNo || !it.expiryDate || !it.quantityReceived)) {
       setError("All rows need a drug, batch no, expiry date, and quantity.");
+      return;
+    }
+    const rowNeedingOpeningExpiry = items.find(
+      (it) => needsOpeningExpiry(inventory.find((d) => d._id === it.drugId)) && !it.openingExpiryDate
+    );
+    if (rowNeedingOpeningExpiry) {
+      setError(`"${rowNeedingOpeningExpiry.drugName}" needs an opening stock expiry before it can be batch-tracked.`);
       return;
     }
     setLoading(true); setError("");
@@ -336,8 +353,11 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                 const filteredDrugs = search.trim().length > 0
                   ? inventory.filter((d) => d.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 50)
                   : inventory.slice(0, 50);
+                const selectedDrug = inventory.find((d) => d._id === item.drugId);
+                const showOpeningExpiry = needsOpeningExpiry(selectedDrug);
                 return (
-                <div key={idx} className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 items-center">
+                <div key={idx} className="space-y-1.5">
+                <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 items-center">
                   {item.drugId ? (
                     <div className="flex items-center gap-1.5 h-8 border rounded-md px-2 bg-background text-xs">
                       <span className="flex-1 truncate">{item.drugName}</span>
@@ -390,6 +410,22 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                   <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600" disabled={items.length === 1} onClick={() => removeRow(idx)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
+                </div>
+                {showOpeningExpiry && (
+                  <div className="flex items-center gap-2 pl-1 pr-9 flex-wrap">
+                    <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      "{selectedDrug!.name}" already has {selectedDrug!.stock} unit(s) on hand (not batch-tracked yet).
+                      Enter an expiry for this existing stock to carry it forward. If you're not sure of the real
+                      expiry, enter today's date so this stock is used up first.
+                    </span>
+                    <Input
+                      type="date"
+                      className="h-8 text-xs w-40"
+                      value={item.openingExpiryDate}
+                      onChange={(e) => setItem(idx, "openingExpiryDate", e.target.value)}
+                    />
+                  </div>
+                )}
                 </div>
               );})}
             </div>

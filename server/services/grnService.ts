@@ -4,7 +4,7 @@ import DrugBatch from "../models/DrugBatch.js";
 import DrugInventory from "../models/DrugInventory.js";
 import InventoryAuditLog from "../models/InventoryAuditLog.js";
 import { getNextId } from "../lib/counter.js";
-import { syncDrugStock } from "../lib/fefo.js";
+import { syncDrugStock, seedOpeningBatchIfNeeded } from "../lib/fefo.js";
 import { AppError } from "../lib/AppError.js";
 
 export interface GRNListFilters {
@@ -71,6 +71,8 @@ export async function createGRN(tenantId: string, userName: string, body: Record
         for (const item of items) {
           if (!item.drugId || !item.batchNo || !item.expiryDate || !item.quantityReceived) continue;
 
+          await seedOpeningBatchIfNeeded(tenantId, item.drugId, item.openingExpiryDate, userName, session);
+
           await DrugBatch.create(
             [{
               tenantId,
@@ -96,6 +98,12 @@ export async function createGRN(tenantId: string, userName: string, body: Record
     });
   } catch (err: any) {
     if (err.code === 11000) throw AppError.conflict("Batch number already exists");
+    if (err.requiresOpeningExpiry) {
+      throw AppError.badRequest(
+        `"${err.drugName}" already has ${err.existingStock} unit(s) of manually-tracked stock. Provide an expiry date for this existing stock before adding batch details.`,
+        { requiresOpeningExpiry: true, drugId: err.drugId, drugName: err.drugName, existingStock: err.existingStock }
+      );
+    }
     throw err;
   } finally {
     await session.endSession();
@@ -105,7 +113,7 @@ export async function createGRN(tenantId: string, userName: string, body: Record
 }
 
 // Update GRN (Draft → Received triggers batch creation)
-export async function updateGRN(tenantId: string, id: string, body: Record<string, any>) {
+export async function updateGRN(tenantId: string, userName: string, id: string, body: Record<string, any>) {
   const grn = await GRN.findOne({ _id: id, tenantId });
   if (!grn) throw AppError.notFound("GRN not found");
 
@@ -124,8 +132,16 @@ export async function updateGRN(tenantId: string, id: string, body: Record<strin
 
       // If transitioning Draft → Received, create batches now
       if (becomeReceived && updated) {
-        for (const item of updated.items) {
+        for (let i = 0; i < updated.items.length; i++) {
+          const item = updated.items[i];
           if (!item.drugId || !item.batchNo || !item.quantityReceived) continue;
+
+          // updated.items is Mongoose-cast against GRNItemSchema, which strips
+          // openingExpiryDate — read it from the raw request body instead (same
+          // array, same order, as submitted by the client).
+          const openingExpiryDate = body.items?.[i]?.openingExpiryDate;
+          await seedOpeningBatchIfNeeded(tenantId, item.drugId, openingExpiryDate, userName, session);
+
           await DrugBatch.create(
             [{
               tenantId,
@@ -149,6 +165,12 @@ export async function updateGRN(tenantId: string, id: string, body: Record<strin
     });
   } catch (err: any) {
     if (err.code === 11000) throw AppError.conflict("Batch number already exists");
+    if (err.requiresOpeningExpiry) {
+      throw AppError.badRequest(
+        `"${err.drugName}" already has ${err.existingStock} unit(s) of manually-tracked stock. Provide an expiry date for this existing stock before adding batch details.`,
+        { requiresOpeningExpiry: true, drugId: err.drugId, drugName: err.drugName, existingStock: err.existingStock }
+      );
+    }
     throw err;
   } finally {
     await session.endSession();
