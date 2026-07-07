@@ -2,6 +2,7 @@ import { Router } from "express";
 import { superadminMiddleware } from "../middleware/superadmin.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import * as superadminService from "../services/superadminService.js";
+import * as backupService from "../services/backupService.js";
 
 const router = Router();
 
@@ -60,6 +61,18 @@ router.post("/tenants/:id/activate", asyncHandler(async (req, res) => {
 // DELETE /api/superadmin/tenants/:id
 router.delete("/tenants/:id", asyncHandler(async (req, res) => {
   const data = await superadminService.cancelTenant(req.params.id);
+  res.json({ success: true, data });
+}));
+
+// GET /api/superadmin/backup — full MongoDB dump (gzip, base64-encoded)
+router.get("/backup", asyncHandler(async (_req, res) => {
+  const data = await backupService.createBackup();
+  res.json({ success: true, data });
+}));
+
+// POST /api/superadmin/backup/restore — restore a previously downloaded dump
+router.post("/backup/restore", asyncHandler(async (req, res) => {
+  const data = await backupService.restoreBackup(req.body.fileData);
   res.json({ success: true, data });
 }));
 

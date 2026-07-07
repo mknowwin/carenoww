@@ -86,6 +86,9 @@ export default function SuperAdminDashboard() {
           <Link href="/superadmin/tenants" className="py-3 text-sm font-medium text-slate-400 hover:text-white border-b-2 border-transparent">
             Tenants
           </Link>
+          <Link href="/superadmin/backup" className="py-3 text-sm font-medium text-slate-400 hover:text-white border-b-2 border-transparent">
+            Backup
+          </Link>
         </div>
       </nav>
 

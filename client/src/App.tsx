@@ -22,6 +22,7 @@ import SuperAdminLoginPage from "./pages/superadmin/login";
 import SuperAdminDashboard from "./pages/superadmin/dashboard";
 import TenantsPage from "./pages/superadmin/tenants";
 import TenantFormPage from "./pages/superadmin/tenant-form";
+import SuperAdminBackupPage from "./pages/superadmin/backup";
 
 function LoadingScreen() {
   return (
@@ -102,6 +103,7 @@ export default function App() {
       <Route path="/superadmin/tenants/new"  component={() => <SuperAdminRoute component={TenantFormPage} />} />
       <Route path="/superadmin/tenants/:id"  component={() => <SuperAdminRoute component={TenantFormPage} />} />
       <Route path="/superadmin/tenants"      component={() => <SuperAdminRoute component={TenantsPage} />} />
+      <Route path="/superadmin/backup"       component={() => <SuperAdminRoute component={SuperAdminBackupPage} />} />
       <Route path="/superadmin">
         {superAdmin ? <Redirect to="/superadmin/dashboard" /> : <Redirect to="/superadmin/login" />}
       </Route>
