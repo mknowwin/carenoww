@@ -1002,6 +1002,7 @@ export function printCurrentStockReport(drugs: any[], filter: string, clinicOver
       <td class="tr"><strong>${d.stock}</strong> ${d.unit}</td>
       <td class="tr">${d.reorderLevel} ${d.unit}</td>
       <td class="tr">${d.mrpPerUnit ? `₹${Number(d.mrpPerUnit).toLocaleString("en-IN")}` : "—"}</td>
+      <td class="tc">${d.isBatchTracked ? "Yes" : "No"}</td>
       <td class="tc"><strong style="color:${d.status === "Critical" ? "#dc2626" : d.status === "Low" ? "#d97706" : "#15803d"};">${d.status}</strong></td>
     </tr>`;
   }).join("");
@@ -1038,11 +1039,12 @@ export function printCurrentStockReport(drugs: any[], filter: string, clinicOver
           <th class="tr" style="width:110px;">Current Stock</th>
           <th class="tr" style="width:110px;">Reorder Level</th>
           <th class="tr" style="width:90px;">MRP/Unit</th>
+          <th class="tc" style="width:90px;">Batch Tracked</th>
           <th class="tc" style="width:80px;">Status</th>
         </tr>
       </thead>
       <tbody>
-        ${rowHtml || '<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No items found</td></tr>'}
+        ${rowHtml || '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">No items found</td></tr>'}
       </tbody>
     </table>
 
