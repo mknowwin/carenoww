@@ -118,6 +118,12 @@ export const superadmin = {
   cancelTenant:  (id: string) => del<any>(`/superadmin/tenants/${id}`),
   getTenantUsers:(id: string) => get<any>(`/superadmin/tenants/${id}/users`),
   seedTenant:    (id: string) => post<any>(`/superadmin/tenants/${id}/seed`, {}),
+  backup:        () => get<{
+    fileName: string; fileType: string; fileData: string;
+    sizeBytes: number; collectionCount: number; documentCount: number; generatedAt: string;
+  }>("/superadmin/backup"),
+  restoreBackup: (fileData: string) =>
+    post<{ restoredCollections: number; restoredDocuments: number }>("/superadmin/backup/restore", { fileData }),
 };
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────

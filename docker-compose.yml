@@ -8,19 +8,31 @@ services:
     restart: unless-stopped
     ports:
       - "5031:5031"
+      # Uncomment to reach MongoDB from the host (e.g. mongosh, Compass):
+      # - "27017:27017"
     environment:
-      PORT: "${PORT:-5031}"
-      NODE_ENV: "${NODE_ENV:-production}"
-      MONGODB_URI: "${MONGODB_URI}"
+      # Hardcoded, not templated from .env: that file is shared with local
+      # `npm run dev` (PORT=3201, NODE_ENV=development), which would otherwise
+      # leak in here and make the container listen on the wrong port and skip
+      # serving the built client.
+      PORT: "5031"
+      NODE_ENV: "production"
+      # Mongo now runs inside this same container as a single-node replica set.
+      MONGODB_URI: "${MONGODB_URI:-mongodb://127.0.0.1:27017/carenoww?replicaSet=rs0}"
       JWT_SECRET: "${JWT_SECRET}"
       SUPERADMIN_JWT_SECRET: "${SUPERADMIN_JWT_SECRET}"
       SUPERADMIN_EMAIL: "${SUPERADMIN_EMAIL}"
       SUPERADMIN_PASSWORD: "${SUPERADMIN_PASSWORD}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       CORS_ORIGIN: "${CORS_ORIGIN:-}"
+    volumes:
+      - mongo-data:/data/db
     networks:
       - carenoww-net
 
 networks:
   carenoww-net:
     driver: bridge
+
+volumes:
+  mongo-data:

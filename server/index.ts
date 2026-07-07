@@ -58,7 +58,8 @@ const loginLimiter = rateLimit({
 const apiLimiter   = rateLimit({ windowMs: 60 * 1000, max: 300, handler: rateLimitHandler("RATE_LIMITED", "Too many requests. Please try again later.") });
 const publicLimiter = rateLimit({ windowMs: 60 * 1000, max: 600, handler: rateLimitHandler("RATE_LIMITED", "Too many requests. Please try again later.") });
 
-app.use(express.json({ limit: "12mb" }));
+// 50mb accommodates base64-encoded MongoDB backup archives uploaded for restore (server/routes/superadmin.ts).
+app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: false }));
 
 // ── Connect to MongoDB ─────────────────────────────────────────────────────────
