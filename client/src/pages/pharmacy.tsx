@@ -862,8 +862,8 @@ export default function PharmacyPage() {
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="border-b bg-muted/40">
-                              {["#", "Drug Name", "Category", "Stock", "Reorder Level", "MRP/Unit", "Status"].map((h, i) => (
-                                <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 3 ? "text-left" : "text-right"} ${i === 6 ? "text-center" : ""}`}>{h}</th>
+                              {["#", "Drug Name", "Category", "Stock", "Reorder Level", "MRP/Unit", "Batch Tracked", "Status"].map((h, i) => (
+                                <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 3 ? "text-left" : "text-right"} ${i === 6 || i === 7 ? "text-center" : ""}`}>{h}</th>
                               ))}
                             </tr>
                           </thead>
@@ -876,6 +876,9 @@ export default function PharmacyPage() {
                                 <td className="py-2.5 px-4 text-right font-semibold">{drug.stock} <span className="font-normal text-muted-foreground">{drug.unit}</span></td>
                                 <td className="py-2.5 px-4 text-right text-muted-foreground">{drug.reorderLevel} {drug.unit}</td>
                                 <td className="py-2.5 px-4 text-right text-muted-foreground">{drug.mrpPerUnit ? `₹${Number(drug.mrpPerUnit).toLocaleString("en-IN")}` : "—"}</td>
+                                <td className="py-2.5 px-4 text-center">
+                                  <Badge variant={drug.isBatchTracked ? "default" : "outline"} className="text-xs">{drug.isBatchTracked ? "Yes" : "No"}</Badge>
+                                </td>
                                 <td className="py-2.5 px-4 text-center">
                                   <Badge className={`text-xs ${INVENTORY_STATUS_COLORS[drug.status]}`}>{drug.status}</Badge>
                                 </td>
