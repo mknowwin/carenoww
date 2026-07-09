@@ -46,6 +46,8 @@ export async function seedOpeningBatchIfNeeded(
     expiryDate: new Date(openingExpiryDate),
     quantityReceived: drug.stock,
     quantityRemaining: drug.stock,
+    purchasePricePerUnit: drug.purchasePricePerUnit ?? 0,
+    mrpPerUnit: drug.mrpPerUnit ?? 0,
     status: "Active",
   }], { session });
 
