@@ -7,6 +7,8 @@
     "dev": "concurrently -n \"server,client\" -c \"bgBlue.bold,bgMagenta.bold\" \"npm run dev-server\" \"npm run dev-client\"",
     "dev-client": "vite",
     "dev-server": "dotenv -- tsx watch server/index.ts",
+    "docker:dev": "docker compose -f docker-compose.dev.yml up --build",
+    "docker:dev:down": "docker compose -f docker-compose.dev.yml down",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "build:client": "vite build",
     "start": "NODE_ENV=production node dist/index.js",
@@ -15,6 +17,7 @@
     "migrate:drug-isactive": "dotenv -- tsx server/migrate-drug-isactive.ts",
     "migrate:masters": "dotenv -- tsx server/migrate-backfill-masters.ts",
     "migrate:drugbatch-index": "dotenv -- tsx server/migrate-drugbatch-index.ts",
+    "migrate:receivedby-id": "dotenv -- tsx server/migrate-receivedby-id.ts",
     "check": "tsc",
     "typecheck": "tsc --noEmit"
   },

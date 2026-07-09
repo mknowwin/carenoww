@@ -87,6 +87,8 @@ export async function createAdjustment(tenantId: string, userName: string, body:
       expiryDate: new Date(expiryDate),
       quantityReceived: Number(quantityAdjusted),
       quantityRemaining: Number(quantityAdjusted),
+      purchasePricePerUnit: drug.purchasePricePerUnit ?? 0,
+      mrpPerUnit: drug.mrpPerUnit ?? 0,
       status: "Active",
     });
     await syncDrugStock(tenantId, drugId);

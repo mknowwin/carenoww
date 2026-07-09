@@ -1,0 +1,91 @@
+# Dev stack — hot-reloading app + a real replica-set MongoDB, so you can leave
+# `docker compose -f docker-compose.dev.yml up` running and just edit code:
+# tsx watch / Vite HMR pick up changes on the host without a container restart.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build   # first run / after package.json changes
+#   docker compose -f docker-compose.dev.yml up           # subsequent runs
+#   docker compose -f docker-compose.dev.yml down          # stop (add -v to also wipe dev DB data)
+#
+# Separate from docker-compose.yml (production, single bundled container) —
+# this spins up Mongo as its own service since only source is bind-mounted
+# here, not a pre-built dist/.
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: carenoww-mongo-dev
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-dev-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - carenoww-dev-net
+
+  # One-shot: initiates the single-node replica set (required for the app's
+  # multi-document transactions, e.g. billing) the first time it's needed.
+  # Re-running is a no-op — exits 0 once rs.status() succeeds.
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo:
+        condition: service_healthy
+    entrypoint: ["mongosh", "--host", "mongo", "--quiet", "--eval"]
+    command:
+      - >-
+        try { rs.status(); print('Replica set already initiated.'); }
+        catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }); print('Replica set initiated.'); }
+    networks:
+      - carenoww-dev-net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: carenoww-app-dev
+    restart: unless-stopped
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+    ports:
+      - "3200:3200" # Vite (client, with HMR)
+      - "3201:3201" # Express (API)
+    environment:
+      PORT: "3201"
+      NODE_ENV: "development"
+      # Points at the separate `mongo` service, not templated from .env, so it
+      # can't accidentally point at a host-local Mongo instead.
+      MONGODB_URI: "mongodb://mongo:27017/carenoww?replicaSet=rs0"
+      # Falls back to throwaway dev values if unset — fine for local dev,
+      # never use these defaults in anything reachable outside your machine.
+      JWT_SECRET: "${JWT_SECRET:-dev_jwt_secret_change_me_min_32_chars_xxxx}"
+      SUPERADMIN_JWT_SECRET: "${SUPERADMIN_JWT_SECRET:-dev_superadmin_secret_change_me_xxxx}"
+      SUPERADMIN_EMAIL: "${SUPERADMIN_EMAIL:-superadmin@carenoww.io}"
+      SUPERADMIN_PASSWORD: "${SUPERADMIN_PASSWORD:-SuperAdmin@2026!}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-}"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    # Same as `npm run dev`, but Vite needs --host 0.0.0.0 to be reachable
+    # from outside the container (its default `localhost` bind isn't).
+    command:
+      - sh
+      - -c
+      - npx concurrently -n "server,client" -c "bgBlue.bold,bgMagenta.bold" "npm run dev-server" "vite --host 0.0.0.0"
+    networks:
+      - carenoww-dev-net
+
+networks:
+  carenoww-dev-net:
+    driver: bridge
+
+volumes:
+  mongo-dev-data:

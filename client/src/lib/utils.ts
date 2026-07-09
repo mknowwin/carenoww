@@ -15,6 +15,12 @@ export function formatCurrency(amount: number, currency = "INR"): string {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amount);
 }
 
+/** Same as formatCurrency but never abbreviates (no K/L/Cr) — full digit-grouped amount. */
+export function formatCurrencyFull(amount: number, currency = "INR"): string {
+  if (currency === "INR") return `₹${Math.round(amount).toLocaleString("en-IN")}`;
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amount);
+}
+
 /** Returns "YYYY-MM-DD" in the given IANA timezone (uses Intl, no packages needed). */
 export function todayInTz(tz: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());

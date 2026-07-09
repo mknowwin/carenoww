@@ -228,6 +228,7 @@ export const pharmacy = {
       const qs = params ? "?" + new URLSearchParams(params as Record<string, string>).toString() : "";
       return get<any[]>(`/pharmacy/batches/expiry-report${qs}`);
     },
+    update: (id: string, data: any) => put<any>(`/pharmacy/batches/${id}`, data),
   },
   grn: {
     list:   (params?: Record<string, string>) => {

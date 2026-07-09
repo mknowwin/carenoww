@@ -318,6 +318,7 @@ export interface PaymentEntry {
   payer: string;
   transactionRef?: string;
   receivedBy?: string;
+  receivedById?: string;
   notes?: string;
   paidAt?: string;
 }
@@ -327,6 +328,7 @@ export interface AdvanceEntry {
   amount: number;
   receivedDate?: string;
   receivedBy?: string;
+  receivedById?: string;
   mode: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
   transactionRef?: string;
 }
@@ -370,6 +372,8 @@ export interface BillingRecord {
   paymentMode?: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
   type: string;
   notes?: string;
+  createdBy?: string;
+  createdById?: string;
   isLocked?: boolean;
   insurance?: InsuranceClaim;
   totalCgst?: number;

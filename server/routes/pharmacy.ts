@@ -84,6 +84,12 @@ router.get("/batches/expiry-report", requireRole("admin", "pharmacist", "pharmac
   res.json({ success: true, data });
 }));
 
+// PUT /api/pharmacy/batches/:id — edit batch metadata (batch no, dates, prices, status)
+router.put("/batches/:id", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const data = await drugBatchService.updateBatch(req.user!.tenantId, req.user!.name, req.params.id, req.body);
+  res.json({ success: true, data });
+}));
+
 // ── GRN (Goods Receipt Note) ──────────────────────────────────────────────────
 
 // GET /api/pharmacy/grn

@@ -10,7 +10,7 @@ import { DRUG_UNITS } from "@/lib/constants";
 import {
   Pill, Search, Plus, AlertTriangle, CheckCircle2,
   Clock, Package, RefreshCw, FileText, History, ShoppingCart, SlidersHorizontal, Pencil, Trash2,
-  BarChart3, Printer, Upload, ChevronLeft, ChevronRight,
+  BarChart3, Printer, Upload, ChevronLeft, ChevronRight, Layers,
 } from "lucide-react";
 import { printExpiryReport, printCurrentStockReport } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,7 @@ import DispenseCounterModal from "@/components/modals/DispenseCounterModal";
 import DrugEditModal from "@/components/modals/DrugEditModal";
 import BulkUploadInventoryModal from "@/components/modals/BulkUploadInventoryModal";
 import HistoryModal from "@/components/modals/HistoryModal";
+import DrugBatchesModal from "@/components/modals/DrugBatchesModal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,7 @@ export default function PharmacyPage() {
   // Inventory edit
   const [editDrug, setEditDrug] = useState<any>(null);
   const [historyDrug, setHistoryDrug] = useState<any>(null);
+  const [batchesDrug, setBatchesDrug] = useState<any>(null);
   const [deactivatingDrug, setDeactivatingDrug] = useState<string | null>(null);
   const [cancellingGrn, setCancellingGrn] = useState<string | null>(null);
 
@@ -615,6 +617,11 @@ export default function PharmacyPage() {
                     <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setHistoryDrug(drug)} title="History">
                       <History className="h-3.5 w-3.5" />
                     </Button>
+                    {drug.isBatchTracked && (
+                      <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setBatchesDrug(drug)} title="Batches">
+                        <Layers className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     {drug.isActive === false ? (
                       canManageInventory && (
                         <Button
@@ -1008,6 +1015,7 @@ export default function PharmacyPage() {
       <DrugEditModal open={!!editDrug} onClose={() => setEditDrug(null)} drug={editDrug} />
       <BulkUploadInventoryModal open={showBulkUpload} onClose={() => setShowBulkUpload(false)} />
       <HistoryModal open={!!historyDrug} onClose={() => setHistoryDrug(null)} drug={historyDrug} />
+      <DrugBatchesModal open={!!batchesDrug} onClose={() => setBatchesDrug(null)} drug={batchesDrug} canEdit={canManageInventory} />
     </div>
   );
 }
