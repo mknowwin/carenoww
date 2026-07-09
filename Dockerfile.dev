@@ -1,0 +1,16 @@
+# ── Dev image ─────────────────────────────────────────────────────────────────
+# Installs dependencies only; source is bind-mounted by docker-compose.dev.yml
+# so edits on the host are picked up by tsx watch / Vite HMR without rebuilding
+# or restarting the container. Rebuild only when package.json changes.
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 3200 3201
+
+CMD ["npm", "run", "dev"]

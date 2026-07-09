@@ -211,6 +211,7 @@ export async function createBill(tenantId: string, user: { name: string; id: str
           paymentMode: paymentMode || "Cash",
           payer: payer || "Self",
           receivedBy: user.name,
+          receivedById: user.id,
           paidAt: new Date(),
         });
       }
@@ -346,7 +347,7 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
   return updated;
 }
 
-export async function postPayment(tenantId: string, userName: string, id: string, body: Record<string, any>) {
+export async function postPayment(tenantId: string, user: { id: string; name: string }, id: string, body: Record<string, any>) {
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
 
@@ -362,7 +363,8 @@ export async function postPayment(tenantId: string, userName: string, id: string
     paymentMode,
     payer: payer || bill.payer,
     transactionRef: transactionRef || "",
-    receivedBy: userName,
+    receivedBy: user.name,
+    receivedById: user.id,
     notes: notes || "",
     paidAt: new Date(),
   };
@@ -455,7 +457,7 @@ export async function fileClaim(tenantId: string, id: string, body: Record<strin
   );
 }
 
-export async function updateClaim(tenantId: string, userName: string, id: string, body: Record<string, any>) {
+export async function updateClaim(tenantId: string, user: { id: string; name: string }, id: string, body: Record<string, any>) {
   const { claimStatus, settledAmount, rejectionReason } = body;
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
@@ -481,7 +483,8 @@ export async function updateClaim(tenantId: string, userName: string, id: string
         amount: settled,
         paymentMode: "Insurance",
         payer: bill.insurance?.tpaName || "Insurance",
-        receivedBy: userName,
+        receivedBy: user.name,
+        receivedById: user.id,
         paidAt: new Date(),
       },
     };
@@ -490,7 +493,12 @@ export async function updateClaim(tenantId: string, userName: string, id: string
   return BillingRecord.findByIdAndUpdate(bill._id, updates, { new: true });
 }
 
-export async function salesByStaff(tenantId: string, timezone: string, filters: { from?: string; to?: string }) {
+export async function salesByStaff(
+  tenantId: string,
+  timezone: string,
+  filters: { from?: string; to?: string },
+  requester: { id: string; role: string }
+) {
   const { from, to } = filters;
 
   const dateFilter: any = {};
@@ -500,12 +508,15 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
   const matchStage: any = { tenantId: new mongoose.Types.ObjectId(tenantId), status: { $ne: "Draft" } };
   if (from || to) matchStage.createdAt = dateFilter;
 
+  const isPrivileged = ["admin", "finance"].includes(requester.role);
+  const creatorMatch = isPrivileged ? matchStage : { ...matchStage, createdById: requester.id };
+
   const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
   const emptyBreakdown = () => Object.fromEntries(PAYMENT_MODES.map(m => [m, 0]));
 
   const [byCreator, byReceiver, byReceiverMode] = await Promise.all([
     BillingRecord.aggregate([
-      { $match: matchStage },
+      { $match: creatorMatch },
       {
         $group: {
           _id: "$createdBy",
@@ -518,6 +529,7 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
     BillingRecord.aggregate([
       { $match: matchStage },
       { $unwind: "$payments" },
+      ...(isPrivileged ? [] : [{ $match: { "payments.receivedById": requester.id } }]),
       {
         $group: {
           _id: "$payments.receivedBy",
@@ -529,6 +541,7 @@ export async function salesByStaff(tenantId: string, timezone: string, filters: 
     BillingRecord.aggregate([
       { $match: matchStage },
       { $unwind: "$payments" },
+      ...(isPrivileged ? [] : [{ $match: { "payments.receivedById": requester.id } }]),
       {
         $group: {
           _id: { receivedBy: "$payments.receivedBy", paymentMode: "$payments.paymentMode" },

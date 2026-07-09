@@ -188,6 +188,22 @@ function _billMeta(bill: any, clinic: ClinicInfo, hasGst: boolean | string | und
   return { subtotal, gstSummary };
 }
 
+// ── Payment history — used across all invoice styles to show who was paid what, when ──
+function _paymentRows(bill: any) {
+  return ((bill.payments || []) as any[])
+    .slice()
+    .sort((a, b) => new Date(a.paidAt || 0).getTime() - new Date(b.paidAt || 0).getTime())
+    .map((p, idx) => ({
+      no: idx + 1,
+      dateStr: p.paidAt
+        ? new Date(p.paidAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+        : "—",
+      mode: p.paymentMode || "—",
+      receivedBy: p.receivedBy || "—",
+      amountStr: `₹${(p.amount || 0).toLocaleString()}`,
+    }));
+}
+
 // ── Style 1: Classic ──────────────────────────────────────────────────────────
 function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
   const docLabel = hasGst ? "Tax Invoice" : undefined;
@@ -240,6 +256,26 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
+    ${(() => {
+      const paymentRows = _paymentRows(bill);
+      if (!paymentRows.length) return "";
+      return `
+    <table>
+      <thead>
+        <tr><th class="tc" style="width:36px;">#</th><th>Date</th><th>Mode</th><th>Received By</th><th class="tr">Amount</th></tr>
+      </thead>
+      <tbody>
+        ${paymentRows.map((p) => `
+        <tr>
+          <td class="tc">${p.no}</td>
+          <td>${p.dateStr}</td>
+          <td>${p.mode}</td>
+          <td>${p.receivedBy}</td>
+          <td class="tr">${p.amountStr}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+    })()}
     <div class="summary">
       <table>
         <tr><td>Subtotal</td><td class="tr">₹${subtotal.toLocaleString()}</td></tr>
@@ -328,6 +364,33 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
       <tbody>${itemRows}</tbody>
     </table>
 
+    ${(() => {
+      const paymentRows = _paymentRows(bill);
+      if (!paymentRows.length) return "";
+      return `
+    <table style="width:100%;border-collapse:collapse;margin:0 0 12px;">
+      <thead>
+        <tr style="background:#1a5c4a;">
+          <th style="padding:7px 10px;text-align:center;color:#fff;font-size:10px;letter-spacing:.3px;width:32px;">#</th>
+          <th style="padding:7px 10px;text-align:left;color:#fff;font-size:10px;letter-spacing:.3px;">Date</th>
+          <th style="padding:7px 10px;text-align:left;color:#fff;font-size:10px;letter-spacing:.3px;">Mode</th>
+          <th style="padding:7px 10px;text-align:left;color:#fff;font-size:10px;letter-spacing:.3px;">Received By</th>
+          <th style="padding:7px 10px;text-align:right;color:#fff;font-size:10px;letter-spacing:.3px;width:90px;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${paymentRows.map((p) => `
+        <tr>
+          <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;text-align:center;color:#888;">${p.no}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;">${p.dateStr}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;">${p.mode}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;">${p.receivedBy}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;text-align:right;font-weight:700;color:#1a5c4a;">${p.amountStr}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+    })()}
+
     <div style="margin-left:auto;width:280px;border:1px solid #1a5c4a;border-radius:6px;overflow:hidden;">
       <table style="width:100%;border-collapse:collapse;">
         <tr><td style="padding:6px 12px;font-size:12px;">Subtotal</td><td style="padding:6px 12px;text-align:right;font-size:12px;">₹${subtotal.toLocaleString()}</td></tr>
@@ -409,6 +472,20 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       <tbody>${itemRows}</tbody>
     </table>
 
+    ${(() => {
+      const paymentRows = _paymentRows(bill);
+      if (!paymentRows.length) return "";
+      return `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#888;margin-bottom:6px;">Payment History</div>
+      ${paymentRows.map((p) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:12px;">
+        <span>${p.dateStr} · ${p.mode} <span style="color:#aaa;">— ${p.receivedBy}</span></span>
+        <span style="font-weight:600;">${p.amountStr}</span>
+      </div>`).join("")}
+    </div>`;
+    })()}
+
     <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
       <div style="min-width:240px;font-size:13px;">
         <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;">
@@ -481,6 +558,21 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
     <div style="font-size:11px;margin-bottom:8px;">
       ${itemLines}
     </div>
+
+    ${(() => {
+      const paymentRows = _paymentRows(bill);
+      if (!paymentRows.length) return "";
+      return `
+    <div style="border-top:1px dashed #333;border-bottom:1px dashed #333;padding:6px 0;margin-bottom:8px;font-size:10px;">
+      <div style="font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#888;margin-bottom:4px;">Payment History</div>
+      ${paymentRows.map((p) => `
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+        <span>${p.dateStr} · ${p.mode}</span>
+        <span style="font-weight:700;">${p.amountStr}</span>
+      </div>
+      <div style="color:#aaa;font-size:9px;margin-bottom:3px;">by ${p.receivedBy}</div>`).join("")}
+    </div>`;
+    })()}
 
     <div style="border-top:1px dashed #333;padding-top:7px;font-size:11px;">
       ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
@@ -560,6 +652,31 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
+
+    ${(() => {
+      const paymentRows = _paymentRows(bill);
+      if (!paymentRows.length) return "";
+      return `
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+      <thead>
+        <tr style="background:#f0f0f0;">
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:left;">Date</th>
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:left;">Mode</th>
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:left;">Received By</th>
+          <th style="padding:5px 6px;border:1px solid #ccc;font-size:9px;text-transform:uppercase;text-align:right;width:70px;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${paymentRows.map((p) => `
+        <tr>
+          <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;">${p.dateStr}</td>
+          <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;">${p.mode}</td>
+          <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;">${p.receivedBy}</td>
+          <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;text-align:right;font-weight:700;">${p.amountStr}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+    })()}
 
     <div style="margin-left:auto;width:200px;font-size:10px;">
       <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>Subtotal</span><span>₹${subtotal.toLocaleString()}</span></div>

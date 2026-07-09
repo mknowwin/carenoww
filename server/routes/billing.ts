@@ -32,7 +32,7 @@ router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pha
 
 // ── POST /api/billing/:id/payments — record a payment installment ─────────────
 router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
-  const updated = await billingService.postPayment(req.user!.tenantId, req.user!.name, req.params.id, req.body);
+  const updated = await billingService.postPayment(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
   res.status(201).json({ success: true, data: updated });
 }));
 
@@ -62,13 +62,14 @@ router.post("/:id/claim", requireRole("admin", "finance"), asyncHandler(async (r
 
 // ── PUT /api/billing/:id/claim — update claim status (through to Settled) ─────
 router.put("/:id/claim", requireRole("admin", "finance"), asyncHandler(async (req: AuthRequest, res) => {
-  const updated = await billingService.updateClaim(req.user!.tenantId, req.user!.name, req.params.id, req.body);
+  const updated = await billingService.updateClaim(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
   res.json({ success: true, data: updated });
 }));
 
 // ── GET /api/billing/report/by-staff — sales aggregated by staff member ─────────
-router.get("/report/by-staff", requireRole("admin", "finance"), asyncHandler(async (req: AuthRequest, res) => {
-  const data = await billingService.salesByStaff(req.user!.tenantId, req.user!.timezone, req.query as Record<string, string>);
+// Non-admin/finance roles get self-scoped results (their own row only) — see salesByStaff().
+router.get("/report/by-staff", requireRole("admin", "finance", "doctor", "nurse", "receptionist", "pharmacist", "pharmacy_admin", "lab_tech"), asyncHandler(async (req: AuthRequest, res) => {
+  const data = await billingService.salesByStaff(req.user!.tenantId, req.user!.timezone, req.query as Record<string, string>, { id: req.user!.id, role: req.user!.role });
   res.json({ success: true, data });
 }));
 

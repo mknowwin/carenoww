@@ -24,6 +24,7 @@ export interface IPaymentEntry {
   payer: string;
   transactionRef?: string;
   receivedBy: string;
+  receivedById?: string;
   notes?: string;
   paidAt: Date;
 }
@@ -32,6 +33,7 @@ export interface IAdvanceEntry {
   amount: number;
   receivedDate?: Date;
   receivedBy?: string;
+  receivedById?: string;
   mode: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
   transactionRef?: string;
 }
@@ -112,6 +114,7 @@ const PaymentEntrySchema = new Schema<IPaymentEntry>({
   payer:          { type: String, default: "Self" },
   transactionRef: { type: String, default: "" },
   receivedBy:     { type: String, default: "" },
+  receivedById:   { type: String, default: "" },
   notes:          { type: String, default: "" },
   paidAt:         { type: Date, default: Date.now },
 }, { _id: true });
@@ -120,6 +123,7 @@ const AdvanceEntrySchema = new Schema<IAdvanceEntry>({
   amount:         { type: Number, required: true },
   receivedDate:   { type: Date, default: Date.now },
   receivedBy:     { type: String, default: "" },
+  receivedById:   { type: String, default: "" },
   mode:           { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online"], default: "Cash" },
   transactionRef: { type: String, default: "" },
 }, { _id: true });

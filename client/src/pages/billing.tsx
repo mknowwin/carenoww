@@ -4,14 +4,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   CreditCard, Search, Plus, CheckCircle2, Clock,
   TrendingUp, IndianRupee, Pencil, Printer, ChevronDown,
-  ChevronUp, FileText, Download, Banknote, Wallet, Users,
+  ChevronUp, FileText, Download, Banknote, Wallet, Users, User,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { billing as billingApi } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCurrencyFull } from "@/lib/utils";
 import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
@@ -34,6 +35,10 @@ function PaymentIcon({ mode }: { mode: string }) {
   return <Wallet className="h-3 w-3" />;
 }
 const TYPE_TABS = ["All", "OPD", "IPD", "Emergency", "Lab", "Pharmacy"];
+function todayLocalStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 // ── component ──────────────────────────────────────────────────────────────────
 export default function BillingPage() {
@@ -57,8 +62,8 @@ export default function BillingPage() {
 
   // By Staff view
   const [view,          setView]         = useState<"list" | "staff">("list");
-  const [staffDateFrom, setStaffDateFrom] = useState("");
-  const [staffDateTo,   setStaffDateTo]   = useState("");
+  const [staffDateFrom, setStaffDateFrom] = useState(todayLocalStr);
+  const [staffDateTo,   setStaffDateTo]   = useState(todayLocalStr);
   const [expandedStaff, setExpandedStaff] = useState<Set<string>>(new Set());
 
   const toggleStaffExpand = (name: string) =>
@@ -120,6 +125,8 @@ export default function BillingPage() {
     return matchSearch && matchType && matchStatus && matchDate && matchStaff;
   });
 
+  const staffOptions = Array.from(new Set(ALL_BILLS.map((b) => b.createdBy).filter(Boolean))).sort();
+
   // ── summary stats ─────────────────────────────────────────────────────────
   // Drafts can carry a non-zero computed amount before they're finalized — exclude
   // them from financial totals so "Total Billed"/"Balance Due" only reflect real invoices.
@@ -128,10 +135,9 @@ export default function BillingPage() {
   const totalCollected = billableBills.reduce((a, b) => a + (b.paid   || 0), 0);
   const totalPending   = billableBills.reduce((a, b) => a + (b.balance || 0), 0);
   const collectionRate = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
-  const todayRevenue   = billableBills.filter(withinDate).filter((b) => dateFilter === "all"
-    ? new Date(b.createdAt).toDateString() === new Date().toDateString()
-    : true
-  ).reduce((a, b) => a + (b.paid || 0), 0);
+  const todaysRevenue  = billableBills
+    .filter((b) => new Date(b.createdAt).toDateString() === new Date().toDateString())
+    .reduce((a, b) => a + (b.paid || 0), 0);
 
   // type breakdown
   const byType = TYPE_TABS.slice(1).map((t) => ({
@@ -191,7 +197,8 @@ export default function BillingPage() {
               onClick={() => setView("staff")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${view === "staff" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
             >
-              <Users className="h-3 w-3" /> By Staff
+              {isAdmin ? <Users className="h-3 w-3" /> : <User className="h-3 w-3" />}
+              {isAdmin ? "By Staff" : "My Report"}
             </button>
           </div>
           <Button variant="outline" size="sm" className="gap-2 h-9">
@@ -233,7 +240,7 @@ export default function BillingPage() {
               <div>
                 <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide">Today's Revenue</p>
                 <p className="text-2xl font-bold text-teal-800">
-                  {formatCurrency(ALL_BILLS.filter((b) => new Date(b.createdAt).toDateString() === new Date().toDateString()).reduce((a, b) => a + (b.paid || 0), 0))}
+                  {formatCurrencyFull(todaysRevenue)}
                 </p>
               </div>
               <div className="flex gap-6 text-sm">
@@ -298,107 +305,166 @@ export default function BillingPage() {
             </CardContent>
           </Card>
 
-          {staffReport.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: "Staff Members",   value: String(staffReport.length),                                                                              color: "text-foreground",  bg: "bg-muted" },
-                { label: "Total Billed",    value: formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0)),                color: "text-foreground",  bg: "bg-muted" },
-                { label: "Total Collected", value: formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0)),                color: "text-green-600",  bg: "bg-green-50" },
-                { label: "Cash Received",   value: formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0)),                color: "text-teal-600",   bg: "bg-teal-50" },
-              ].map((s) => (
-                <Card key={s.label}>
-                  <CardContent className="p-4">
-                    <div className={`text-xl font-bold leading-tight ${s.color}`}>{s.value}</div>
-                    <div className="text-xs text-muted-foreground">{s.label}</div>
+          {isAdmin ? (
+            <>
+              {staffReport.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: "Staff Members",   value: String(staffReport.length),                                                                              color: "text-foreground",  bg: "bg-muted" },
+                    { label: "Total Billed",    value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0)),                color: "text-foreground",  bg: "bg-muted" },
+                    { label: "Total Collected", value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0)),                color: "text-green-600",  bg: "bg-green-50" },
+                    { label: "Cash Received",   value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0)),                color: "text-teal-600",   bg: "bg-teal-50" },
+                  ].map((s) => (
+                    <Card key={s.label}>
+                      <CardContent className="p-4">
+                        <div className={`text-xl font-bold leading-tight ${s.color}`}>{s.value}</div>
+                        <div className="text-xs text-muted-foreground">{s.label}</div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+
+              {staffLoading ? (
+                <div className="text-center py-12 text-sm text-muted-foreground">Loading report…</div>
+              ) : staffReport.length === 0 ? (
+                <Card>
+                  <CardContent className="py-14 text-center space-y-2">
+                    <Users className="h-10 w-10 text-muted-foreground/20 mx-auto" />
+                    <p className="text-sm text-muted-foreground font-medium">No billing records found</p>
+                    <p className="text-xs text-muted-foreground">Try a different date range.</p>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-          )}
-
-          {staffLoading ? (
-            <div className="text-center py-12 text-sm text-muted-foreground">Loading report…</div>
-          ) : staffReport.length === 0 ? (
-            <Card>
-              <CardContent className="py-14 text-center space-y-2">
-                <Users className="h-10 w-10 text-muted-foreground/20 mx-auto" />
-                <p className="text-sm text-muted-foreground font-medium">No billing records found</p>
-                <p className="text-xs text-muted-foreground">Try a different date range.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="p-0 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/40">
-                        {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received", ""].map((h, i) => (
-                          <th key={i} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : "text-right"}`}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {staffReport.map((row: any, idx: number) => {
-                        const breakdown: Record<string, number> = row.paymentBreakdown || {};
-                        const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
-                          .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
-                          .filter(p => p.amount > 0);
-                        const isExpanded = expandedStaff.has(row.staffName);
-                        return (
-                          <Fragment key={row.staffName}>
-                            <tr className="border-b hover:bg-muted/20">
-                              <td className="py-3 px-4 text-muted-foreground">{idx + 1}</td>
-                              <td className="py-3 px-4 font-medium">{row.staffName}</td>
-                              <td className="py-3 px-4 text-right">{row.billsCreated}</td>
-                              <td className="py-3 px-4 text-right font-medium">{formatCurrency(row.totalBilled)}</td>
-                              <td className="py-3 px-4 text-right text-green-600 font-medium">{formatCurrency(row.totalPaid)}</td>
-                              <td className="py-3 px-4 text-right">{row.paymentsCount}</td>
-                              <td className="py-3 px-4 text-right text-teal-600 font-medium">{formatCurrency(row.totalReceived)}</td>
-                              <td className="py-3 px-4 text-right">
-                                {activeModePairs.length > 0 && (
-                                  <button
-                                    onClick={() => toggleStaffExpand(row.staffName)}
-                                    className="p-1 rounded hover:bg-muted text-muted-foreground"
-                                    title={isExpanded ? "Hide breakdown" : "Show payment breakdown"}
-                                  >
-                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                            {isExpanded && activeModePairs.length > 0 && (
-                              <tr className="bg-muted/10 border-b">
-                                <td />
-                                <td colSpan={7} className="py-2 px-4 pb-3">
-                                  <div className="flex flex-wrap gap-x-5 gap-y-1 pl-2 border-l-2 border-muted-foreground/20">
-                                    {activeModePairs.map(({ mode, amount }) => (
-                                      <div key={mode} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                        <span className="font-medium text-foreground">{mode}</span>
-                                        <span className="text-teal-600 font-semibold">{formatCurrency(amount)}</span>
+              ) : (
+                <Card>
+                  <CardContent className="p-0 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/40">
+                            {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received", ""].map((h, i) => (
+                              <th key={i} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : "text-right"}`}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {staffReport.map((row: any, idx: number) => {
+                            const breakdown: Record<string, number> = row.paymentBreakdown || {};
+                            const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
+                              .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
+                              .filter(p => p.amount > 0);
+                            const isExpanded = expandedStaff.has(row.staffName);
+                            return (
+                              <Fragment key={row.staffName}>
+                                <tr className="border-b hover:bg-muted/20">
+                                  <td className="py-3 px-4 text-muted-foreground">{idx + 1}</td>
+                                  <td className="py-3 px-4 font-medium">{row.staffName}</td>
+                                  <td className="py-3 px-4 text-right">{row.billsCreated}</td>
+                                  <td className="py-3 px-4 text-right font-medium">{formatCurrencyFull(row.totalBilled)}</td>
+                                  <td className="py-3 px-4 text-right text-green-600 font-medium">{formatCurrencyFull(row.totalPaid)}</td>
+                                  <td className="py-3 px-4 text-right">{row.paymentsCount}</td>
+                                  <td className="py-3 px-4 text-right text-teal-600 font-medium">{formatCurrencyFull(row.totalReceived)}</td>
+                                  <td className="py-3 px-4 text-right">
+                                    {activeModePairs.length > 0 && (
+                                      <button
+                                        onClick={() => toggleStaffExpand(row.staffName)}
+                                        className="p-1 rounded hover:bg-muted text-muted-foreground"
+                                        title={isExpanded ? "Hide breakdown" : "Show payment breakdown"}
+                                      >
+                                        {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                                {isExpanded && activeModePairs.length > 0 && (
+                                  <tr className="bg-muted/10 border-b">
+                                    <td />
+                                    <td colSpan={7} className="py-2 px-4 pb-3">
+                                      <div className="flex flex-wrap gap-x-5 gap-y-1 pl-2 border-l-2 border-muted-foreground/20">
+                                        {activeModePairs.map(({ mode, amount }) => (
+                                          <div key={mode} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                            <span className="font-medium text-foreground">{mode}</span>
+                                            <span className="text-teal-600 font-semibold">{formatCurrencyFull(amount)}</span>
+                                          </div>
+                                        ))}
                                       </div>
-                                    ))}
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
-                        );
-                      })}
-                      <tr className="border-t bg-muted/40 font-semibold">
-                        <td className="py-3 px-4" colSpan={2}>Total</td>
-                        <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.billsCreated  || 0), 0)}</td>
-                        <td className="py-3 px-4 text-right">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0))}</td>
-                        <td className="py-3 px-4 text-right text-green-600">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0))}</td>
-                        <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.paymentsCount || 0), 0)}</td>
-                        <td className="py-3 px-4 text-right text-teal-600">{formatCurrency(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0))}</td>
-                        <td />
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                          <tr className="border-t bg-muted/40 font-semibold">
+                            <td className="py-3 px-4" colSpan={2}>Total</td>
+                            <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.billsCreated  || 0), 0)}</td>
+                            <td className="py-3 px-4 text-right">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0))}</td>
+                            <td className="py-3 px-4 text-right text-green-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0))}</td>
+                            <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.paymentsCount || 0), 0)}</td>
+                            <td className="py-3 px-4 text-right text-teal-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0))}</td>
+                            <td />
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : (
+            <>
+              {staffLoading ? (
+                <div className="text-center py-12 text-sm text-muted-foreground">Loading report…</div>
+              ) : staffReport.length === 0 ? (
+                <Card>
+                  <CardContent className="py-14 text-center space-y-2">
+                    <User className="h-10 w-10 text-muted-foreground/20 mx-auto" />
+                    <p className="text-sm text-muted-foreground font-medium">No billing activity found</p>
+                    <p className="text-xs text-muted-foreground">Try a different date range.</p>
+                  </CardContent>
+                </Card>
+              ) : (() => {
+                const myRow = staffReport[0];
+                const breakdown: Record<string, number> = myRow.paymentBreakdown || {};
+                const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
+                  .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
+                  .filter(p => p.amount > 0);
+                return (
+                  <>
+                    <p className="text-xs text-muted-foreground -mt-1">Your billing summary for the selected date range.</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { label: "Bills Created",   value: String(myRow.billsCreated || 0),          color: "text-foreground",  bg: "bg-muted" },
+                        { label: "Total Billed",    value: formatCurrencyFull(myRow.totalBilled || 0),    color: "text-foreground",  bg: "bg-muted" },
+                        { label: "Total Collected", value: formatCurrencyFull(myRow.totalPaid || 0),      color: "text-green-600",   bg: "bg-green-50" },
+                        { label: "Cash Received",   value: formatCurrencyFull(myRow.totalReceived || 0),  color: "text-teal-600",    bg: "bg-teal-50" },
+                      ].map((s) => (
+                        <Card key={s.label}>
+                          <CardContent className="p-4">
+                            <div className={`text-xl font-bold leading-tight ${s.color}`}>{s.value}</div>
+                            <div className="text-xs text-muted-foreground">{s.label}</div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                    {activeModePairs.length > 0 && (
+                      <Card>
+                        <CardContent className="p-4">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Payments by mode</p>
+                          <div className="flex flex-wrap gap-x-6 gap-y-2">
+                            {activeModePairs.map(({ mode, amount }) => (
+                              <div key={mode} className="flex items-center gap-1.5 text-sm">
+                                <span className="font-medium text-foreground">{mode}</span>
+                                <span className="text-teal-600 font-semibold">{formatCurrencyFull(amount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
+                );
+              })()}
+            </>
           )}
         </div>
       )}
@@ -492,6 +558,17 @@ export default function BillingPage() {
             <Input placeholder="Search patient, bill ID, doctor…" className="pl-9 h-9"
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
+          {isAdmin && staffOptions.length > 0 && (
+            <Select value={staffFilter ?? "All"} onValueChange={(v) => setStaffFilter(v === "All" ? null : v)}>
+              <SelectTrigger className="h-9 w-44 text-sm"><SelectValue placeholder="Staff" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Staff</SelectItem>
+                {staffOptions.map((name) => (
+                  <SelectItem key={name} value={name}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <div className="flex gap-1.5 flex-wrap">
             {["All","Draft","Paid","Partial","Pending","Claimed"].map((s) => (
               <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" className="h-9"
