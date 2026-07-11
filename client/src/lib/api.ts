@@ -19,6 +19,24 @@ export class ApiError extends Error {
   }
 }
 
+/** Formats an insufficient-stock error's per-drug shortage detail, if present, falling back to the plain message. */
+export function describeStockError(err: any): string {
+  const shortages = err?.details?.shortages as
+    | Array<{ drugId?: string; name?: string; required?: number; available: number }>
+    | undefined;
+  if (shortages?.length) {
+    return shortages
+      .map((s) => {
+        const label = s.name || s.drugId || "Item";
+        return s.required != null
+          ? `${label}: need ${s.required}, only ${s.available} available`
+          : `${label}: only ${s.available} available`;
+      })
+      .join("; ");
+  }
+  return err?.message || "Something went wrong.";
+}
+
 type AuthSource = "user" | "superadmin";
 
 function getAuth(): { token: string; source: AuthSource } | null {

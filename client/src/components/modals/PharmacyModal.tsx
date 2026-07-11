@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { pharmacy as pharmApi } from "@/lib/api";
+import { pharmacy as pharmApi, describeStockError } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface Props { open: boolean; onClose: () => void; existing?: any; mode?: "order" | "inventory"; }
@@ -62,7 +62,7 @@ export default function PharmacyModal({ open, onClose, existing, mode = "order" 
       }
       onClose();
     } catch (err: any) {
-      setError(err.message || "Failed to save");
+      setError(describeStockError(err));
     } finally {
       setLoading(false);
     }

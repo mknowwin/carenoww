@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { printExpiryReport, printCurrentStockReport } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { pharmacy as pharmacyApi } from "@/lib/api";
+import { pharmacy as pharmacyApi, describeStockError } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
@@ -334,7 +334,7 @@ export default function PharmacyPage() {
       qc.invalidateQueries({ queryKey: ["pharmacy-orders"] });
       qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
     } catch (err: any) {
-      toast({ variant: "destructive", title: "Update failed", description: err.message || "Failed to update order." });
+      toast({ variant: "destructive", title: status === "Dispensed" ? "Dispense failed" : "Update failed", description: describeStockError(err) });
     } finally { setUpdating(null); }
   };
 

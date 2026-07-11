@@ -26,7 +26,7 @@ const FINANCIAL_FIELDS = new Set(["items", "amount", "discount", "discountType",
 // Verify stock availability up front — a Pharmacy bill must not be created or
 // finalized if it can't actually be fulfilled from inventory. Deferred for
 // Drafts until they're finalized, since draft items may still change.
-async function checkPharmacyStock(tenantId: string, pharmacyItems: any[], session?: mongoose.ClientSession) {
+export async function checkPharmacyStock(tenantId: string, pharmacyItems: any[], session?: mongoose.ClientSession) {
   const shortages: Array<{ drugId: string; name?: string; required: number; available: number }> = [];
   for (const item of pharmacyItems) {
     const qty = item.quantity ?? 1;
@@ -38,21 +38,50 @@ async function checkPharmacyStock(tenantId: string, pharmacyItems: any[], sessio
   return shortages;
 }
 
-// Deduct pharmacy stock for items that carry a drugId. Availability was
-// already verified above, so this should only fail on a genuine race
-// (concurrent bill draining the same batch). Always called inside the
-// caller's transaction: throwing here aborts the whole bill create/finalize,
-// so a bill is never left committed with no matching deduction.
-async function deductPharmacyStock(tenantId: string, pharmacyItems: any[], session: mongoose.ClientSession) {
-  for (const item of pharmacyItems) {
+// Deducts stock for every item in allItems that's a pharmacy line item
+// (category "Pharmacy" with a drugId); everything else passes through
+// unchanged. Availability was already verified above, so a throw here should
+// only happen on a genuine race (concurrent bill draining the same batch).
+// Always called inside the caller's transaction: throwing here aborts the
+// whole bill create/finalize, so a bill is never left committed with no
+// matching deduction.
+//
+// For batch-tracked drugs, a single input line item can be fulfilled from
+// multiple batches (FEFO); each batch has its own MRP, so the returned array
+// replaces that one line with one line per batch actually drawn from, priced
+// at that batch's own MRP. Non-batch-tracked drugs have only one flat price
+// on DrugInventory, so there's nothing to split — they pass through as a
+// single line, same as today.
+export async function deductAndExpandPharmacyItems(tenantId: string, allItems: any[], session: mongoose.ClientSession): Promise<any[]> {
+  const result: any[] = [];
+  for (const item of allItems) {
+    if (!(item.category === "Pharmacy" && item.drugId)) {
+      result.push(item);
+      continue;
+    }
+
     const drug = await DrugInventory.findOne({ _id: item.drugId, tenantId }).session(session);
-    if (!drug) continue;
+    if (!drug) {
+      result.push(item);
+      continue;
+    }
     const qty = item.quantity ?? 1;
 
     if (drug.isBatchTracked) {
-      // FEFO batch deduction — syncs DrugInventory.stock from batches
-      await fefoDeduct(tenantId.toString(), item.drugId, qty, session);
+      // FEFO batch deduction — syncs DrugInventory.stock from batches, and
+      // may span multiple batches; expand into one line item per batch drawn.
+      const used = await fefoDeduct(tenantId.toString(), item.drugId, qty, session);
       await syncDrugStock(tenantId.toString(), item.drugId, session);
+      for (const u of used) {
+        result.push({
+          ...item,
+          quantity: u.deducted,
+          unitPrice: u.mrpPerUnit,
+          total: u.deducted * u.mrpPerUnit,
+          batchNo: u.batchNo,
+          expiryDate: u.expiryDate,
+        });
+      }
     } else {
       if (drug.stock < qty) {
         const err: any = new Error("Insufficient stock");
@@ -68,8 +97,10 @@ async function deductPharmacyStock(tenantId: string, pharmacyItems: any[], sessi
       const ratio = newStock / reorderLevel;
       const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
       await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } }, { session });
+      result.push(item);
     }
   }
+  return result;
 }
 
 export interface BillListFilters {
@@ -149,31 +180,35 @@ export async function createBill(tenantId: string, user: { name: string; id: str
 
   // Drafts never carry a payment — money is only recorded once a bill is finalized.
   const paidAmount = isDraft ? 0 : Number(paid);
-  const balance = finalAmount - paidAmount;
 
-  const buildDoc = (billId: string, payments: any[]) => ({
-    tenantId,
-    billId,
-    patientId, patientName,
-    appointmentId: appointmentId || undefined,
-    admissionId: admissionId || undefined,
-    items,
-    amount: finalAmount,
-    paid: paidAmount,
-    balance,
-    discount,
-    discountType,
-    discountPercent,
-    status: isDraft ? "Draft" : computeStatus(finalAmount, paidAmount),
-    payer: payer || "Self",
-    paymentMode: paymentMode || "Cash",
-    type: type || "OPD",
-    notes: notes || "",
-    createdBy: user.name,
-    createdById: user.id,
-    payments,
-    isLocked: isDraft ? false : paidAmount >= finalAmount,
-  });
+  const buildDoc = (billId: string, payments: any[], itemsOverride?: any[], amountOverride?: number) => {
+    const docItems = itemsOverride ?? items;
+    const docAmount = amountOverride ?? finalAmount;
+    const docBalance = docAmount - paidAmount;
+    return {
+      tenantId,
+      billId,
+      patientId, patientName,
+      appointmentId: appointmentId || undefined,
+      admissionId: admissionId || undefined,
+      items: docItems,
+      amount: docAmount,
+      paid: paidAmount,
+      balance: docBalance,
+      discount,
+      discountType,
+      discountPercent,
+      status: isDraft ? "Draft" : computeStatus(docAmount, paidAmount),
+      payer: payer || "Self",
+      paymentMode: paymentMode || "Cash",
+      type: type || "OPD",
+      notes: notes || "",
+      createdBy: user.name,
+      createdById: user.id,
+      payments,
+      isLocked: isDraft ? false : paidAmount >= docAmount,
+    };
+  };
 
   if (isDraft) {
     // Drafts get a placeholder, non-fiscal id from a separate counter so an
@@ -216,12 +251,20 @@ export async function createBill(tenantId: string, user: { name: string; id: str
         });
       }
 
-      const [created] = await BillingRecord.create([buildDoc(billId, payments)], { session });
-      bill = created;
-
+      let itemsForDoc = items;
+      let amountForDoc = finalAmount;
       if (pharmacyItems.length) {
-        await deductPharmacyStock(tenantId, pharmacyItems, session);
+        itemsForDoc = await deductAndExpandPharmacyItems(tenantId, items, session);
+        // Only recompute the amount when it was originally derived from
+        // items (not an explicit caller-supplied flat amount) — a batch
+        // split can change the total when per-batch MRPs differ.
+        if (!amount) {
+          amountForDoc = calcAmount(itemsForDoc, discount, discountType, discountPercent);
+        }
       }
+
+      const [created] = await BillingRecord.create([buildDoc(billId, payments, itemsForDoc, amountForDoc)], { session });
+      bill = created;
     });
   } catch (err: any) {
     if (err.code === 11000) throw AppError.conflict("Bill ID conflict — retry");
@@ -323,15 +366,20 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
       const invoicePrefix = ((tenant as any)?.settings?.invoicePrefix || "BILL").toString().trim();
       update.billId = await getNextId(tenantId, "bill", `${invoicePrefix}-`, session);
 
+      if (pharmacyItems.length) {
+        const itemsForDoc = await deductAndExpandPharmacyItems(tenantId, finalItems, session);
+        update.items = itemsForDoc;
+        update.amount = calcAmount(itemsForDoc, finalDiscount, finalDiscountType, finalDiscountPct);
+        update.balance = update.amount - finalPaid;
+        update.isLocked = finalPaid >= update.amount;
+        if (!status) update.status = computeStatus(update.amount, finalPaid);
+      }
+
       updated = await BillingRecord.findOneAndUpdate(
         { _id: id, tenantId },
         { $set: update },
         { new: true, session }
       );
-
-      if (pharmacyItems.length) {
-        await deductPharmacyStock(tenantId, pharmacyItems, session);
-      }
     });
   } catch (err: any) {
     if (err.insufficientStock) {

@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import BillingRecord, { IBillItem } from "../models/BillingRecord.js";
 import Tenant from "../models/Tenant.js";
 import { getNextId } from "./counter.js";
@@ -27,7 +28,7 @@ function computeStatus(amount: number, paid: number): "Paid" | "Partial" | "Pend
  * Find an existing pending/partial bill for this appointment or admission and
  * append items to it. If none exists, create a new bill.
  */
-export async function createOrAppendBill(params: AutoBillParams): Promise<typeof BillingRecord.prototype> {
+export async function createOrAppendBill(params: AutoBillParams, session?: mongoose.ClientSession): Promise<typeof BillingRecord.prototype> {
   const {
     tenantId, patientId, patientName,
     appointmentId, admissionId, items, type,
@@ -43,7 +44,7 @@ export async function createOrAppendBill(params: AutoBillParams): Promise<typeof
   else lookupQuery = null; // no encounter link — always create new
 
   if (lookupQuery) {
-    const existing = await BillingRecord.findOne(lookupQuery);
+    const existing = await BillingRecord.findOne(lookupQuery).session(session ?? null);
     if (existing) {
       const newAmount = existing.amount + subtotal;
       const newBalance = newAmount - existing.paid;
@@ -57,17 +58,17 @@ export async function createOrAppendBill(params: AutoBillParams): Promise<typeof
             status: computeStatus(newAmount, existing.paid),
           },
         },
-        { new: true }
+        { new: true, session }
       );
       return updated!;
     }
   }
 
   // Create a new bill
-  const tenant = await Tenant.findById(tenantId).select("settings.invoicePrefix").lean();
+  const tenant = await Tenant.findById(tenantId).select("settings.invoicePrefix").session(session ?? null).lean();
   const invoicePrefix = ((tenant as any)?.settings?.invoicePrefix || "BILL").toString().trim();
-  const billId = await getNextId(tenantId, "bill", `${invoicePrefix}-`);
-  const bill = await BillingRecord.create({
+  const billId = await getNextId(tenantId, "bill", `${invoicePrefix}-`, session);
+  const [bill] = await BillingRecord.create([{
     tenantId,
     billId,
     patientId,
@@ -84,6 +85,6 @@ export async function createOrAppendBill(params: AutoBillParams): Promise<typeof
     payer,
     paymentMode,
     createdBy,
-  });
+  }], { session });
   return bill;
 }
