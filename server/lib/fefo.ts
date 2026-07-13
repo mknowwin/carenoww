@@ -81,7 +81,7 @@ export async function fefoDeduct(
   drugId: string,
   quantity: number,
   session?: mongoose.ClientSession
-): Promise<Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number }>> {
+): Promise<Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number; expiryDate: Date }>> {
   const batches = await DrugBatch.find({
     tenantId: new mongoose.Types.ObjectId(tenantId),
     drugId: new mongoose.Types.ObjectId(drugId),
@@ -93,12 +93,13 @@ export async function fefoDeduct(
   if (available < quantity) {
     const err: any = new Error("Insufficient stock");
     err.insufficientStock = true;
+    err.drugId = drugId;
     err.available = available;
     throw err;
   }
 
   let remaining = quantity;
-  const used: Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number }> = [];
+  const used: Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number; expiryDate: Date }> = [];
 
   for (const batch of batches) {
     if (remaining <= 0) break;
@@ -110,7 +111,7 @@ export async function fefoDeduct(
         status: newQty === 0 ? "Exhausted" : "Active",
       },
     }, { session });
-    used.push({ batchId: batch._id as mongoose.Types.ObjectId, batchNo: batch.batchNo, deducted: take, mrpPerUnit: batch.mrpPerUnit ?? 0 });
+    used.push({ batchId: batch._id as mongoose.Types.ObjectId, batchNo: batch.batchNo, deducted: take, mrpPerUnit: batch.mrpPerUnit ?? 0, expiryDate: batch.expiryDate });
     remaining -= take;
   }
 

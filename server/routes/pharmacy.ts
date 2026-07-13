@@ -18,13 +18,16 @@ router.get("/orders", requireRole("admin", "doctor", "pharmacist", "pharmacy_adm
   res.json({ success: true, data });
 }));
 
-// POST /api/pharmacy/orders — create order (digital auto-order OR manual counter/paper-Rx)
+// POST /api/pharmacy/orders — create order (digital auto-order OR manual counter/paper-Rx).
+// status: "Dispensed" with items triggers the same atomic FEFO stock-check/deduct/auto-bill
+// path as PUT /orders/:id below, rejecting (409) on insufficient stock.
 router.post("/orders", requireRole("admin", "doctor", "pharmacist", "pharmacy_admin", "nurse", "receptionist"), asyncHandler(async (req: AuthRequest, res) => {
   const order = await pharmacyOrderService.createOrder(req.user!.tenantId, req.user!.name, req.body);
   res.status(201).json({ success: true, data: order });
 }));
 
-// PUT /api/pharmacy/orders/:id — update status / dispense with FEFO stock deduction
+// PUT /api/pharmacy/orders/:id — update status / dispense; dispensing checks and deducts
+// FEFO stock and auto-bills atomically, rejecting (409) on insufficient stock
 router.put("/orders/:id", requireRole("admin", "pharmacist", "pharmacy_admin", "nurse"), asyncHandler(async (req: AuthRequest, res) => {
   const data = await pharmacyOrderService.updateOrder(req.user!.tenantId, req.user!.name, req.params.id, req.body);
   res.json({ success: true, data });

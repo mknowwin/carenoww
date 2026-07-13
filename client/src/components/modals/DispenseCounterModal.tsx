@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Plus, RefreshCw, Package } from "lucide-react";
-import { pharmacy as pharmApi } from "@/lib/api";
+import { pharmacy as pharmApi, describeStockError } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 
@@ -162,7 +162,7 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
       qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
       setResult({ rxId: order.rxId });
     } catch (err: any) {
-      setError(err.message || "Failed to create order.");
+      setError(describeStockError(err));
     } finally {
       setLoading(false);
     }
