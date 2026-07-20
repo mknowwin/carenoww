@@ -229,6 +229,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   // this save stays a Draft or finalizes it.
   const handleSubmit = async (e: React.SyntheticEvent, opts: { asDraft?: boolean } = {}) => {
     e.preventDefault();
+    if (loading) return;
     const asDraft = opts.asDraft ?? false;
     if (!patientName.trim()) { setError("Patient name is required"); return; }
     if (!asDraft && !payOnly && items.some((it) => !it.description.trim())) { setError("All items need a description"); return; }

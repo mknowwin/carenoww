@@ -30,6 +30,12 @@ router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pha
   res.json({ success: true, data: bill });
 }));
 
+// ── DELETE /api/billing/:id — permanently delete a draft bill ────────────────
+router.delete("/:id", requireRole("admin", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const data = await billingService.deleteDraftBill(req.user!.tenantId, req.params.id);
+  res.json({ success: true, data });
+}));
+
 // ── POST /api/billing/:id/payments — record a payment installment ─────────────
 router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
   const updated = await billingService.postPayment(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);

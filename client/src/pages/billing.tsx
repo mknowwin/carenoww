@@ -9,7 +9,7 @@ import {
   CreditCard, Search, Plus, CheckCircle2, Clock,
   TrendingUp, IndianRupee, Pencil, Printer, ChevronDown,
   ChevronUp, FileText, Download, Banknote, Wallet, Users, User,
-  Ban, Undo2,
+  Ban, Undo2, Trash2, Lock,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { billing as billingApi } from "@/lib/api";
@@ -85,6 +85,8 @@ export default function BillingPage() {
   const [expandedId,  setExpandedId]  = useState<string | null>(null);
   const [cancelling,  setCancelling]  = useState<string | null>(null);
   const [returnBill,  setReturnBill]  = useState<any>(null);
+  const [deletingId,  setDeletingId]  = useState<string | null>(null);
+  const [unlockingId, setUnlockingId] = useState<string | null>(null);
 
   const [staffFilter,   setStaffFilter]   = useState<string | null>(null);
 
@@ -110,32 +112,50 @@ export default function BillingPage() {
 
   // Bills are fetched scoped to the selected date range (default: today) rather
   // than pulling every bill and filtering client-side — see rangeForFilter.
+  // This query always runs (regardless of search) so the summary stat cards and
+  // staff filter options stay pinned to the selected date range.
   const { from: rangeFrom, to: rangeTo } = rangeForFilter(dateFilter, dateFrom, dateTo);
-  const { data: apiData, isLoading } = useQuery({
+  const { data: rangeApiData, isLoading: rangeLoading } = useQuery({
     queryKey: ["billing", rangeFrom, rangeTo],
     queryFn: () => billingApi.list({ ...(rangeFrom ? { from: rangeFrom } : {}), ...(rangeTo ? { to: rangeTo } : {}) }),
     retry: false,
     refetchInterval: 30_000,
   });
-  const ALL_BILLS: any[] = (apiData?.bills ?? []).map((b: any) => ({
+  const RANGE_BILLS: any[] = (rangeApiData?.bills ?? []).map((b: any) => ({
     ...b, id: b.billId || b._id || b.id,
   }));
 
+  // A search term is looked up on the backend across all dates (bill number or
+  // patient name), independent of the currently selected date range.
+  const trimmedSearch = search.trim();
+  const { data: searchApiData, isLoading: searchLoading } = useQuery({
+    queryKey: ["billing", "search", trimmedSearch],
+    queryFn: () => billingApi.list({ search: trimmedSearch }),
+    enabled: !!trimmedSearch,
+    retry: false,
+  });
+  const SEARCH_BILLS: any[] = (searchApiData?.bills ?? []).map((b: any) => ({
+    ...b, id: b.billId || b._id || b.id,
+  }));
+
+  const ALL_BILLS = trimmedSearch ? SEARCH_BILLS : RANGE_BILLS;
+  const isLoading = trimmedSearch ? searchLoading : rangeLoading;
+
   const filtered = ALL_BILLS.filter((b: any) => {
-    const q = search.toLowerCase();
-    const matchSearch  = !q || b.patientName?.toLowerCase().includes(q) || (b.id || "").toLowerCase().includes(q) || b.doctor?.toLowerCase().includes(q);
     const matchType    = typeFilter === "All" || b.type === typeFilter;
     const matchStatus  = statusFilter === "All" || b.status === statusFilter;
     const matchStaff   = !staffFilter || b.createdBy === staffFilter;
-    return matchSearch && matchType && matchStatus && matchStaff;
+    return matchType && matchStatus && matchStaff;
   });
 
-  const staffOptions = Array.from(new Set(ALL_BILLS.map((b) => b.createdBy).filter(Boolean))).sort();
+  const staffOptions = Array.from(new Set(RANGE_BILLS.map((b) => b.createdBy).filter(Boolean))).sort();
 
   // ── summary stats ─────────────────────────────────────────────────────────
+  // Always derived from RANGE_BILLS (not ALL_BILLS) so the cards stay pinned to
+  // the selected date range even while a search is active.
   // Drafts can carry a non-zero computed amount before they're finalized — exclude
   // them from financial totals so "Total Billed"/"Balance Due" only reflect real invoices.
-  const billableBills  = ALL_BILLS.filter((b) => b.status !== "Draft");
+  const billableBills  = RANGE_BILLS.filter((b) => b.status !== "Draft");
   const totalBilled    = billableBills.reduce((a, b) => a + (b.amount || 0), 0);
   const totalCollected = billableBills.reduce((a, b) => a + (b.paid   || 0), 0);
   const totalPending   = billableBills.reduce((a, b) => a + (b.balance || 0), 0);
@@ -186,6 +206,45 @@ export default function BillingPage() {
       toast({ variant: "destructive", title: "Cancel failed", description: err.message || "Failed to cancel bill." });
     } finally {
       setCancelling(null);
+    }
+  };
+
+  const deleteDraft = async (bill: any) => {
+    const ok = await confirm({
+      title: `Delete draft ${bill.id}?`,
+      description: "This permanently removes the draft. This cannot be undone.",
+      confirmText: "Delete Draft",
+      variant: "destructive",
+    });
+    if (!ok) return;
+    setDeletingId(bill.id);
+    try {
+      await billingApi.deleteDraft(bill._id || bill.id);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+      toast({ title: "Draft deleted" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Delete failed", description: err.message || "Failed to delete draft." });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const unlockBillRow = async (bill: any) => {
+    const ok = await confirm({
+      title: `Unlock bill ${bill.id}?`,
+      description: "This bill is fully paid and locked to prevent accidental changes. Unlocking allows editing items, discount, and amount again.",
+      confirmText: "Unlock",
+    });
+    if (!ok) return;
+    setUnlockingId(bill.id);
+    try {
+      await billingApi.unlock(bill._id || bill.id);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+      toast({ title: "Bill unlocked" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Unlock failed", description: err.message || "Failed to unlock bill." });
+    } finally {
+      setUnlockingId(null);
     }
   };
 
@@ -670,16 +729,16 @@ export default function BillingPage() {
                     <div className="flex items-center gap-5 mt-2 flex-wrap">
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</div>
-                        <div className={`text-sm font-bold ${isCreditNote ? "text-red-600" : ""}`}>{formatCurrency(bill.amount)}</div>
+                        <div className={`text-sm font-bold ${isCreditNote ? "text-red-600" : ""}`}>{formatCurrencyFull(bill.amount)}</div>
                       </div>
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{isCreditNote ? "Refunded" : "Paid"}</div>
-                        <div className={`text-sm font-semibold ${isCreditNote ? "text-red-600" : "text-green-600"}`}>{formatCurrency(bill.paid)}</div>
+                        <div className={`text-sm font-semibold ${isCreditNote ? "text-red-600" : "text-green-600"}`}>{formatCurrencyFull(bill.paid)}</div>
                       </div>
                       {!isCreditNote && bill.balance > 0 && (
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Balance</div>
-                          <div className="text-sm font-semibold text-amber-600">{formatCurrency(bill.balance)}</div>
+                          <div className="text-sm font-semibold text-amber-600">{formatCurrencyFull(bill.balance)}</div>
                         </div>
                       )}
                       {!isCreditNote && bill.amount > 0 && (
@@ -698,10 +757,16 @@ export default function BillingPage() {
                         onClick={() => printBill(bill)}>
                         <Printer className="h-3.5 w-3.5" />
                       </Button>
-                      {!isCreditNote && (
+                      {!isCreditNote && !bill.isLocked && (
                         <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Edit"
                           onClick={() => openEdit(bill)}>
                           <Pencil className="h-3 w-3" />
+                        </Button>
+                      )}
+                      {!isCreditNote && bill.isLocked && isAdmin && (
+                        <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Unlock to edit"
+                          disabled={unlockingId === bill.id} onClick={() => unlockBillRow(bill)}>
+                          <Lock className="h-3 w-3" />
                         </Button>
                       )}
                       <Button size="sm" variant="outline" className="h-7 w-7 p-0"
@@ -719,6 +784,14 @@ export default function BillingPage() {
                         <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 px-2"
                           disabled={paying === bill.id} onClick={() => markPaid(bill)}>
                           {paying === bill.id ? "…" : "Full Pay"}
+                        </Button>
+                      </div>
+                    )}
+                    {!isCreditNote && canCancelReturn && bill.status === "Draft" && (
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 px-2 gap-1"
+                          disabled={deletingId === bill.id} onClick={() => deleteDraft(bill)}>
+                          <Trash2 className="h-3 w-3" /> {deletingId === bill.id ? "…" : "Delete"}
                         </Button>
                       </div>
                     )}
@@ -808,7 +881,7 @@ export default function BillingPage() {
       <AppErrorBoundary>
         <BillingModal
           open={modalOpen}
-          onClose={() => { setModalOpen(false); setEditBill(null); setPayOnly(false); }}
+          onClose={() => setModalOpen(false)}
           existing={editBill}
           payOnly={payOnly}
         />

@@ -170,10 +170,14 @@ export interface BillListFilters {
   limit?: string;
   from?: string; // YYYY-MM-DD, inclusive
   to?: string;   // YYYY-MM-DD, inclusive
+  search?: string;
 }
 
+// Prevents regex special chars in search input from being interpreted as regex operators
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 export async function listBills(tenantId: string, user: { id: string; role: string }, tz: string, filters: BillListFilters) {
-  const { status, patientId, type, page = "1", limit = "50", from, to } = filters;
+  const { status, patientId, type, page = "1", limit = "50", from, to, search } = filters;
   const query: any = { tenantId };
   if (status) query.status = status;
   if (patientId) query.patientId = patientId;
@@ -182,6 +186,13 @@ export async function listBills(tenantId: string, user: { id: string; role: stri
     query.createdAt = {};
     if (from) query.createdAt.$gte = startOfDayUtc(from, tz);
     if (to) query.createdAt.$lte = endOfDayUtc(to, tz);
+  }
+  if (search) {
+    const escaped = escapeRegex(search);
+    query.$or = [
+      { billId: { $regex: escaped, $options: "i" } },
+      { patientName: { $regex: escaped, $options: "i" } },
+    ];
   }
   // Non-admin/finance users see only their own bills
   if (!["admin", "finance"].includes(user.role)) {
@@ -194,6 +205,16 @@ export async function listBills(tenantId: string, user: { id: string; role: stri
     BillingRecord.countDocuments(query),
   ]);
   return { bills, total };
+}
+
+// Drafts never carry payments or deducted stock (see createBill/updateBill),
+// so there's nothing to reverse — a plain delete is safe.
+export async function deleteDraftBill(tenantId: string, id: string) {
+  const bill = await BillingRecord.findOne({ _id: id, tenantId });
+  if (!bill) throw AppError.notFound("Bill not found");
+  if (bill.status !== "Draft") throw AppError.conflict("Only draft bills can be deleted");
+  await BillingRecord.deleteOne({ _id: id, tenantId });
+  return { message: "Draft bill deleted" };
 }
 
 export async function getBill(tenantId: string, id: string) {

@@ -76,6 +76,7 @@ export default function HistoryModal({ open, onClose, drug }: Props) {
                         ))}
                       </ul>
                     )}
+                    {entry.notes && <div className="italic">{entry.notes}</div>}
                   </div>
                 )}
               </div>
