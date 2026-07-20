@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import BillingRecord from "../models/BillingRecord.js";
 import DrugInventory from "../models/DrugInventory.js";
+import DrugBatch from "../models/DrugBatch.js";
+import InventoryAuditLog from "../models/InventoryAuditLog.js";
 import Tenant from "../models/Tenant.js";
 import { startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { getNextId } from "../lib/counter.js";
@@ -103,20 +105,84 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
   return result;
 }
 
+// Reverses the stock impact of Pharmacy line items being cancelled/returned —
+// the inverse of deductAndExpandPharmacyItems. For batch-tracked drugs, adds
+// the quantity back to the batch it was drawn from (looked up by drugId +
+// batchNo, since that's all a bill line item retains); for non-batch drugs,
+// increments DrugInventory.stock directly. Writes an InventoryAuditLog entry
+// per affected drug, same shape as cancelGRN's reversal (grnService.ts).
+export async function restockPharmacyItems(
+  tenantId: string,
+  items: any[],
+  performedBy: string,
+  refNote: string,
+  session: mongoose.ClientSession
+) {
+  for (const item of items) {
+    if (!(item.category === "Pharmacy" && item.drugId)) continue;
+    const qty = item.quantity ?? 0;
+    if (qty <= 0) continue;
+
+    const drug = await DrugInventory.findOne({ _id: item.drugId, tenantId }).session(session);
+    if (!drug) continue;
+    const before = drug.stock;
+
+    if (item.batchNo) {
+      const batch = await DrugBatch.findOne({ tenantId, drugId: item.drugId, batchNo: item.batchNo }).session(session);
+      if (batch) {
+        const newQty = batch.quantityRemaining + qty;
+        await DrugBatch.findByIdAndUpdate(
+          batch._id,
+          { $set: { quantityRemaining: newQty, status: newQty > 0 ? "Active" : batch.status } },
+          { session }
+        );
+        await syncDrugStock(tenantId, item.drugId.toString(), session);
+      } else {
+        // Batch no longer exists (e.g. purged) — fall back to a direct bump.
+        const newStock = drug.stock + qty;
+        await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock } }, { session });
+      }
+    } else {
+      const newStock = drug.stock + qty;
+      const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
+      const ratio = newStock / reorderLevel;
+      const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
+      await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } }, { session });
+    }
+
+    const after = (await DrugInventory.findById(item.drugId).session(session))?.stock ?? before;
+    await InventoryAuditLog.create([{
+      tenantId,
+      drugId: item.drugId,
+      action: "Updated",
+      changes: [{ field: "stock", oldValue: before, newValue: after }],
+      performedBy,
+      notes: refNote,
+    }], { session });
+  }
+}
+
 export interface BillListFilters {
   status?: string;
   patientId?: string;
   type?: string;
   page?: string;
   limit?: string;
+  from?: string; // YYYY-MM-DD, inclusive
+  to?: string;   // YYYY-MM-DD, inclusive
 }
 
-export async function listBills(tenantId: string, user: { id: string; role: string }, filters: BillListFilters) {
-  const { status, patientId, type, page = "1", limit = "50" } = filters;
+export async function listBills(tenantId: string, user: { id: string; role: string }, tz: string, filters: BillListFilters) {
+  const { status, patientId, type, page = "1", limit = "50", from, to } = filters;
   const query: any = { tenantId };
   if (status) query.status = status;
   if (patientId) query.patientId = patientId;
   if (type) query.type = type;
+  if (from || to) {
+    query.createdAt = {};
+    if (from) query.createdAt.$gte = startOfDayUtc(from, tz);
+    if (to) query.createdAt.$lte = endOfDayUtc(to, tz);
+  }
   // Non-admin/finance users see only their own bills
   if (!["admin", "finance"].includes(user.role)) {
     query.createdById = user.id;
@@ -134,6 +200,10 @@ export async function getBill(tenantId: string, id: string) {
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
   return bill;
+}
+
+export async function listCreditNotes(tenantId: string, id: string) {
+  return BillingRecord.find({ tenantId, originalBillId: id, docType: "CreditNote" }).sort({ createdAt: -1 });
 }
 
 export async function createBill(tenantId: string, user: { name: string; id: string }, body: Record<string, any>) {
@@ -284,6 +354,7 @@ export async function createBill(tenantId: string, user: { name: string; id: str
 export async function updateBill(tenantId: string, id: string, body: Record<string, any>) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
+  if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
   // Protect locked bills from financial changes
   if (existing.isLocked) {
@@ -398,6 +469,7 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
 export async function postPayment(tenantId: string, user: { id: string; name: string }, id: string, body: Record<string, any>) {
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
+  if (bill.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
   const { amount, paymentMode = "Cash", payer, transactionRef, notes } = body;
   const payAmt = Number(amount);
@@ -439,18 +511,201 @@ export async function postPayment(tenantId: string, user: { id: string; name: st
 }
 
 export async function unlockBill(tenantId: string, userName: string, id: string) {
-  const bill = await BillingRecord.findOneAndUpdate(
+  const existing = await BillingRecord.findOne({ _id: id, tenantId });
+  if (!existing) throw AppError.notFound("Bill not found");
+  if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
+
+  return BillingRecord.findOneAndUpdate(
     { _id: id, tenantId },
     { $set: { isLocked: false }, $push: { notes: `\n[Unlocked by ${userName} on ${new Date().toLocaleDateString("en-IN")}]` } },
     { new: true }
   );
+}
+
+// Cancels a bill outright. Only allowed before any payment has been
+// collected — once money has changed hands, use returnBillItems instead,
+// which handles the refund. Reverses any Pharmacy stock deduction.
+export async function cancelBill(tenantId: string, user: { id: string; name: string }, id: string, reason?: string) {
+  const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
-  return bill;
+  if (bill.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
+  if (bill.status === "Cancelled") throw AppError.conflict("Bill is already cancelled");
+  if (bill.paid > 0) {
+    throw AppError.conflict("Bill has payments recorded — process a Return instead of cancelling.");
+  }
+
+  const session = await mongoose.startSession();
+  let updated: any;
+  try {
+    await session.withTransaction(async () => {
+      await restockPharmacyItems(tenantId, bill.items, user.name, `Reversed by cancellation of bill ${bill.billId}`, session);
+      updated = await BillingRecord.findOneAndUpdate(
+        { _id: id, tenantId },
+        {
+          $set: {
+            status: "Cancelled",
+            isLocked: false,
+            cancelledBy: user.name,
+            cancelledById: user.id,
+            cancelledAt: new Date(),
+            cancelReason: reason || "",
+          },
+        },
+        { new: true, session }
+      );
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  return updated;
+}
+
+// Returns one or more line items from a finalized bill, crediting the patient.
+// Instead of mutating history in place, this creates a linked Credit Note — a
+// real, separately-dated BillingRecord (docType: "CreditNote") referencing the
+// original bill. That's what makes the refund show up correctly on the day it
+// actually happened in every revenue report (dashboard, By-Staff), since those
+// reports already sum bills/payments by their own date — a Credit Note is just
+// a normal bill with a negative amount/paid, dated today.
+export async function returnBillItems(
+  tenantId: string,
+  user: { id: string; name: string },
+  id: string,
+  body: { items: Array<{ itemId: string; quantity: number }>; reason: string; refundMode?: string }
+) {
+  const bill = await BillingRecord.findOne({ _id: id, tenantId });
+  if (!bill) throw AppError.notFound("Bill not found");
+  if (bill.docType === "CreditNote") throw AppError.conflict("Cannot return items on a credit note");
+  if (bill.status === "Cancelled") throw AppError.conflict("Cannot return items on a cancelled bill");
+  if (bill.status === "Draft") throw AppError.conflict("Cannot return items on a draft bill");
+
+  const { items: requestedItems, reason, refundMode } = body;
+  if (!requestedItems?.length) throw AppError.badRequest("items[] required");
+  if (!reason?.trim()) throw AppError.badRequest("reason is required");
+
+  const existingCreditNotes = await BillingRecord.find({ tenantId, originalBillId: bill._id.toString(), docType: "CreditNote" });
+  const alreadyReturnedByItem = new Map<string, number>();
+  let alreadyRefunded = 0;
+  for (const cn of existingCreditNotes) {
+    alreadyRefunded += Math.abs(cn.paid);
+    for (const it of cn.items) {
+      if (!it.itemId) continue;
+      alreadyReturnedByItem.set(it.itemId, (alreadyReturnedByItem.get(it.itemId) ?? 0) + it.quantity);
+    }
+  }
+
+  const returnItems: any[] = [];
+  let returnAmount = 0;
+  for (const req of requestedItems) {
+    const billItem = bill.items.find((it: any) => it._id.toString() === req.itemId);
+    if (!billItem) throw AppError.badRequest(`Bill item ${req.itemId} not found`);
+
+    const qty = Number(req.quantity);
+    if (!qty || qty <= 0) throw AppError.badRequest("quantity must be > 0");
+
+    const alreadyReturned = alreadyReturnedByItem.get(req.itemId) ?? 0;
+    const remaining = billItem.quantity - alreadyReturned;
+    if (qty > remaining) {
+      throw AppError.badRequest(`Cannot return ${qty} of "${billItem.description}" — only ${remaining} remaining`);
+    }
+
+    const lineTotal = billItem.unitPrice * qty;
+    returnAmount += lineTotal;
+    returnItems.push({
+      itemId: req.itemId,
+      description: billItem.description,
+      category: billItem.category,
+      drugId: billItem.drugId,
+      batchNo: billItem.batchNo,
+      quantity: qty,
+      unitPrice: billItem.unitPrice,
+      total: lineTotal,
+    });
+  }
+
+  const refundAmount = Math.min(returnAmount, Math.max(0, bill.paid - alreadyRefunded));
+  const newAmount = Math.max(0, bill.amount - returnAmount);
+  const newPaid = bill.paid - refundAmount;
+  const newBalance = newAmount - newPaid;
+
+  const session = await mongoose.startSession();
+  let updatedBill: any;
+  let creditNote: any;
+  try {
+    await session.withTransaction(async () => {
+      const creditNoteId = await getNextId(tenantId, "credit-note", "CN-", session);
+
+      await restockPharmacyItems(tenantId, returnItems, user.name, `Returned via ${creditNoteId} on bill ${bill.billId}`, session);
+
+      updatedBill = await BillingRecord.findOneAndUpdate(
+        { _id: id, tenantId },
+        {
+          $set: {
+            amount: newAmount,
+            paid: newPaid,
+            balance: newBalance,
+            status: computeStatus(newAmount, newPaid),
+            isLocked: newPaid >= newAmount,
+          },
+        },
+        { new: true, session }
+      );
+
+      const payments: any[] = [];
+      if (refundAmount > 0) {
+        const paymentId = await getNextId(tenantId, `pay-${creditNoteId}`, "PAY-", session);
+        payments.push({
+          paymentId,
+          amount: -refundAmount,
+          paymentMode: refundMode || "Cash",
+          payer: bill.payer,
+          receivedBy: user.name,
+          receivedById: user.id,
+          notes: reason.trim(),
+          paidAt: new Date(),
+        });
+      }
+
+      const [created] = await BillingRecord.create([{
+        tenantId,
+        billId: creditNoteId,
+        docType: "CreditNote",
+        originalBillId: bill._id.toString(),
+        originalBillNo: bill.billId,
+        patientId: bill.patientId,
+        patientName: bill.patientName,
+        date: new Date(),
+        items: returnItems,
+        amount: -returnAmount,
+        paid: -refundAmount,
+        balance: -returnAmount - (-refundAmount),
+        status: computeStatus(-returnAmount, -refundAmount),
+        payer: bill.payer,
+        paymentMode: refundMode || "Cash",
+        type: bill.type,
+        notes: reason.trim(),
+        createdBy: user.name,
+        createdById: user.id,
+        isLocked: true,
+        payments,
+      }], { session });
+      creditNote = created;
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  return { bill: updatedBill, creditNote };
 }
 
 export async function submitPreAuth(tenantId: string, id: string, body: Record<string, any>) {
+  const existing = await BillingRecord.findOne({ _id: id, tenantId });
+  if (!existing) throw AppError.notFound("Bill not found");
+  if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
+
   const { tpaName, policyNo, memberNo, preAuthNo } = body;
-  const bill = await BillingRecord.findOneAndUpdate(
+  return BillingRecord.findOneAndUpdate(
     { _id: id, tenantId },
     {
       $set: {
@@ -464,13 +719,15 @@ export async function submitPreAuth(tenantId: string, id: string, body: Record<s
     },
     { new: true }
   );
-  if (!bill) throw AppError.notFound("Bill not found");
-  return bill;
 }
 
 export async function updatePreAuth(tenantId: string, id: string, body: Record<string, any>) {
+  const existing = await BillingRecord.findOne({ _id: id, tenantId });
+  if (!existing) throw AppError.notFound("Bill not found");
+  if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
+
   const { preAuthStatus, preAuthAmount } = body;
-  const bill = await BillingRecord.findOneAndUpdate(
+  return BillingRecord.findOneAndUpdate(
     { _id: id, tenantId },
     {
       $set: {
@@ -480,14 +737,13 @@ export async function updatePreAuth(tenantId: string, id: string, body: Record<s
     },
     { new: true }
   );
-  if (!bill) throw AppError.notFound("Bill not found");
-  return bill;
 }
 
 export async function fileClaim(tenantId: string, id: string, body: Record<string, any>) {
   const { claimAmount } = body;
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
+  if (bill.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
   const claimNo = await getNextId(tenantId, "claim", "CLM-");
   return BillingRecord.findByIdAndUpdate(
@@ -509,6 +765,7 @@ export async function updateClaim(tenantId: string, user: { id: string; name: st
   const { claimStatus, settledAmount, rejectionReason } = body;
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
+  if (bill.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
   const insUpdate: any = { "insurance.claimStatus": claimStatus };
   if (rejectionReason) insUpdate["insurance.rejectionReason"] = rejectionReason;
@@ -553,13 +810,22 @@ export async function salesByStaff(
   if (from) dateFilter.$gte = startOfDayUtc(from, timezone);
   if (to) dateFilter.$lte = endOfDayUtc(to, timezone);
 
+  // byCreator answers "bills created by staff X in this period" — a
+  // creation-date question, so it stays keyed on the bill's own createdAt.
   const matchStage: any = { tenantId: new mongoose.Types.ObjectId(tenantId), status: { $ne: "Draft" } };
   if (from || to) matchStage.createdAt = dateFilter;
-
   const isPrivileged = ["admin", "finance"].includes(requester.role);
   const creatorMatch = isPrivileged ? matchStage : { ...matchStage, createdById: requester.id };
 
-  const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
+  // byReceiver/byReceiverMode answer "cash collected/refunded in this period" —
+  // a cash-timing question, so they're keyed on each payment's own paidAt
+  // (post-unwind), not the parent bill's createdAt. This is what makes a
+  // Credit Note's refund entry (negative amount, paidAt = today) correctly
+  // attribute to the staffer who processed it, on the day it happened.
+  const baseMatch = { tenantId: new mongoose.Types.ObjectId(tenantId), status: { $ne: "Draft" } };
+  const paidAtMatch = (from || to) ? [{ $match: { "payments.paidAt": dateFilter } }] : [];
+
+  const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const;
   const emptyBreakdown = () => Object.fromEntries(PAYMENT_MODES.map(m => [m, 0]));
 
   const [byCreator, byReceiver, byReceiverMode] = await Promise.all([
@@ -575,8 +841,9 @@ export async function salesByStaff(
       },
     ]),
     BillingRecord.aggregate([
-      { $match: matchStage },
+      { $match: baseMatch },
       { $unwind: "$payments" },
+      ...paidAtMatch,
       ...(isPrivileged ? [] : [{ $match: { "payments.receivedById": requester.id } }]),
       {
         $group: {
@@ -587,8 +854,9 @@ export async function salesByStaff(
       },
     ]),
     BillingRecord.aggregate([
-      { $match: matchStage },
+      { $match: baseMatch },
       { $unwind: "$payments" },
+      ...paidAtMatch,
       ...(isPrivileged ? [] : [{ $match: { "payments.receivedById": requester.id } }]),
       {
         $group: {

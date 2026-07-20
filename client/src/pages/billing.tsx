@@ -9,12 +9,14 @@ import {
   CreditCard, Search, Plus, CheckCircle2, Clock,
   TrendingUp, IndianRupee, Pencil, Printer, ChevronDown,
   ChevronUp, FileText, Download, Banknote, Wallet, Users, User,
+  Ban, Undo2,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { billing as billingApi } from "@/lib/api";
 import { formatCurrency, formatCurrencyFull } from "@/lib/utils";
 import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
+import ReturnBillModal from "@/components/modals/ReturnBillModal";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -22,11 +24,12 @@ import { confirm } from "@/hooks/use-confirm";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
-  Draft:   "bg-slate-100 text-slate-600",
-  Paid:    "bg-green-100 text-green-700",
-  Partial: "bg-amber-100 text-amber-700",
-  Pending: "bg-red-100 text-red-700",
-  Claimed: "bg-blue-100 text-blue-700",
+  Draft:     "bg-slate-100 text-slate-600",
+  Paid:      "bg-green-100 text-green-700",
+  Partial:   "bg-amber-100 text-amber-700",
+  Pending:   "bg-red-100 text-red-700",
+  Claimed:   "bg-blue-100 text-blue-700",
+  Cancelled: "bg-gray-200 text-gray-500",
 };
 function PaymentIcon({ mode }: { mode: string }) {
   if (mode === "Cash")      return <Banknote className="h-3 w-3" />;
@@ -35,9 +38,31 @@ function PaymentIcon({ mode }: { mode: string }) {
   return <Wallet className="h-3 w-3" />;
 }
 const TYPE_TABS = ["All", "OPD", "IPD", "Emergency", "Lab", "Pharmacy"];
-function todayLocalStr() {
-  const d = new Date();
+function dateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function todayLocalStr() {
+  return dateStr(new Date());
+}
+// Server-side range for the current dateFilter selection — the list is fetched
+// scoped to this range instead of pulling every bill and filtering client-side.
+function rangeForFilter(dateFilter: string, dateFrom: string, dateTo: string): { from?: string; to?: string } {
+  const today = new Date();
+  if (dateFilter === "today") {
+    const t = todayLocalStr();
+    return { from: t, to: t };
+  }
+  if (dateFilter === "week") {
+    const ago = new Date(today); ago.setDate(today.getDate() - 7);
+    return { from: dateStr(ago), to: todayLocalStr() };
+  }
+  if (dateFilter === "month") {
+    return { from: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`, to: todayLocalStr() };
+  }
+  if (dateFilter === "custom") {
+    return { from: dateFrom || undefined, to: dateTo || undefined };
+  }
+  return {}; // "all" — unscoped
 }
 
 // ── component ──────────────────────────────────────────────────────────────────
@@ -45,11 +70,12 @@ export default function BillingPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "finance";
+  const canCancelReturn = isAdmin || user?.role === "pharmacy_admin";
 
   const [search,      setSearch]      = useState("");
   const [typeFilter,  setTypeFilter]  = useState("All");
   const [statusFilter,setStatusFilter]= useState("All");
-  const [dateFilter,  setDateFilter]  = useState("all");
+  const [dateFilter,  setDateFilter]  = useState("today");
   const [dateFrom,    setDateFrom]    = useState("");
   const [dateTo,      setDateTo]      = useState("");
   const [modalOpen,   setModalOpen]   = useState(false);
@@ -57,6 +83,8 @@ export default function BillingPage() {
   const [payOnly,     setPayOnly]     = useState(false);
   const [paying,      setPaying]      = useState<string | null>(null);
   const [expandedId,  setExpandedId]  = useState<string | null>(null);
+  const [cancelling,  setCancelling]  = useState<string | null>(null);
+  const [returnBill,  setReturnBill]  = useState<any>(null);
 
   const [staffFilter,   setStaffFilter]   = useState<string | null>(null);
 
@@ -80,9 +108,12 @@ export default function BillingPage() {
     retry: false,
   });
 
+  // Bills are fetched scoped to the selected date range (default: today) rather
+  // than pulling every bill and filtering client-side — see rangeForFilter.
+  const { from: rangeFrom, to: rangeTo } = rangeForFilter(dateFilter, dateFrom, dateTo);
   const { data: apiData, isLoading } = useQuery({
-    queryKey: ["billing"],
-    queryFn: () => billingApi.list(),
+    queryKey: ["billing", rangeFrom, rangeTo],
+    queryFn: () => billingApi.list({ ...(rangeFrom ? { from: rangeFrom } : {}), ...(rangeTo ? { to: rangeTo } : {}) }),
     retry: false,
     refetchInterval: 30_000,
   });
@@ -90,39 +121,13 @@ export default function BillingPage() {
     ...b, id: b.billId || b._id || b.id,
   }));
 
-  // ── date helpers ─────────────────────────────────────────────────────────
-  const withinDate = (bill: any) => {
-    if (!bill.createdAt) return true;
-    const d   = new Date(bill.createdAt);
-    const now = new Date();
-    if (dateFilter === "today") {
-      return d.toDateString() === now.toDateString();
-    }
-    if (dateFilter === "week") {
-      const ago = new Date(now); ago.setDate(now.getDate() - 7);
-      return d >= ago;
-    }
-    if (dateFilter === "month") {
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    if (dateFilter === "custom") {
-      const from = dateFrom ? new Date(dateFrom) : null;
-      const to   = dateTo   ? new Date(dateTo + "T23:59:59") : null;
-      if (from && d < from) return false;
-      if (to   && d > to)   return false;
-      return true;
-    }
-    return true; // "all"
-  };
-
   const filtered = ALL_BILLS.filter((b: any) => {
     const q = search.toLowerCase();
     const matchSearch  = !q || b.patientName?.toLowerCase().includes(q) || (b.id || "").toLowerCase().includes(q) || b.doctor?.toLowerCase().includes(q);
     const matchType    = typeFilter === "All" || b.type === typeFilter;
     const matchStatus  = statusFilter === "All" || b.status === statusFilter;
-    const matchDate    = withinDate(b);
     const matchStaff   = !staffFilter || b.createdBy === staffFilter;
-    return matchSearch && matchType && matchStatus && matchDate && matchStaff;
+    return matchSearch && matchType && matchStatus && matchStaff;
   });
 
   const staffOptions = Array.from(new Set(ALL_BILLS.map((b) => b.createdBy).filter(Boolean))).sort();
@@ -161,6 +166,26 @@ export default function BillingPage() {
       toast({ variant: "destructive", title: "Payment failed", description: err.message || "Failed to mark bill as paid." });
     } finally {
       setPaying(null);
+    }
+  };
+
+  const cancelBill = async (bill: any) => {
+    const ok = await confirm({
+      title: `Cancel bill ${bill.id}?`,
+      description: "This will void the bill and restock any pharmacy items billed on it. This cannot be undone.",
+      confirmText: "Cancel Bill",
+      variant: "destructive",
+    });
+    if (!ok) return;
+    setCancelling(bill.id);
+    try {
+      await billingApi.cancel(bill._id || bill.id);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+      toast({ title: "Bill cancelled" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Cancel failed", description: err.message || "Failed to cancel bill." });
+    } finally {
+      setCancelling(null);
     }
   };
 
@@ -570,7 +595,7 @@ export default function BillingPage() {
             </Select>
           )}
           <div className="flex gap-1.5 flex-wrap">
-            {["All","Draft","Paid","Partial","Pending","Claimed"].map((s) => (
+            {["All","Draft","Paid","Partial","Pending","Claimed","Cancelled"].map((s) => (
               <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" className="h-9"
                 onClick={() => setStatusFilter(s)}>
                 {s}
@@ -600,17 +625,18 @@ export default function BillingPage() {
         )}
 
         {filtered.map((bill) => {
-          const isOpen     = expandedId === bill.id;
-          const paidPct    = bill.amount > 0 ? Math.min(100, Math.round(((bill.paid || 0) / bill.amount) * 100)) : 0;
-          const billDate   = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+          const isOpen       = expandedId === bill.id;
+          const isCreditNote = bill.docType === "CreditNote";
+          const paidPct      = bill.amount > 0 ? Math.min(100, Math.round(((bill.paid || 0) / bill.amount) * 100)) : 0;
+          const billDate     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
 
           return (
-            <Card key={bill.id} className="hover:shadow-sm transition-shadow">
+            <Card key={bill.id} className={`hover:shadow-sm transition-shadow ${isCreditNote ? "border-red-200" : ""}`}>
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                   {/* Icon */}
-                  <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center shrink-0">
-                    <CreditCard className="h-5 w-5 text-teal-600" />
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isCreditNote ? "bg-red-50" : "bg-teal-50"}`}>
+                    {isCreditNote ? <Undo2 className="h-5 w-5 text-red-600" /> : <CreditCard className="h-5 w-5 text-teal-600" />}
                   </div>
 
                   {/* Main info */}
@@ -618,7 +644,11 @@ export default function BillingPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-sm">{bill.patientName}</span>
                       <span className="text-xs font-mono text-muted-foreground bg-muted px-1.5 rounded">{bill.id}</span>
-                      <Badge className={`text-xs ${STATUS_COLORS[bill.status] ?? "bg-gray-100"}`}>{bill.status}</Badge>
+                      {isCreditNote ? (
+                        <Badge className="text-xs bg-red-100 text-red-700">Credit Note</Badge>
+                      ) : (
+                        <Badge className={`text-xs ${STATUS_COLORS[bill.status] ?? "bg-gray-100"}`}>{bill.status}</Badge>
+                      )}
                       <Badge className="text-xs bg-muted text-muted-foreground">{bill.type || "OPD"}</Badge>
                       {bill.doctor && (
                         <span className="text-xs text-muted-foreground hidden sm:inline">· {bill.doctor}</span>
@@ -632,24 +662,27 @@ export default function BillingPage() {
                         {bill.paymentMode}
                       </span>
                       <span>{bill.payer}</span>
+                      {isCreditNote && bill.originalBillNo && (
+                        <span className="text-red-600">· Original: {bill.originalBillNo}</span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-5 mt-2 flex-wrap">
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</div>
-                        <div className="text-sm font-bold">{formatCurrency(bill.amount)}</div>
+                        <div className={`text-sm font-bold ${isCreditNote ? "text-red-600" : ""}`}>{formatCurrency(bill.amount)}</div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Paid</div>
-                        <div className="text-sm font-semibold text-green-600">{formatCurrency(bill.paid)}</div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{isCreditNote ? "Refunded" : "Paid"}</div>
+                        <div className={`text-sm font-semibold ${isCreditNote ? "text-red-600" : "text-green-600"}`}>{formatCurrency(bill.paid)}</div>
                       </div>
-                      {bill.balance > 0 && (
+                      {!isCreditNote && bill.balance > 0 && (
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Balance</div>
                           <div className="text-sm font-semibold text-amber-600">{formatCurrency(bill.balance)}</div>
                         </div>
                       )}
-                      {bill.amount > 0 && (
+                      {!isCreditNote && bill.amount > 0 && (
                         <div className="flex-1 min-w-24 max-w-48">
                           <Progress value={paidPct} className="h-1.5" />
                           <div className="text-[10px] text-muted-foreground mt-0.5">{paidPct}% collected</div>
@@ -665,17 +698,19 @@ export default function BillingPage() {
                         onClick={() => printBill(bill)}>
                         <Printer className="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Edit"
-                        onClick={() => openEdit(bill)}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
+                      {!isCreditNote && (
+                        <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Edit"
+                          onClick={() => openEdit(bill)}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" className="h-7 w-7 p-0"
                         title={isOpen ? "Collapse" : "View items"}
                         onClick={() => setExpandedId(isOpen ? null : bill.id)}>
                         {isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       </Button>
                     </div>
-                    {(bill.status === "Pending" || bill.status === "Partial") && (
+                    {!isCreditNote && (bill.status === "Pending" || bill.status === "Partial") && (
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-7 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 px-2"
                           onClick={() => openPayment(bill)}>
@@ -685,6 +720,20 @@ export default function BillingPage() {
                           disabled={paying === bill.id} onClick={() => markPaid(bill)}>
                           {paying === bill.id ? "…" : "Full Pay"}
                         </Button>
+                      </div>
+                    )}
+                    {!isCreditNote && canCancelReturn && bill.status !== "Cancelled" && bill.status !== "Draft" && (
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2 gap-1"
+                          onClick={() => setReturnBill(bill)}>
+                          <Undo2 className="h-3 w-3" /> Return
+                        </Button>
+                        {bill.paid === 0 && (
+                          <Button size="sm" variant="outline" className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 px-2 gap-1"
+                            disabled={cancelling === bill.id} onClick={() => cancelBill(bill)}>
+                            <Ban className="h-3 w-3" /> {cancelling === bill.id ? "…" : "Cancel"}
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -726,6 +775,17 @@ export default function BillingPage() {
                         {bill.notes && (
                           <p className="text-xs text-muted-foreground mt-2 px-1 italic">Note: {bill.notes}</p>
                         )}
+                        {isCreditNote && (
+                          <p className="text-xs text-muted-foreground mt-2 px-1">
+                            Processed by {bill.createdBy}{bill.notes ? ` — ${bill.notes}` : ""}
+                          </p>
+                        )}
+                        {bill.status === "Cancelled" && (
+                          <p className="text-xs text-muted-foreground mt-2 px-1">
+                            Cancelled by {bill.cancelledBy}{bill.cancelledAt ? ` on ${new Date(bill.cancelledAt).toLocaleDateString("en-IN")}` : ""}
+                            {bill.cancelReason ? ` — ${bill.cancelReason}` : ""}
+                          </p>
+                        )}
                         <div className="mt-2 flex justify-end">
                           <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
                             onClick={() => printBill(bill)}>
@@ -751,6 +811,11 @@ export default function BillingPage() {
           onClose={() => { setModalOpen(false); setEditBill(null); setPayOnly(false); }}
           existing={editBill}
           payOnly={payOnly}
+        />
+        <ReturnBillModal
+          open={!!returnBill}
+          onClose={() => setReturnBill(null)}
+          bill={returnBill}
         />
       </AppErrorBoundary>
     </div>

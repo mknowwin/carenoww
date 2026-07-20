@@ -695,11 +695,83 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
     </div>`;
 }
 
+// ── Credit Note — a return's own printable document, distinct from an invoice.
+// Always uses one consistent layout regardless of the clinic's chosen invoice
+// style, since it's a different kind of document (a refund record referencing
+// an original bill), not just another way to print the same invoice.
+function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): string {
+  const items = (creditNote.items || []) as any[];
+  const returnAmount = Math.abs(creditNote.amount || 0);
+  const refundAmount = Math.abs(creditNote.paid || 0);
+  const hasBatch = items.some((i: any) => i.batchNo);
+
+  const itemRows = items.map((item, idx) => `
+    <tr>
+      <td class="tc" style="width:36px;">${idx + 1}</td>
+      <td><strong>${item.description}</strong></td>
+      <td style="width:90px;">${item.category}</td>
+      ${hasBatch ? `<td style="width:96px;font-family:monospace;font-size:11px;">${item.batchNo || "—"}</td>` : ""}
+      <td class="tc" style="width:44px;">${item.quantity}</td>
+      <td class="tr" style="width:76px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
+      <td class="tr" style="width:88px;font-weight:600;">₹${(item.total || 0).toLocaleString()}</td>
+    </tr>`).join("");
+
+  return `
+    ${clinicHeader(clinic, "Credit Note")}
+    <div class="doc-row">
+      <div>
+        <div class="doc-title" style="color:#b91c1c;">CREDIT NOTE</div>
+        <div style="margin-top:4px;"><span class="badge" style="background:#fee2e2;color:#b91c1c;border-color:#fca5a5;">${creditNote.type || "OPD"}</span></div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:16px;font-weight:800;font-family:monospace;color:#b91c1c;">${creditNote.billId || "—"}</div>
+        <div>Date: ${date}</div>
+        <div style="margin-top:3px;font-size:11px;color:#888;">Ref. Invoice: <strong>${creditNote.originalBillNo || "—"}</strong></div>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="meta-item"><label>Patient Name</label><span>${creditNote.patientName || "—"}</span></div>
+      <div class="meta-item"><label>UHID</label><span>${creditNote.patientId || "—"}</span></div>
+      <div class="meta-item"><label>Payer</label><span>${creditNote.payer || "Self"}</span></div>
+      <div class="meta-item"><label>Refund Mode</label><span>${creditNote.paymentMode || "—"}</span></div>
+      <div class="meta-item"><label>Processed By</label><span>${creditNote.createdBy || "—"}</span></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th class="tc">#</th><th>Description</th><th>Category</th>
+          ${hasBatch ? `<th>Batch No</th>` : ""}
+          <th class="tc">Qty Returned</th>
+          <th class="tr">Rate</th><th class="tr">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="summary">
+      <table>
+        <tr class="tot-row"><td>Return Value</td><td class="tr">₹${returnAmount.toLocaleString()}</td></tr>
+        <tr class="paid-row"><td>Refund Issued</td><td class="tr">₹${refundAmount.toLocaleString()}</td></tr>
+        ${returnAmount > refundAmount ? `<tr><td style="color:#d97706;">Credited to Balance</td><td class="tr" style="color:#d97706;">₹${(returnAmount - refundAmount).toLocaleString()}</td></tr>` : ""}
+      </table>
+    </div>
+    ${creditNote.notes ? `<div class="notes"><strong>Reason for Return</strong>${creditNote.notes}</div>` : ""}
+    <div class="footer">
+      <p>This credit note reduces the value of invoice ${creditNote.originalBillNo || "—"} issued by ${clinic.name}.</p>
+      ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
+    </div>`;
+}
+
 // ── printBill — dispatches to style-specific builder ──────────────────────────
 export function printBill(bill: any, clinicOverride?: ClinicInfo) {
   const clinic   = clinicOverride ?? getStoredClinic();
   const style    = clinic.invoiceStyle || "classic";
   const date     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+
+  if (bill.docType === "CreditNote") {
+    open(`Credit Note ${bill.billId || bill.id}`, _bodyCreditNote(bill, clinic, date));
+    return;
+  }
+
   const items    = (bill.items || []) as any[];
   const subtotal = items.reduce((s: number, i: any) => s + (i.total || 0), 0);
   const balance  = (bill.amount || 0) - (bill.paid || 0);

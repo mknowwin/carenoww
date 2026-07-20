@@ -284,6 +284,10 @@ export const billing = {
   // Payment
   postPayment:(id: string, data: any) => post<any>(`/billing/${id}/payments`, data),
   unlock:     (id: string) => post<any>(`/billing/${id}/unlock`, {}),
+  // Cancel / Return
+  cancel:     (id: string, reason?: string) => post<any>(`/billing/${id}/cancel`, { reason }),
+  returnItems:(id: string, data: any) => post<any>(`/billing/${id}/return`, data),
+  creditNotes:(id: string) => get<any[]>(`/billing/${id}/credit-notes`),
   // Insurance / claims
   preAuth:    (id: string, data: any) => post<any>(`/billing/${id}/pre-auth`, data),
   updatePreAuth:(id: string, data: any) => put<any>(`/billing/${id}/pre-auth`, data),

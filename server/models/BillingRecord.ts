@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IBillItem {
+  itemId?: string;
   description: string;
   category: "Consultation" | "Lab" | "Pharmacy" | "Procedure" | "Diagnosis" | "Room" | "Other";
   quantity: number;
@@ -20,7 +21,7 @@ export interface IBillItem {
 export interface IPaymentEntry {
   paymentId: string;
   amount: number;
-  paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Advance-Adjustment";
+  paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Advance-Adjustment" | "Adjustment";
   payer: string;
   transactionRef?: string;
   receivedBy: string;
@@ -72,14 +73,21 @@ export interface IBillingRecord extends Document {
   totalAdvance: number;
   advances: IAdvanceEntry[];
   payments: IPaymentEntry[];
-  status: "Draft" | "Paid" | "Partial" | "Pending" | "Claimed";
+  status: "Draft" | "Paid" | "Partial" | "Pending" | "Claimed" | "Cancelled";
   payer: string;
-  paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
+  paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Adjustment";
   type: "OPD" | "IPD" | "Emergency" | "Lab" | "Pharmacy";
   notes: string;
   createdBy: string;
   createdById: string;
   isLocked: boolean;
+  cancelledBy?: string;
+  cancelledById?: string;
+  cancelledAt?: Date;
+  cancelReason?: string;
+  docType: "Bill" | "CreditNote";
+  originalBillId?: string;
+  originalBillNo?: string;
   insurance: IInsuranceClaim;
   totalCgst: number;
   totalSgst: number;
@@ -91,6 +99,7 @@ export interface IBillingRecord extends Document {
 }
 
 const BillItemSchema = new Schema<IBillItem>({
+  itemId:       { type: String },
   description:  { type: String, default: "" },
   category:     { type: String, enum: ["Consultation", "Lab", "Pharmacy", "Procedure", "Diagnosis", "Room", "Other"], default: "Other" },
   quantity:     { type: Number, default: 1 },
@@ -110,7 +119,7 @@ const BillItemSchema = new Schema<IBillItem>({
 const PaymentEntrySchema = new Schema<IPaymentEntry>({
   paymentId:      { type: String, required: true },
   amount:         { type: Number, required: true },
-  paymentMode:    { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"], required: true },
+  paymentMode:    { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"], required: true },
   payer:          { type: String, default: "Self" },
   transactionRef: { type: String, default: "" },
   receivedBy:     { type: String, default: "" },
@@ -163,14 +172,21 @@ const BillingRecordSchema = new Schema<IBillingRecord>(
     totalAdvance:   { type: Number, default: 0 },
     advances:       { type: [AdvanceEntrySchema], default: [] },
     payments:       { type: [PaymentEntrySchema], default: [] },
-    status:         { type: String, enum: ["Draft", "Paid", "Partial", "Pending", "Claimed"], default: "Pending" },
+    status:         { type: String, enum: ["Draft", "Paid", "Partial", "Pending", "Claimed", "Cancelled"], default: "Pending" },
     payer:          { type: String, default: "Self" },
-    paymentMode:    { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online"], default: "Cash" },
+    paymentMode:    { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online", "Adjustment"], default: "Cash" },
     type:           { type: String, enum: ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"], default: "OPD" },
     notes:          { type: String, default: "" },
     createdBy:      { type: String, default: "" },
     createdById:    { type: String, default: "", index: true },
     isLocked:       { type: Boolean, default: false },
+    cancelledBy:    { type: String },
+    cancelledById:  { type: String },
+    cancelledAt:    { type: Date },
+    cancelReason:   { type: String },
+    docType:        { type: String, enum: ["Bill", "CreditNote"], default: "Bill" },
+    originalBillId: { type: String, index: true },
+    originalBillNo: { type: String },
     insurance:      { type: InsuranceClaimSchema, default: () => ({ claimStatus: "Not-Filed" }) },
     totalCgst:      { type: Number, default: 0 },
     totalSgst:      { type: Number, default: 0 },
