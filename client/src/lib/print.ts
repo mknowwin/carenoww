@@ -180,12 +180,23 @@ ${body}
 
 function _billMeta(bill: any, clinic: ClinicInfo, hasGst: boolean | string | undefined) {
   const subtotal = ((bill.items || []) as any[]).reduce((s: number, i: any) => s + (i.total || 0), 0);
+  // `bill.discount` is already the resolved discount *amount* (client sends discountAmt
+  // regardless of Flat/Percent — see BillingModal.tsx), matching what the "Discount" row
+  // below displays. `amount` is rounded to the nearest rupee (billingService.calcAmount)
+  // while subtotal/discount are not — roundOff is that adjustment, shown as its own line
+  // so the printed total is traceable back to the line items instead of looking off by a
+  // few paise.
+  const roundOff = (bill.amount || 0) - Math.max(0, subtotal - (bill.discount || 0));
   const gstSummary = hasGst ? `
     <tr><td>Taxable Amount</td><td class="tr">₹${(bill.taxableAmount || subtotal).toLocaleString()}</td></tr>
     ${bill.totalCgst > 0 ? `<tr><td>CGST</td><td class="tr">₹${bill.totalCgst.toLocaleString()}</td></tr>` : ""}
     ${bill.totalSgst > 0 ? `<tr><td>SGST</td><td class="tr">₹${bill.totalSgst.toLocaleString()}</td></tr>` : ""}
     ${bill.totalIgst > 0 ? `<tr><td>IGST</td><td class="tr">₹${bill.totalIgst.toLocaleString()}</td></tr>` : ""}` : "";
-  return { subtotal, gstSummary };
+  return { subtotal, roundOff, gstSummary };
+}
+
+function _roundOffLabel(roundOff: number): string {
+  return `${roundOff < 0 ? "−" : "+"}₹${Math.abs(roundOff).toFixed(2)}`;
 }
 
 // ── Payment history — used across all invoice styles to show who was paid what, when ──
@@ -207,7 +218,7 @@ function _paymentRows(bill: any) {
 // ── Style 1: Classic ──────────────────────────────────────────────────────────
 function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
   const docLabel = hasGst ? "Tax Invoice" : undefined;
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
 
   const hasBatch = items.some((i: any) => i.batchNo);
   const itemRows = items.map((item, idx) => `
@@ -281,6 +292,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
         <tr><td>Subtotal</td><td class="tr">₹${subtotal.toLocaleString()}</td></tr>
         ${bill.discount > 0 ? `<tr><td>Discount</td><td class="tr" style="color:#d97706;">−₹${bill.discount.toLocaleString()}</td></tr>` : ""}
         ${gstSummary}
+        ${roundOff !== 0 ? `<tr><td>Round Off</td><td class="tr">${_roundOffLabel(roundOff)}</td></tr>` : ""}
         <tr class="tot-row"><td>Total</td><td class="tr">₹${(bill.amount || 0).toLocaleString()}</td></tr>
         <tr class="paid-row"><td>Amount Paid</td><td class="tr">₹${(bill.paid || 0).toLocaleString()}</td></tr>
         ${balance > 0 ? `<tr class="bal-row"><td>Balance Due</td><td class="tr">₹${balance.toLocaleString()}</td></tr>` : ""}
@@ -297,7 +309,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
 // ── Style 2: Modern ───────────────────────────────────────────────────────────
 function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
   const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join("  ·  ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:40px;width:auto;object-fit:contain;margin-bottom:4px;display:block;" />` : "";
 
@@ -396,6 +408,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
         <tr><td style="padding:6px 12px;font-size:12px;">Subtotal</td><td style="padding:6px 12px;text-align:right;font-size:12px;">₹${subtotal.toLocaleString()}</td></tr>
         ${bill.discount > 0 ? `<tr><td style="padding:6px 12px;font-size:12px;color:#d97706;">Discount</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#d97706;">−₹${bill.discount.toLocaleString()}</td></tr>` : ""}
         ${gstSummary ? gstSummary.replace(/<tr>/g, '<tr>').replace(/class="tr"/g, 'style="text-align:right;"') : ""}
+        ${roundOff !== 0 ? `<tr><td style="padding:6px 12px;font-size:12px;">Round Off</td><td style="padding:6px 12px;text-align:right;font-size:12px;">${_roundOffLabel(roundOff)}</td></tr>` : ""}
         <tr style="background:#1a5c4a;"><td style="padding:8px 12px;color:#fff;font-weight:800;font-size:14px;">Total</td><td style="padding:8px 12px;text-align:right;color:#fff;font-weight:800;font-size:14px;">₹${(bill.amount || 0).toLocaleString()}</td></tr>
         <tr><td style="padding:6px 12px;font-size:12px;color:#15803d;font-weight:600;">Paid</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#15803d;font-weight:600;">₹${(bill.paid || 0).toLocaleString()}</td></tr>
         ${balance > 0 ? `<tr><td style="padding:6px 12px;font-size:12px;color:#dc2626;font-weight:600;">Balance Due</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#dc2626;font-weight:600;">₹${balance.toLocaleString()}</td></tr>` : ""}
@@ -412,7 +425,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
 
 // ── Style 3: Minimal ──────────────────────────────────────────────────────────
 function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
   const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join("  ·  ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:44px;width:auto;object-fit:contain;margin-bottom:6px;display:block;" />` : "";
 
@@ -494,6 +507,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
         ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
         ${hasGst && bill.totalCgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>CGST</span><span>₹${bill.totalCgst.toLocaleString()}</span></div>` : ""}
         ${hasGst && bill.totalSgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>SGST</span><span>₹${bill.totalSgst.toLocaleString()}</span></div>` : ""}
+        ${roundOff !== 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>Round Off</span><span>${_roundOffLabel(roundOff)}</span></div>` : ""}
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #111;margin-top:2px;font-size:16px;font-weight:800;">
           <span>Total</span><span>₹${(bill.amount || 0).toLocaleString()}</span>
         </div>
@@ -514,6 +528,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
 // ── Style 4: Thermal / Slip (A5) ──────────────────────────────────────────────
 function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number): string {
+  const roundOff = (bill.amount || 0) - Math.max(0, subtotal - (bill.discount || 0));
   const sub = [clinic.phone, clinic.address].filter(Boolean).join(" · ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:36px;width:auto;object-fit:contain;display:block;margin:0 auto 4px;" />` : "";
 
@@ -576,6 +591,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
     <div style="border-top:1px dashed #333;padding-top:7px;font-size:11px;">
       ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
+      ${roundOff !== 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Round Off</span><span>${_roundOffLabel(roundOff)}</span></div>` : ""}
       <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;padding-bottom:5px;border-bottom:1px dashed #333;margin-bottom:5px;">
         <span>TOTAL</span><span>₹${(bill.amount || 0).toLocaleString()}</span>
       </div>
@@ -597,7 +613,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
 // ── Style 5: Compact (A5) ─────────────────────────────────────────────────────
 function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
   const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join(" · ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:32px;width:auto;object-fit:contain;" />` : "";
 
@@ -683,6 +699,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
       ${hasGst && bill.totalCgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>CGST</span><span>₹${bill.totalCgst.toLocaleString()}</span></div>` : ""}
       ${hasGst && bill.totalSgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>SGST</span><span>₹${bill.totalSgst.toLocaleString()}</span></div>` : ""}
+      ${roundOff !== 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>Round Off</span><span>${_roundOffLabel(roundOff)}</span></div>` : ""}
       <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;font-weight:800;border-top:2px solid #111;"><span>Total</span><span>₹${(bill.amount || 0).toLocaleString()}</span></div>
       <div style="display:flex;justify-content:space-between;padding:3px 0;color:#15803d;font-weight:600;"><span>Paid</span><span>₹${(bill.paid || 0).toLocaleString()}</span></div>
       ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;color:#dc2626;font-weight:600;"><span>Balance</span><span>₹${balance.toLocaleString()}</span></div>` : ""}

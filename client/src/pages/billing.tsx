@@ -17,6 +17,7 @@ import { formatCurrency, formatCurrencyFull } from "@/lib/utils";
 import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
 import ReturnBillModal from "@/components/modals/ReturnBillModal";
+import FullPayModal from "@/components/modals/FullPayModal";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -81,7 +82,7 @@ export default function BillingPage() {
   const [modalOpen,   setModalOpen]   = useState(false);
   const [editBill,    setEditBill]    = useState<any>(null);
   const [payOnly,     setPayOnly]     = useState(false);
-  const [paying,      setPaying]      = useState<string | null>(null);
+  const [fullPayBill, setFullPayBill] = useState<any>(null);
   const [expandedId,  setExpandedId]  = useState<string | null>(null);
   const [cancelling,  setCancelling]  = useState<string | null>(null);
   const [returnBill,  setReturnBill]  = useState<any>(null);
@@ -156,9 +157,15 @@ export default function BillingPage() {
   // Drafts can carry a non-zero computed amount before they're finalized — exclude
   // them from financial totals so "Total Billed"/"Balance Due" only reflect real invoices.
   const billableBills  = RANGE_BILLS.filter((b) => b.status !== "Draft");
-  const totalBilled    = billableBills.reduce((a, b) => a + (b.amount || 0), 0);
-  const totalCollected = billableBills.reduce((a, b) => a + (b.paid   || 0), 0);
+  // Credit notes are BillingRecord rows with negative amount/paid (see billingService.returnBillItems)
+  // — netting them into Total Billed/Collected would understate real invoicing/collection, so they're
+  // reported separately as "Refund Amount" instead.
+  const invoiceBills   = billableBills.filter((b) => b.docType !== "CreditNote");
+  const creditNotes    = billableBills.filter((b) => b.docType === "CreditNote");
+  const totalBilled    = invoiceBills.reduce((a, b) => a + (b.amount || 0), 0);
+  const totalCollected = invoiceBills.reduce((a, b) => a + (b.paid   || 0), 0);
   const totalPending   = billableBills.reduce((a, b) => a + (b.balance || 0), 0);
+  const totalRefunded  = creditNotes.reduce((a, b) => a + Math.abs(b.paid || 0), 0);
   const collectionRate = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
   const todaysRevenue  = billableBills
     .filter((b) => new Date(b.createdAt).toDateString() === new Date().toDateString())
@@ -170,24 +177,6 @@ export default function BillingPage() {
     count:  billableBills.filter((b) => b.type === t).length,
     amount: billableBills.filter((b) => b.type === t).reduce((a, b) => a + (b.amount || 0), 0),
   }));
-
-  const markPaid = async (bill: any) => {
-    const ok = await confirm({
-      title: `Mark ${bill.id} as fully paid?`,
-      description: `₹${bill.amount?.toLocaleString()} will be recorded as paid in full.`,
-      confirmText: "Mark Paid",
-    });
-    if (!ok) return;
-    setPaying(bill.id);
-    try {
-      await billingApi.update(bill._id || bill.id, { paid: bill.amount, status: "Paid" });
-      qc.invalidateQueries({ queryKey: ["billing"] });
-    } catch (err: any) {
-      toast({ variant: "destructive", title: "Payment failed", description: err.message || "Failed to mark bill as paid." });
-    } finally {
-      setPaying(null);
-    }
-  };
 
   const cancelBill = async (bill: any) => {
     const ok = await confirm({
@@ -295,11 +284,12 @@ export default function BillingPage() {
       </div>
 
       {/* ── Summary cards ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           { label: "Total Billed",    value: formatCurrency(totalBilled),    color: "text-foreground",  bg: "bg-muted",      icon: IndianRupee },
           { label: "Collected",       value: formatCurrency(totalCollected), color: "text-green-600",  bg: "bg-green-50",   icon: CheckCircle2 },
           { label: "Balance Due",     value: formatCurrency(totalPending),   color: "text-amber-600",  bg: "bg-amber-50",   icon: Clock },
+          { label: "Refund Amount",   value: formatCurrency(totalRefunded),  color: "text-red-600",    bg: "bg-red-50",     icon: Undo2 },
           { label: "Collection Rate", value: `${collectionRate}%`,           color: "text-teal-600",   bg: "bg-teal-50",    icon: TrendingUp },
         ].map((s) => (
           <Card key={s.label}>
@@ -392,12 +382,13 @@ export default function BillingPage() {
           {isAdmin ? (
             <>
               {staffReport.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   {[
                     { label: "Staff Members",   value: String(staffReport.length),                                                                              color: "text-foreground",  bg: "bg-muted" },
                     { label: "Total Billed",    value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0)),                color: "text-foreground",  bg: "bg-muted" },
                     { label: "Total Collected", value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0)),                color: "text-green-600",  bg: "bg-green-50" },
                     { label: "Cash Received",   value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0)),                color: "text-teal-600",   bg: "bg-teal-50" },
+                    { label: "Refund Amount",   value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalRefunded || 0), 0)),                color: "text-red-600",    bg: "bg-red-50" },
                   ].map((s) => (
                     <Card key={s.label}>
                       <CardContent className="p-4">
@@ -426,7 +417,7 @@ export default function BillingPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b bg-muted/40">
-                            {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received", ""].map((h, i) => (
+                            {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Refunded", "Payments #", "Cash Received", ""].map((h, i) => (
                               <th key={i} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : "text-right"}`}>{h}</th>
                             ))}
                           </tr>
@@ -446,6 +437,7 @@ export default function BillingPage() {
                                   <td className="py-3 px-4 text-right">{row.billsCreated}</td>
                                   <td className="py-3 px-4 text-right font-medium">{formatCurrencyFull(row.totalBilled)}</td>
                                   <td className="py-3 px-4 text-right text-green-600 font-medium">{formatCurrencyFull(row.totalPaid)}</td>
+                                  <td className="py-3 px-4 text-right text-red-600 font-medium">{formatCurrencyFull(row.totalRefunded || 0)}</td>
                                   <td className="py-3 px-4 text-right">{row.paymentsCount}</td>
                                   <td className="py-3 px-4 text-right text-teal-600 font-medium">{formatCurrencyFull(row.totalReceived)}</td>
                                   <td className="py-3 px-4 text-right">
@@ -463,7 +455,7 @@ export default function BillingPage() {
                                 {isExpanded && activeModePairs.length > 0 && (
                                   <tr className="bg-muted/10 border-b">
                                     <td />
-                                    <td colSpan={7} className="py-2 px-4 pb-3">
+                                    <td colSpan={8} className="py-2 px-4 pb-3">
                                       <div className="flex flex-wrap gap-x-5 gap-y-1 pl-2 border-l-2 border-muted-foreground/20">
                                         {activeModePairs.map(({ mode, amount }) => (
                                           <div key={mode} className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -483,6 +475,7 @@ export default function BillingPage() {
                             <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.billsCreated  || 0), 0)}</td>
                             <td className="py-3 px-4 text-right">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0))}</td>
                             <td className="py-3 px-4 text-right text-green-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0))}</td>
+                            <td className="py-3 px-4 text-right text-red-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalRefunded || 0), 0))}</td>
                             <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.paymentsCount || 0), 0)}</td>
                             <td className="py-3 px-4 text-right text-teal-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0))}</td>
                             <td />
@@ -515,12 +508,13 @@ export default function BillingPage() {
                 return (
                   <>
                     <p className="text-xs text-muted-foreground -mt-1">Your billing summary for the selected date range.</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                       {[
                         { label: "Bills Created",   value: String(myRow.billsCreated || 0),          color: "text-foreground",  bg: "bg-muted" },
                         { label: "Total Billed",    value: formatCurrencyFull(myRow.totalBilled || 0),    color: "text-foreground",  bg: "bg-muted" },
                         { label: "Total Collected", value: formatCurrencyFull(myRow.totalPaid || 0),      color: "text-green-600",   bg: "bg-green-50" },
                         { label: "Cash Received",   value: formatCurrencyFull(myRow.totalReceived || 0),  color: "text-teal-600",    bg: "bg-teal-50" },
+                        { label: "Refund Amount",   value: formatCurrencyFull(myRow.totalRefunded || 0),  color: "text-red-600",     bg: "bg-red-50" },
                       ].map((s) => (
                         <Card key={s.label}>
                           <CardContent className="p-4">
@@ -688,6 +682,10 @@ export default function BillingPage() {
           const isCreditNote = bill.docType === "CreditNote";
           const paidPct      = bill.amount > 0 ? Math.min(100, Math.round(((bill.paid || 0) / bill.amount) * 100)) : 0;
           const billDate     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+          // amount is rounded to the nearest rupee (billingService.calcAmount) while items/discount
+          // aren't — this is that adjustment, matching the same formula used in print.ts's _billMeta.
+          const itemsSubtotal = (bill.items || []).reduce((s: number, it: any) => s + (it.total || 0), 0);
+          const roundOff      = (bill.amount || 0) - Math.max(0, itemsSubtotal - (bill.discount || 0));
 
           return (
             <Card key={bill.id} className={`hover:shadow-sm transition-shadow ${isCreditNote ? "border-red-200" : ""}`}>
@@ -782,8 +780,8 @@ export default function BillingPage() {
                           Record Pay
                         </Button>
                         <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 px-2"
-                          disabled={paying === bill.id} onClick={() => markPaid(bill)}>
-                          {paying === bill.id ? "…" : "Full Pay"}
+                          onClick={() => setFullPayBill(bill)}>
+                          Full Pay
                         </Button>
                       </div>
                     )}
@@ -845,6 +843,11 @@ export default function BillingPage() {
                             Discount: −₹{bill.discount?.toLocaleString()}
                           </div>
                         )}
+                        {roundOff !== 0 && (
+                          <div className="text-xs text-right text-muted-foreground mt-1 px-1">
+                            Round Off: {roundOff > 0 ? "+" : "−"}₹{Math.abs(roundOff).toFixed(2)}
+                          </div>
+                        )}
                         {bill.notes && (
                           <p className="text-xs text-muted-foreground mt-2 px-1 italic">Note: {bill.notes}</p>
                         )}
@@ -889,6 +892,11 @@ export default function BillingPage() {
           open={!!returnBill}
           onClose={() => setReturnBill(null)}
           bill={returnBill}
+        />
+        <FullPayModal
+          open={!!fullPayBill}
+          onClose={() => setFullPayBill(null)}
+          bill={fullPayBill}
         />
       </AppErrorBoundary>
     </div>

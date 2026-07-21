@@ -20,7 +20,7 @@ function calcAmount(items: any[], discount: number, discountType: string, discou
   const discountAmt = discountType === "Percent"
     ? Math.round((subtotal * discountPercent) / 100)
     : discount;
-  return Math.max(0, subtotal - discountAmt);
+  return Math.round(Math.max(0, subtotal - discountAmt));
 }
 
 const FINANCIAL_FIELDS = new Set(["items", "amount", "discount", "discountType", "discountPercent"]);
@@ -274,7 +274,14 @@ export async function createBill(tenantId: string, user: { name: string; id: str
 
   const buildDoc = (billId: string, payments: any[], itemsOverride?: any[], amountOverride?: number) => {
     const docItems = itemsOverride ?? items;
-    const docAmount = amountOverride ?? finalAmount;
+    const rawAmount = amountOverride ?? finalAmount;
+    // Round the total to the nearest rupee here too — the client normally sends its
+    // own flat `amount`, which skips the calcAmount recompute below, so this is the
+    // one spot in createBill that's always hit regardless of where the amount came from.
+    // Falls back to 0 (matching the schema's own default) rather than leaving this
+    // undefined — an empty Draft (no items, no amount yet) still needs a real number
+    // here so docBalance below doesn't compute NaN and fail Mongoose's Number cast.
+    const docAmount = rawAmount != null ? Math.round(rawAmount) : 0;
     const docBalance = docAmount - paidAmount;
     return {
       tenantId,
@@ -646,12 +653,8 @@ export async function returnBillItems(
   }
 
   const refundAmount = Math.min(returnAmount, Math.max(0, bill.paid - alreadyRefunded));
-  const newAmount = Math.max(0, bill.amount - returnAmount);
-  const newPaid = bill.paid - refundAmount;
-  const newBalance = newAmount - newPaid;
 
   const session = await mongoose.startSession();
-  let updatedBill: any;
   let creditNote: any;
   try {
     await session.withTransaction(async () => {
@@ -659,20 +662,10 @@ export async function returnBillItems(
 
       await restockPharmacyItems(tenantId, returnItems, user.name, `Returned via ${creditNoteId} on bill ${bill.billId}`, session);
 
-      updatedBill = await BillingRecord.findOneAndUpdate(
-        { _id: id, tenantId },
-        {
-          $set: {
-            amount: newAmount,
-            paid: newPaid,
-            balance: newBalance,
-            status: computeStatus(newAmount, newPaid),
-            isLocked: newPaid >= newAmount,
-          },
-        },
-        { new: true, session }
-      );
-
+      // The original bill is left untouched — the Credit Note below is the sole,
+      // correctly-dated record of the return. Mutating bill.amount/paid here would
+      // double-count the return in date-range reports, which already sum both
+      // Bill and CreditNote records (see billingService.listBills).
       const payments: any[] = [];
       if (refundAmount > 0) {
         const paymentId = await getNextId(tenantId, `pay-${creditNoteId}`, "PAY-", session);
@@ -717,7 +710,7 @@ export async function returnBillItems(
     await session.endSession();
   }
 
-  return { bill: updatedBill, creditNote };
+  return { bill, creditNote };
 }
 
 export async function submitPreAuth(tenantId: string, id: string, body: Record<string, any>) {
@@ -849,6 +842,11 @@ export async function salesByStaff(
   const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const;
   const emptyBreakdown = () => Object.fromEntries(PAYMENT_MODES.map(m => [m, 0]));
 
+  // Credit notes (docType: "CreditNote") carry negative amount/paid — summing them
+  // together with normal bills would net refunds into "Total Billed"/"Total Collected"
+  // instead of reporting them separately, so they're excluded here and rolled up
+  // into their own totalRefunded figure (the actual cash paid back to the patient).
+  const isCreditNote = { $eq: ["$docType", "CreditNote"] };
   const [byCreator, byReceiver, byReceiverMode] = await Promise.all([
     BillingRecord.aggregate([
       { $match: creatorMatch },
@@ -856,8 +854,9 @@ export async function salesByStaff(
         $group: {
           _id: "$createdBy",
           billsCreated: { $sum: 1 },
-          totalBilled: { $sum: "$amount" },
-          totalPaid: { $sum: "$paid" },
+          totalBilled: { $sum: { $cond: [isCreditNote, 0, "$amount"] } },
+          totalPaid: { $sum: { $cond: [isCreditNote, 0, "$paid"] } },
+          totalRefunded: { $sum: { $cond: [isCreditNote, { $abs: "$paid" }, 0] } },
         },
       },
     ]),
@@ -897,6 +896,7 @@ export async function salesByStaff(
       billsCreated: row.billsCreated,
       totalBilled: row.totalBilled,
       totalPaid: row.totalPaid,
+      totalRefunded: row.totalRefunded,
       paymentsCount: 0,
       totalReceived: 0,
       paymentBreakdown: emptyBreakdown(),
@@ -915,6 +915,7 @@ export async function salesByStaff(
         billsCreated: 0,
         totalBilled: 0,
         totalPaid: 0,
+        totalRefunded: 0,
         paymentsCount: row.paymentsCount,
         totalReceived: row.totalReceived,
         paymentBreakdown: emptyBreakdown(),
@@ -931,6 +932,7 @@ export async function salesByStaff(
         billsCreated: 0,
         totalBilled: 0,
         totalPaid: 0,
+        totalRefunded: 0,
         paymentsCount: 0,
         totalReceived: 0,
         paymentBreakdown: emptyBreakdown(),
