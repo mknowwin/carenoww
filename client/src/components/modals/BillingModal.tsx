@@ -11,17 +11,17 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, IndianRupee, Stethoscope, Printer, CheckCircle2, Search, Pill, Loader2, UserCheck } from "lucide-react";
 import { printBill } from "@/lib/print";
 
-const BILL_TYPES    = ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"] as const;
+const BILL_TYPES = ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"] as const;
 const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online"] as const;
-const CATEGORIES    = ["Consultation", "Diagnosis", "Lab", "Pharmacy", "Procedure", "Room", "Bed Charges", "Nursing", "Other"] as const;
-const PAYERS        = ["Self","Star Health","New India","United India","Max Bupa","HDFC Ergo","Medi Assist","CGHS","ESI","Other"];
+const CATEGORIES = ["Consultation", "Diagnosis", "Lab", "Pharmacy", "Procedure", "Room", "Bed Charges", "Nursing", "Other"] as const;
+const PAYERS = ["Self", "Star Health", "New India", "United India", "Max Bupa", "HDFC Ergo", "Medi Assist", "CGHS", "ESI", "Other"];
 
 // Rate categories shown per bill type in the service charge panel
 const BILL_RATE_CATEGORIES: Record<string, string[]> = {
-  OPD:       ["Consultation", "Diagnosis", "Lab", "Procedure", "Other"],
-  IPD:       ["Consultation", "Procedure", "Room", "Bed Charges", "Nursing", "Other"],
-  Emergency: ["Consultation", "Procedure", "Other"],
-  Lab:       ["Lab"],
+  OPD: ["Consultation", "Diagnosis", "Lab", "Procedure", "Other"],
+  IPD: ["Consultation", "Diagnosis", "Lab", "Procedure", "Room", "Bed Charges", "Nursing", "Other"],
+  Emergency: ["Consultation", "Diagnosis", "Lab", "Procedure", "Other"],
+  Lab: ["Lab"],
 };
 
 interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; availableQty?: number; }
@@ -40,31 +40,31 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
 }
 
 export default function BillingModal({ open, onClose, existing, payOnly = false, prefill }: Props) {
-  const qc     = useQueryClient();
+  const qc = useQueryClient();
   const isEdit = !!existing;
 
   // ── form state ─────────────────────────────────────────────────────────────
-  const [patientId,       setPatientId]       = useState("");
-  const [patientName,     setPatientName]     = useState("");
-  const [type,            setType]            = useState("OPD");
-  const [doctorName,      setDoctorName]      = useState("__none__");
-  const [items,           setItems]           = useState<BillItem[]>([emptyItem()]);
-  const [discountType,    setDiscountType]    = useState<"Flat" | "Percent">("Flat");
-  const [discount,        setDiscount]        = useState(0);
+  const [patientId, setPatientId] = useState("");
+  const [patientName, setPatientName] = useState("");
+  const [type, setType] = useState("OPD");
+  const [doctorName, setDoctorName] = useState("__none__");
+  const [items, setItems] = useState<BillItem[]>([emptyItem()]);
+  const [discountType, setDiscountType] = useState<"Flat" | "Percent">("Flat");
+  const [discount, setDiscount] = useState(0);
   const [discountPercent, setDiscountPercent] = useState(0);
-  const [paid,            setPaid]            = useState(0);
-  const [payer,           setPayer]           = useState("Self");
-  const [paymentMode,     setPaymentMode]     = useState("Cash");
-  const [transactionRef,  setTransactionRef]  = useState("");
-  const [insurer,         setInsurer]         = useState({ tpaName: "", policyNo: "", memberNo: "" });
-  const [notes,           setNotes]           = useState("");
-  const [rateNameFilter,  setRateNameFilter]  = useState("");
-  const [drugSearch,      setDrugSearch]      = useState("");
-  const [manualPharmacy,  setManualPharmacy]  = useState(false);
-  const [loading,         setLoading]         = useState(false);
-  const [error,           setError]           = useState("");
-  const [savedBill,       setSavedBill]       = useState<any>(null);
-  const [uhidStatus,      setUhidStatus]      = useState<"idle" | "loading" | "found" | "not-found">("idle");
+  const [paid, setPaid] = useState(0);
+  const [payer, setPayer] = useState("Self");
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [transactionRef, setTransactionRef] = useState("");
+  const [insurer, setInsurer] = useState({ tpaName: "", policyNo: "", memberNo: "" });
+  const [notes, setNotes] = useState("");
+  const [rateNameFilter, setRateNameFilter] = useState("");
+  const [drugSearch, setDrugSearch] = useState("");
+  const [manualPharmacy, setManualPharmacy] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [savedBill, setSavedBill] = useState<any>(null);
+  const [uhidStatus, setUhidStatus] = useState<"idle" | "loading" | "found" | "not-found">("idle");
 
   // ── doctors ────────────────────────────────────────────────────────────────
   const { data: doctorsRaw } = useQuery({ queryKey: ["doctors"], queryFn: () => usersApi.doctors(), retry: false, enabled: open });
@@ -90,9 +90,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   const isPharmacyBill = type === "Pharmacy" && !payOnly && !manualPharmacy;
   const { data: drugResults = [] } = useQuery({
     queryKey: ["inventory-search", drugSearch],
-    queryFn:  () => pharmacyApi.inventory.list({ search: drugSearch }),
-    enabled:  open && isPharmacyBill && drugSearch.length >= 1,
-    retry:    false,
+    queryFn: () => pharmacyApi.inventory.list({ search: drugSearch }),
+    enabled: open && isPharmacyBill && drugSearch.length >= 1,
+    retry: false,
   });
   const drugList: any[] = Array.isArray(drugResults) ? drugResults : (drugResults as any)?.drugs ?? [];
 
@@ -117,8 +117,8 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
       if (activeBatches.length > 0) {
         if (activeBatches[0].mrpPerUnit != null) unitPrice = activeBatches[0].mrpPerUnit;
-        batchNo      = activeBatches[0].batchNo;
-        expiryDate   = activeBatches[0].expiryDate;
+        batchNo = activeBatches[0].batchNo;
+        expiryDate = activeBatches[0].expiryDate;
         availableQty = activeBatches.reduce((s, b) => s + b.quantityRemaining, 0);
       }
     } catch {
@@ -202,10 +202,10 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   const addRateItem = (rate: any) => {
     setItems((prev) => [...prev.filter((it) => it.description !== ""), {
       description: rate.name,
-      category:    rate.category,
-      quantity:    1,
-      unitPrice:   rate.defaultRate,
-      total:       rate.defaultRate,
+      category: rate.category,
+      quantity: 1,
+      unitPrice: rate.defaultRate,
+      total: rate.defaultRate,
     }]);
   };
 
@@ -218,10 +218,13 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     }));
   };
 
-  const subtotal    = items.reduce((s, it) => s + (it.total || 0), 0);
+  const hasItems = items.some((it) => it.description.trim() !== "" || it.unitPrice > 0);
+  const subtotal = items.reduce((s, it) => s + (it.total || 0), 0);
   const discountAmt = discountType === "Percent" ? Math.round((subtotal * discountPercent) / 100) : discount;
-  const totalAmount = Math.max(0, subtotal - discountAmt);
-  const balance     = totalAmount - paid;
+  const netBeforeRound = Math.max(0, subtotal - discountAmt);
+  const totalAmount = Math.round(netBeforeRound);
+  const roundOff = totalAmount - netBeforeRound;
+  const balance = totalAmount - paid;
 
   // ── submit ─────────────────────────────────────────────────────────────────
   // isDraft-in-progress (existing.status === "Draft") never disappears just because
@@ -229,8 +232,10 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   // this save stays a Draft or finalizes it.
   const handleSubmit = async (e: React.SyntheticEvent, opts: { asDraft?: boolean } = {}) => {
     e.preventDefault();
+    if (loading) return;
     const asDraft = opts.asDraft ?? false;
     if (!patientName.trim()) { setError("Patient name is required"); return; }
+    if (!payOnly && !hasItems) { setError("Add at least one item to the bill"); return; }
     if (!asDraft && !payOnly && items.some((it) => !it.description.trim())) { setError("All items need a description"); return; }
     const overStock = !asDraft && !payOnly && items.find((it) => it.availableQty != null && it.quantity > it.availableQty);
     if (overStock) { setError(`Quantity for "${overStock.description}" exceeds available stock (${overStock.availableQty})`); return; }
@@ -242,7 +247,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
       if (payOnly) {
         // Use the dedicated payment endpoint to preserve audit trail
         result = await billingApi.postPayment(existing._id || existing.id, {
-          amount:       paid,
+          amount: paid,
           paymentMode,
           payer,
           transactionRef,
@@ -252,7 +257,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         const payload: any = {
           patientId: effectiveUhid, patientName, type,
           doctor: (doctorName && doctorName !== "__none__") ? doctorName : undefined,
-          items:  items.map((it) => ({ ...it, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) })),
+          items: items.map((it) => ({ ...it, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) })),
           amount: totalAmount,
           discount: discountAmt,
           discountType,
@@ -274,11 +279,11 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
       qc.invalidateQueries({ queryKey: ["billing"] });
       if (type === "Pharmacy") qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
       setSavedBill({
-        billId:      result?.billId,
+        billId: result?.billId,
         patientName: patientName || existing?.patientName,
-        amount:      payOnly ? existing?.amount : totalAmount,
-        paid:        payOnly ? (existing?.paid ?? 0) + paid : (asDraft ? 0 : paid),
-        balance:     payOnly ? Math.max(0, (existing?.balance ?? 0) - paid) : (asDraft ? totalAmount : balance),
+        amount: payOnly ? existing?.amount : totalAmount,
+        paid: payOnly ? (existing?.paid ?? 0) + paid : (asDraft ? 0 : paid),
+        balance: payOnly ? Math.max(0, (existing?.balance ?? 0) - paid) : (asDraft ? totalAmount : balance),
         ...result, // includes the server-authoritative `status` (e.g. "Draft")
       });
     } catch (err: any) {
@@ -345,9 +350,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                         inputMode="numeric"
                         onChange={(e) => { setPatientId(e.target.value.replace(/\D/g, "")); setUhidStatus("idle"); }}
                       />
-                      {uhidStatus === "loading"   && <Loader2   className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                      {uhidStatus === "found"     && <UserCheck  className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-600" />}
-                      {uhidStatus === "not-found" && <span       className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-destructive">?</span>}
+                      {uhidStatus === "loading" && <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                      {uhidStatus === "found" && <UserCheck className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-600" />}
+                      {uhidStatus === "not-found" && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-destructive">?</span>}
                     </div>
                   </F>
                   <F label="Patient Name *"><Input className="h-8 text-sm" value={patientName} placeholder="Full name" required onChange={(e) => setPatientName(e.target.value)} /></F>
@@ -494,7 +499,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                               <Input ref={item === justAddedItem ? qtyInputRef : undefined} className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseInt(e.target.value) || 1)} />
                               <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
                               <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
-                              <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                              <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                 onClick={() => setItems((p) => p.filter((_, i) => i !== items.indexOf(item)))}>
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
@@ -530,11 +535,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                       <Input className="h-7 text-xs text-center" type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 1)} />
                       <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" placeholder="₹" value={item.unitPrice || ""} onChange={(e) => updateItem(idx, "unitPrice", parseFloat(e.target.value) || 0)} />
                       <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
-                      {items.length > 1 ? (
-                        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10" onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      ) : <div />}
+                      <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   ))}
                   <div className="flex gap-2 flex-wrap">
@@ -575,8 +578,11 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                         {discountAmt > 0 && <span className="text-xs text-muted-foreground self-center whitespace-nowrap">= ₹{discountAmt.toLocaleString()}</span>}
                       </div>
                     </div>
-                    <div className="flex items-end">
+                    <div className="flex items-end justify-between">
                       <div><div className="text-xs text-muted-foreground mb-1">Net Total</div><div className="text-xl font-bold text-teal-700">₹{totalAmount.toLocaleString()}</div></div>
+                      {roundOff !== 0 && (
+                        <div className="text-right"><div className="text-xs text-muted-foreground mb-1">Round Off</div><div className="text-sm font-medium">{roundOff > 0 ? "+" : "−"}₹{Math.abs(roundOff).toFixed(2)}</div></div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -618,9 +624,10 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                 {!payOnly && (
                   <div className="flex gap-5 text-sm pt-1 border-t flex-wrap">
                     <span>Total: <strong>₹{totalAmount.toLocaleString()}</strong></span>
+                    {roundOff !== 0 && <span className="text-muted-foreground">Round Off: {roundOff > 0 ? "+" : "−"}₹{Math.abs(roundOff).toFixed(2)}</span>}
                     <span>Paid: <strong className="text-green-600">₹{paid.toLocaleString()}</strong></span>
-                    {balance > 0  && <span>Balance: <strong className="text-red-500">₹{balance.toLocaleString()}</strong></span>}
-                    {balance < 0  && <span className="text-green-600">Overpaid: <strong>₹{Math.abs(balance).toLocaleString()}</strong></span>}
+                    {balance > 0 && <span>Balance: <strong className="text-red-500">₹{balance.toLocaleString()}</strong></span>}
+                    {balance < 0 && <span className="text-green-600">Overpaid: <strong>₹{Math.abs(balance).toLocaleString()}</strong></span>}
                     {balance === 0 && paid > 0 && <span className="text-green-600 font-medium">✓ Fully paid</span>}
                   </div>
                 )}
@@ -635,12 +642,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
               <div className="flex justify-end gap-2 pt-1 border-t">
                 <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
                 {!payOnly && (!isEdit || existing?.status === "Draft") && (
-                  <Button type="button" variant="secondary" disabled={loading} className="gap-2"
+                  <Button type="button" variant="secondary" disabled={loading || !hasItems} className="gap-2"
                     onClick={(e) => handleSubmit(e, { asDraft: true })}>
                     Save as Draft
                   </Button>
                 )}
-                <Button type="submit" disabled={loading} className="gap-2 min-w-[150px]">
+                <Button type="submit" disabled={loading || (!payOnly && !hasItems)} className="gap-2 min-w-[150px]">
                   <IndianRupee className="h-3.5 w-3.5" />
                   {loading ? "Saving…" : isEdit ? (payOnly ? "Record Payment" : existing?.status === "Draft" ? "Generate Bill" : "Update Bill") : "Generate Bill"}
                 </Button>

@@ -9,12 +9,15 @@ import {
   CreditCard, Search, Plus, CheckCircle2, Clock,
   TrendingUp, IndianRupee, Pencil, Printer, ChevronDown,
   ChevronUp, FileText, Download, Banknote, Wallet, Users, User,
+  Ban, Undo2, Trash2, Lock,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { billing as billingApi } from "@/lib/api";
 import { formatCurrency, formatCurrencyFull } from "@/lib/utils";
 import { printBill, printSalesReport } from "@/lib/print";
 import BillingModal from "@/components/modals/BillingModal";
+import ReturnBillModal from "@/components/modals/ReturnBillModal";
+import FullPayModal from "@/components/modals/FullPayModal";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -22,11 +25,12 @@ import { confirm } from "@/hooks/use-confirm";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
-  Draft:   "bg-slate-100 text-slate-600",
-  Paid:    "bg-green-100 text-green-700",
-  Partial: "bg-amber-100 text-amber-700",
-  Pending: "bg-red-100 text-red-700",
-  Claimed: "bg-blue-100 text-blue-700",
+  Draft:     "bg-slate-100 text-slate-600",
+  Paid:      "bg-green-100 text-green-700",
+  Partial:   "bg-amber-100 text-amber-700",
+  Pending:   "bg-red-100 text-red-700",
+  Claimed:   "bg-blue-100 text-blue-700",
+  Cancelled: "bg-gray-200 text-gray-500",
 };
 function PaymentIcon({ mode }: { mode: string }) {
   if (mode === "Cash")      return <Banknote className="h-3 w-3" />;
@@ -35,9 +39,31 @@ function PaymentIcon({ mode }: { mode: string }) {
   return <Wallet className="h-3 w-3" />;
 }
 const TYPE_TABS = ["All", "OPD", "IPD", "Emergency", "Lab", "Pharmacy"];
-function todayLocalStr() {
-  const d = new Date();
+function dateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function todayLocalStr() {
+  return dateStr(new Date());
+}
+// Server-side range for the current dateFilter selection — the list is fetched
+// scoped to this range instead of pulling every bill and filtering client-side.
+function rangeForFilter(dateFilter: string, dateFrom: string, dateTo: string): { from?: string; to?: string } {
+  const today = new Date();
+  if (dateFilter === "today") {
+    const t = todayLocalStr();
+    return { from: t, to: t };
+  }
+  if (dateFilter === "week") {
+    const ago = new Date(today); ago.setDate(today.getDate() - 7);
+    return { from: dateStr(ago), to: todayLocalStr() };
+  }
+  if (dateFilter === "month") {
+    return { from: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`, to: todayLocalStr() };
+  }
+  if (dateFilter === "custom") {
+    return { from: dateFrom || undefined, to: dateTo || undefined };
+  }
+  return {}; // "all" — unscoped
 }
 
 // ── component ──────────────────────────────────────────────────────────────────
@@ -45,18 +71,23 @@ export default function BillingPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "finance";
+  const canCancelReturn = isAdmin || user?.role === "pharmacy_admin";
 
   const [search,      setSearch]      = useState("");
   const [typeFilter,  setTypeFilter]  = useState("All");
   const [statusFilter,setStatusFilter]= useState("All");
-  const [dateFilter,  setDateFilter]  = useState("all");
+  const [dateFilter,  setDateFilter]  = useState("today");
   const [dateFrom,    setDateFrom]    = useState("");
   const [dateTo,      setDateTo]      = useState("");
   const [modalOpen,   setModalOpen]   = useState(false);
   const [editBill,    setEditBill]    = useState<any>(null);
   const [payOnly,     setPayOnly]     = useState(false);
-  const [paying,      setPaying]      = useState<string | null>(null);
+  const [fullPayBill, setFullPayBill] = useState<any>(null);
   const [expandedId,  setExpandedId]  = useState<string | null>(null);
+  const [cancelling,  setCancelling]  = useState<string | null>(null);
+  const [returnBill,  setReturnBill]  = useState<any>(null);
+  const [deletingId,  setDeletingId]  = useState<string | null>(null);
+  const [unlockingId, setUnlockingId] = useState<string | null>(null);
 
   const [staffFilter,   setStaffFilter]   = useState<string | null>(null);
 
@@ -80,60 +111,61 @@ export default function BillingPage() {
     retry: false,
   });
 
-  const { data: apiData, isLoading } = useQuery({
-    queryKey: ["billing"],
-    queryFn: () => billingApi.list(),
+  // Bills are fetched scoped to the selected date range (default: today) rather
+  // than pulling every bill and filtering client-side — see rangeForFilter.
+  // This query always runs (regardless of search) so the summary stat cards and
+  // staff filter options stay pinned to the selected date range.
+  const { from: rangeFrom, to: rangeTo } = rangeForFilter(dateFilter, dateFrom, dateTo);
+  const { data: rangeApiData, isLoading: rangeLoading } = useQuery({
+    queryKey: ["billing", rangeFrom, rangeTo],
+    queryFn: () => billingApi.list({ ...(rangeFrom ? { from: rangeFrom } : {}), ...(rangeTo ? { to: rangeTo } : {}) }),
     retry: false,
     refetchInterval: 30_000,
   });
-  const ALL_BILLS: any[] = (apiData?.bills ?? []).map((b: any) => ({
+  const RANGE_BILLS: any[] = (rangeApiData?.bills ?? []).map((b: any) => ({
     ...b, id: b.billId || b._id || b.id,
   }));
 
-  // ── date helpers ─────────────────────────────────────────────────────────
-  const withinDate = (bill: any) => {
-    if (!bill.createdAt) return true;
-    const d   = new Date(bill.createdAt);
-    const now = new Date();
-    if (dateFilter === "today") {
-      return d.toDateString() === now.toDateString();
-    }
-    if (dateFilter === "week") {
-      const ago = new Date(now); ago.setDate(now.getDate() - 7);
-      return d >= ago;
-    }
-    if (dateFilter === "month") {
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    if (dateFilter === "custom") {
-      const from = dateFrom ? new Date(dateFrom) : null;
-      const to   = dateTo   ? new Date(dateTo + "T23:59:59") : null;
-      if (from && d < from) return false;
-      if (to   && d > to)   return false;
-      return true;
-    }
-    return true; // "all"
-  };
+  // A search term is looked up on the backend across all dates (bill number or
+  // patient name), independent of the currently selected date range.
+  const trimmedSearch = search.trim();
+  const { data: searchApiData, isLoading: searchLoading } = useQuery({
+    queryKey: ["billing", "search", trimmedSearch],
+    queryFn: () => billingApi.list({ search: trimmedSearch }),
+    enabled: !!trimmedSearch,
+    retry: false,
+  });
+  const SEARCH_BILLS: any[] = (searchApiData?.bills ?? []).map((b: any) => ({
+    ...b, id: b.billId || b._id || b.id,
+  }));
+
+  const ALL_BILLS = trimmedSearch ? SEARCH_BILLS : RANGE_BILLS;
+  const isLoading = trimmedSearch ? searchLoading : rangeLoading;
 
   const filtered = ALL_BILLS.filter((b: any) => {
-    const q = search.toLowerCase();
-    const matchSearch  = !q || b.patientName?.toLowerCase().includes(q) || (b.id || "").toLowerCase().includes(q) || b.doctor?.toLowerCase().includes(q);
     const matchType    = typeFilter === "All" || b.type === typeFilter;
     const matchStatus  = statusFilter === "All" || b.status === statusFilter;
-    const matchDate    = withinDate(b);
     const matchStaff   = !staffFilter || b.createdBy === staffFilter;
-    return matchSearch && matchType && matchStatus && matchDate && matchStaff;
+    return matchType && matchStatus && matchStaff;
   });
 
-  const staffOptions = Array.from(new Set(ALL_BILLS.map((b) => b.createdBy).filter(Boolean))).sort();
+  const staffOptions = Array.from(new Set(RANGE_BILLS.map((b) => b.createdBy).filter(Boolean))).sort();
 
   // ── summary stats ─────────────────────────────────────────────────────────
+  // Always derived from RANGE_BILLS (not ALL_BILLS) so the cards stay pinned to
+  // the selected date range even while a search is active.
   // Drafts can carry a non-zero computed amount before they're finalized — exclude
   // them from financial totals so "Total Billed"/"Balance Due" only reflect real invoices.
-  const billableBills  = ALL_BILLS.filter((b) => b.status !== "Draft");
-  const totalBilled    = billableBills.reduce((a, b) => a + (b.amount || 0), 0);
-  const totalCollected = billableBills.reduce((a, b) => a + (b.paid   || 0), 0);
+  const billableBills  = RANGE_BILLS.filter((b) => b.status !== "Draft");
+  // Credit notes are BillingRecord rows with negative amount/paid (see billingService.returnBillItems)
+  // — netting them into Total Billed/Collected would understate real invoicing/collection, so they're
+  // reported separately as "Refund Amount" instead.
+  const invoiceBills   = billableBills.filter((b) => b.docType !== "CreditNote");
+  const creditNotes    = billableBills.filter((b) => b.docType === "CreditNote");
+  const totalBilled    = invoiceBills.reduce((a, b) => a + (b.amount || 0), 0);
+  const totalCollected = invoiceBills.reduce((a, b) => a + (b.paid   || 0), 0);
   const totalPending   = billableBills.reduce((a, b) => a + (b.balance || 0), 0);
+  const totalRefunded  = creditNotes.reduce((a, b) => a + Math.abs(b.paid || 0), 0);
   const collectionRate = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
   const todaysRevenue  = billableBills
     .filter((b) => new Date(b.createdAt).toDateString() === new Date().toDateString())
@@ -146,21 +178,62 @@ export default function BillingPage() {
     amount: billableBills.filter((b) => b.type === t).reduce((a, b) => a + (b.amount || 0), 0),
   }));
 
-  const markPaid = async (bill: any) => {
+  const cancelBill = async (bill: any) => {
     const ok = await confirm({
-      title: `Mark ${bill.id} as fully paid?`,
-      description: `₹${bill.amount?.toLocaleString()} will be recorded as paid in full.`,
-      confirmText: "Mark Paid",
+      title: `Cancel bill ${bill.id}?`,
+      description: "This will void the bill and restock any pharmacy items billed on it. This cannot be undone.",
+      confirmText: "Cancel Bill",
+      variant: "destructive",
     });
     if (!ok) return;
-    setPaying(bill.id);
+    setCancelling(bill.id);
     try {
-      await billingApi.update(bill._id || bill.id, { paid: bill.amount, status: "Paid" });
+      await billingApi.cancel(bill._id || bill.id);
       qc.invalidateQueries({ queryKey: ["billing"] });
+      toast({ title: "Bill cancelled" });
     } catch (err: any) {
-      toast({ variant: "destructive", title: "Payment failed", description: err.message || "Failed to mark bill as paid." });
+      toast({ variant: "destructive", title: "Cancel failed", description: err.message || "Failed to cancel bill." });
     } finally {
-      setPaying(null);
+      setCancelling(null);
+    }
+  };
+
+  const deleteDraft = async (bill: any) => {
+    const ok = await confirm({
+      title: `Delete draft ${bill.id}?`,
+      description: "This permanently removes the draft. This cannot be undone.",
+      confirmText: "Delete Draft",
+      variant: "destructive",
+    });
+    if (!ok) return;
+    setDeletingId(bill.id);
+    try {
+      await billingApi.deleteDraft(bill._id || bill.id);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+      toast({ title: "Draft deleted" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Delete failed", description: err.message || "Failed to delete draft." });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const unlockBillRow = async (bill: any) => {
+    const ok = await confirm({
+      title: `Unlock bill ${bill.id}?`,
+      description: "This bill is fully paid and locked to prevent accidental changes. Unlocking allows editing items, discount, and amount again.",
+      confirmText: "Unlock",
+    });
+    if (!ok) return;
+    setUnlockingId(bill.id);
+    try {
+      await billingApi.unlock(bill._id || bill.id);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+      toast({ title: "Bill unlocked" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Unlock failed", description: err.message || "Failed to unlock bill." });
+    } finally {
+      setUnlockingId(null);
     }
   };
 
@@ -211,11 +284,12 @@ export default function BillingPage() {
       </div>
 
       {/* ── Summary cards ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           { label: "Total Billed",    value: formatCurrency(totalBilled),    color: "text-foreground",  bg: "bg-muted",      icon: IndianRupee },
           { label: "Collected",       value: formatCurrency(totalCollected), color: "text-green-600",  bg: "bg-green-50",   icon: CheckCircle2 },
           { label: "Balance Due",     value: formatCurrency(totalPending),   color: "text-amber-600",  bg: "bg-amber-50",   icon: Clock },
+          { label: "Refund Amount",   value: formatCurrency(totalRefunded),  color: "text-red-600",    bg: "bg-red-50",     icon: Undo2 },
           { label: "Collection Rate", value: `${collectionRate}%`,           color: "text-teal-600",   bg: "bg-teal-50",    icon: TrendingUp },
         ].map((s) => (
           <Card key={s.label}>
@@ -308,12 +382,13 @@ export default function BillingPage() {
           {isAdmin ? (
             <>
               {staffReport.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   {[
                     { label: "Staff Members",   value: String(staffReport.length),                                                                              color: "text-foreground",  bg: "bg-muted" },
                     { label: "Total Billed",    value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0)),                color: "text-foreground",  bg: "bg-muted" },
                     { label: "Total Collected", value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0)),                color: "text-green-600",  bg: "bg-green-50" },
                     { label: "Cash Received",   value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0)),                color: "text-teal-600",   bg: "bg-teal-50" },
+                    { label: "Refund Amount",   value: formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalRefunded || 0), 0)),                color: "text-red-600",    bg: "bg-red-50" },
                   ].map((s) => (
                     <Card key={s.label}>
                       <CardContent className="p-4">
@@ -342,7 +417,7 @@ export default function BillingPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b bg-muted/40">
-                            {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Payments #", "Cash Received", ""].map((h, i) => (
+                            {["#", "Staff Name", "Bills Created", "Total Billed", "Collected", "Refunded", "Payments #", "Cash Received", ""].map((h, i) => (
                               <th key={i} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i === 0 || i === 1 ? "text-left" : "text-right"}`}>{h}</th>
                             ))}
                           </tr>
@@ -362,6 +437,7 @@ export default function BillingPage() {
                                   <td className="py-3 px-4 text-right">{row.billsCreated}</td>
                                   <td className="py-3 px-4 text-right font-medium">{formatCurrencyFull(row.totalBilled)}</td>
                                   <td className="py-3 px-4 text-right text-green-600 font-medium">{formatCurrencyFull(row.totalPaid)}</td>
+                                  <td className="py-3 px-4 text-right text-red-600 font-medium">{formatCurrencyFull(row.totalRefunded || 0)}</td>
                                   <td className="py-3 px-4 text-right">{row.paymentsCount}</td>
                                   <td className="py-3 px-4 text-right text-teal-600 font-medium">{formatCurrencyFull(row.totalReceived)}</td>
                                   <td className="py-3 px-4 text-right">
@@ -379,7 +455,7 @@ export default function BillingPage() {
                                 {isExpanded && activeModePairs.length > 0 && (
                                   <tr className="bg-muted/10 border-b">
                                     <td />
-                                    <td colSpan={7} className="py-2 px-4 pb-3">
+                                    <td colSpan={8} className="py-2 px-4 pb-3">
                                       <div className="flex flex-wrap gap-x-5 gap-y-1 pl-2 border-l-2 border-muted-foreground/20">
                                         {activeModePairs.map(({ mode, amount }) => (
                                           <div key={mode} className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -399,6 +475,7 @@ export default function BillingPage() {
                             <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.billsCreated  || 0), 0)}</td>
                             <td className="py-3 px-4 text-right">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalBilled   || 0), 0))}</td>
                             <td className="py-3 px-4 text-right text-green-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalPaid     || 0), 0))}</td>
+                            <td className="py-3 px-4 text-right text-red-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalRefunded || 0), 0))}</td>
                             <td className="py-3 px-4 text-right">{staffReport.reduce((a: number, r: any) => a + (r.paymentsCount || 0), 0)}</td>
                             <td className="py-3 px-4 text-right text-teal-600">{formatCurrencyFull(staffReport.reduce((a: number, r: any) => a + (r.totalReceived || 0), 0))}</td>
                             <td />
@@ -431,12 +508,13 @@ export default function BillingPage() {
                 return (
                   <>
                     <p className="text-xs text-muted-foreground -mt-1">Your billing summary for the selected date range.</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                       {[
                         { label: "Bills Created",   value: String(myRow.billsCreated || 0),          color: "text-foreground",  bg: "bg-muted" },
                         { label: "Total Billed",    value: formatCurrencyFull(myRow.totalBilled || 0),    color: "text-foreground",  bg: "bg-muted" },
                         { label: "Total Collected", value: formatCurrencyFull(myRow.totalPaid || 0),      color: "text-green-600",   bg: "bg-green-50" },
                         { label: "Cash Received",   value: formatCurrencyFull(myRow.totalReceived || 0),  color: "text-teal-600",    bg: "bg-teal-50" },
+                        { label: "Refund Amount",   value: formatCurrencyFull(myRow.totalRefunded || 0),  color: "text-red-600",     bg: "bg-red-50" },
                       ].map((s) => (
                         <Card key={s.label}>
                           <CardContent className="p-4">
@@ -570,7 +648,7 @@ export default function BillingPage() {
             </Select>
           )}
           <div className="flex gap-1.5 flex-wrap">
-            {["All","Draft","Paid","Partial","Pending","Claimed"].map((s) => (
+            {["All","Draft","Paid","Partial","Pending","Claimed","Cancelled"].map((s) => (
               <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" className="h-9"
                 onClick={() => setStatusFilter(s)}>
                 {s}
@@ -600,17 +678,22 @@ export default function BillingPage() {
         )}
 
         {filtered.map((bill) => {
-          const isOpen     = expandedId === bill.id;
-          const paidPct    = bill.amount > 0 ? Math.min(100, Math.round(((bill.paid || 0) / bill.amount) * 100)) : 0;
-          const billDate   = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+          const isOpen       = expandedId === bill.id;
+          const isCreditNote = bill.docType === "CreditNote";
+          const paidPct      = bill.amount > 0 ? Math.min(100, Math.round(((bill.paid || 0) / bill.amount) * 100)) : 0;
+          const billDate     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+          // amount is rounded to the nearest rupee (billingService.calcAmount) while items/discount
+          // aren't — this is that adjustment, matching the same formula used in print.ts's _billMeta.
+          const itemsSubtotal = (bill.items || []).reduce((s: number, it: any) => s + (it.total || 0), 0);
+          const roundOff      = (bill.amount || 0) - Math.max(0, itemsSubtotal - (bill.discount || 0));
 
           return (
-            <Card key={bill.id} className="hover:shadow-sm transition-shadow">
+            <Card key={bill.id} className={`hover:shadow-sm transition-shadow ${isCreditNote ? "border-red-200" : ""}`}>
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                   {/* Icon */}
-                  <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center shrink-0">
-                    <CreditCard className="h-5 w-5 text-teal-600" />
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isCreditNote ? "bg-red-50" : "bg-teal-50"}`}>
+                    {isCreditNote ? <Undo2 className="h-5 w-5 text-red-600" /> : <CreditCard className="h-5 w-5 text-teal-600" />}
                   </div>
 
                   {/* Main info */}
@@ -618,7 +701,11 @@ export default function BillingPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-sm">{bill.patientName}</span>
                       <span className="text-xs font-mono text-muted-foreground bg-muted px-1.5 rounded">{bill.id}</span>
-                      <Badge className={`text-xs ${STATUS_COLORS[bill.status] ?? "bg-gray-100"}`}>{bill.status}</Badge>
+                      {isCreditNote ? (
+                        <Badge className="text-xs bg-red-100 text-red-700">Credit Note</Badge>
+                      ) : (
+                        <Badge className={`text-xs ${STATUS_COLORS[bill.status] ?? "bg-gray-100"}`}>{bill.status}</Badge>
+                      )}
                       <Badge className="text-xs bg-muted text-muted-foreground">{bill.type || "OPD"}</Badge>
                       {bill.doctor && (
                         <span className="text-xs text-muted-foreground hidden sm:inline">· {bill.doctor}</span>
@@ -632,24 +719,27 @@ export default function BillingPage() {
                         {bill.paymentMode}
                       </span>
                       <span>{bill.payer}</span>
+                      {isCreditNote && bill.originalBillNo && (
+                        <span className="text-red-600">· Original: {bill.originalBillNo}</span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-5 mt-2 flex-wrap">
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</div>
-                        <div className="text-sm font-bold">{formatCurrency(bill.amount)}</div>
+                        <div className={`text-sm font-bold ${isCreditNote ? "text-red-600" : ""}`}>{formatCurrencyFull(bill.amount)}</div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Paid</div>
-                        <div className="text-sm font-semibold text-green-600">{formatCurrency(bill.paid)}</div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{isCreditNote ? "Refunded" : "Paid"}</div>
+                        <div className={`text-sm font-semibold ${isCreditNote ? "text-red-600" : "text-green-600"}`}>{formatCurrencyFull(bill.paid)}</div>
                       </div>
-                      {bill.balance > 0 && (
+                      {!isCreditNote && bill.balance > 0 && (
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Balance</div>
-                          <div className="text-sm font-semibold text-amber-600">{formatCurrency(bill.balance)}</div>
+                          <div className="text-sm font-semibold text-amber-600">{formatCurrencyFull(bill.balance)}</div>
                         </div>
                       )}
-                      {bill.amount > 0 && (
+                      {!isCreditNote && bill.amount > 0 && (
                         <div className="flex-1 min-w-24 max-w-48">
                           <Progress value={paidPct} className="h-1.5" />
                           <div className="text-[10px] text-muted-foreground mt-0.5">{paidPct}% collected</div>
@@ -665,26 +755,56 @@ export default function BillingPage() {
                         onClick={() => printBill(bill)}>
                         <Printer className="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Edit"
-                        onClick={() => openEdit(bill)}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
+                      {!isCreditNote && !bill.isLocked && (
+                        <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Edit"
+                          onClick={() => openEdit(bill)}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                      )}
+                      {!isCreditNote && bill.isLocked && isAdmin && (
+                        <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Unlock to edit"
+                          disabled={unlockingId === bill.id} onClick={() => unlockBillRow(bill)}>
+                          <Lock className="h-3 w-3" />
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" className="h-7 w-7 p-0"
                         title={isOpen ? "Collapse" : "View items"}
                         onClick={() => setExpandedId(isOpen ? null : bill.id)}>
                         {isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       </Button>
                     </div>
-                    {(bill.status === "Pending" || bill.status === "Partial") && (
+                    {!isCreditNote && (bill.status === "Pending" || bill.status === "Partial") && (
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-7 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 px-2"
                           onClick={() => openPayment(bill)}>
                           Record Pay
                         </Button>
                         <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 px-2"
-                          disabled={paying === bill.id} onClick={() => markPaid(bill)}>
-                          {paying === bill.id ? "…" : "Full Pay"}
+                          onClick={() => setFullPayBill(bill)}>
+                          Full Pay
                         </Button>
+                      </div>
+                    )}
+                    {!isCreditNote && canCancelReturn && bill.status === "Draft" && (
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 px-2 gap-1"
+                          disabled={deletingId === bill.id} onClick={() => deleteDraft(bill)}>
+                          <Trash2 className="h-3 w-3" /> {deletingId === bill.id ? "…" : "Delete"}
+                        </Button>
+                      </div>
+                    )}
+                    {!isCreditNote && canCancelReturn && bill.status !== "Cancelled" && bill.status !== "Draft" && (
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2 gap-1"
+                          onClick={() => setReturnBill(bill)}>
+                          <Undo2 className="h-3 w-3" /> Return
+                        </Button>
+                        {bill.paid === 0 && (
+                          <Button size="sm" variant="outline" className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 px-2 gap-1"
+                            disabled={cancelling === bill.id} onClick={() => cancelBill(bill)}>
+                            <Ban className="h-3 w-3" /> {cancelling === bill.id ? "…" : "Cancel"}
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -723,8 +843,24 @@ export default function BillingPage() {
                             Discount: −₹{bill.discount?.toLocaleString()}
                           </div>
                         )}
+                        {roundOff !== 0 && (
+                          <div className="text-xs text-right text-muted-foreground mt-1 px-1">
+                            Round Off: {roundOff > 0 ? "+" : "−"}₹{Math.abs(roundOff).toFixed(2)}
+                          </div>
+                        )}
                         {bill.notes && (
                           <p className="text-xs text-muted-foreground mt-2 px-1 italic">Note: {bill.notes}</p>
+                        )}
+                        {isCreditNote && (
+                          <p className="text-xs text-muted-foreground mt-2 px-1">
+                            Processed by {bill.createdBy}{bill.notes ? ` — ${bill.notes}` : ""}
+                          </p>
+                        )}
+                        {bill.status === "Cancelled" && (
+                          <p className="text-xs text-muted-foreground mt-2 px-1">
+                            Cancelled by {bill.cancelledBy}{bill.cancelledAt ? ` on ${new Date(bill.cancelledAt).toLocaleDateString("en-IN")}` : ""}
+                            {bill.cancelReason ? ` — ${bill.cancelReason}` : ""}
+                          </p>
                         )}
                         <div className="mt-2 flex justify-end">
                           <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
@@ -748,9 +884,19 @@ export default function BillingPage() {
       <AppErrorBoundary>
         <BillingModal
           open={modalOpen}
-          onClose={() => { setModalOpen(false); setEditBill(null); setPayOnly(false); }}
+          onClose={() => setModalOpen(false)}
           existing={editBill}
           payOnly={payOnly}
+        />
+        <ReturnBillModal
+          open={!!returnBill}
+          onClose={() => setReturnBill(null)}
+          bill={returnBill}
+        />
+        <FullPayModal
+          open={!!fullPayBill}
+          onClose={() => setFullPayBill(null)}
+          bill={fullPayBill}
         />
       </AppErrorBoundary>
     </div>

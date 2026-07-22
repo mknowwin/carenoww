@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import {
   Settings, User, Bell, Shield, Brain, Building2,
-  Monitor, Globe, Key, Database, CheckCircle2, Users, Plus, Trash2,
+  Monitor, Globe, Key, KeyRound, Database, CheckCircle2, Users, Plus, Trash2,
   Stethoscope, ChevronDown, ChevronRight, Clock, CalendarDays, Pencil,
   X, Loader2, UserPlus, Mic, FlaskConical, Pill, CreditCard, UserCheck, HeartPulse,
   Upload, ImageIcon, IndianRupee, Printer,
@@ -492,6 +492,16 @@ function StaffSection() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [pwForm, setPwForm] = useState({ password: "", confirm: "" });
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState("");
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", department: "", role: "" as StaffRole | "" });
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
+
   const { data: usersData, isLoading } = useQuery({
     queryKey: ["users"],
     queryFn: usersApi.list,
@@ -507,6 +517,61 @@ function StaffSection() {
     setAdding(false);
     setError("");
     setSuccess("");
+    setResettingId(null);
+    setEditingId(null);
+  };
+
+  const openReset = (id: string) => {
+    setEditingId(null);
+    setResettingId(id);
+    setPwForm({ password: "", confirm: "" });
+    setPwError("");
+  };
+
+  const openEdit = (u: any) => {
+    setResettingId(null);
+    setEditingId(u._id);
+    setEditForm({ name: u.name ?? "", department: u.department ?? "", role: u.role });
+    setEditError("");
+  };
+
+  const submitEdit = async (e: React.FormEvent, id: string) => {
+    e.preventDefault();
+    setEditError("");
+    if (!editForm.name.trim()) { setEditError("Name is required"); return; }
+    setEditLoading(true);
+    try {
+      await usersApi.update(id, {
+        name: editForm.name.trim(),
+        department: editForm.department,
+        role: editForm.role,
+      });
+      qc.invalidateQueries({ queryKey: ["users"] });
+      toast({ title: "Staff updated", description: `Details saved for ${editForm.name.trim()}.` });
+      setEditingId(null);
+    } catch (err: any) {
+      setEditError(err.message || "Failed to update staff details");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const submitReset = async (e: React.FormEvent, id: string, name: string) => {
+    e.preventDefault();
+    setPwError("");
+    if (pwForm.password.length < 6) { setPwError("Password must be at least 6 characters"); return; }
+    if (pwForm.password !== pwForm.confirm) { setPwError("Passwords do not match"); return; }
+    setPwLoading(true);
+    try {
+      await usersApi.update(id, { password: pwForm.password });
+      toast({ title: "Password reset", description: `New password set for ${name}.` });
+      setResettingId(null);
+      setPwForm({ password: "", confirm: "" });
+    } catch (err: any) {
+      setPwError(err.message || "Failed to reset password");
+    } finally {
+      setPwLoading(false);
+    }
   };
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -690,27 +755,168 @@ function StaffSection() {
           {roleUsers.map((u: any) => (
             <div
               key={u._id}
-              className="flex items-center gap-3 p-3 rounded-xl border border-border bg-background hover:shadow-sm transition-shadow"
+              className="rounded-xl border border-border bg-background hover:shadow-sm transition-shadow"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${ROLE_COLORS[activeTab]}`}>
-                {u.name?.[0]?.toUpperCase() ?? "U"}
+              <div className="flex items-center gap-3 p-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${ROLE_COLORS[activeTab]}`}>
+                  {u.name?.[0]?.toUpperCase() ?? "U"}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold">{u.name}</p>
+                  <p className="text-xs text-muted-foreground">{u.email}</p>
+                  {u.department && (
+                    <p className="text-xs text-muted-foreground mt-0.5">{u.department}</p>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground shrink-0"
+                  onClick={() => editingId === u._id ? setEditingId(null) : openEdit(u)}
+                  title="Edit Details"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground shrink-0"
+                  onClick={() => resettingId === u._id ? setResettingId(null) : openReset(u._id)}
+                  title="Reset Password"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                  onClick={() => deactivate(u._id, u.name)}
+                  title="Deactivate"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">{u.name}</p>
-                <p className="text-xs text-muted-foreground">{u.email}</p>
-                {u.department && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{u.department}</p>
-                )}
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
-                onClick={() => deactivate(u._id, u.name)}
-                title="Deactivate"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+
+              {editingId === u._id && (
+                <form
+                  onSubmit={(e) => submitEdit(e, u._id)}
+                  className="bg-muted/30 border-t border-border rounded-b-xl p-3 space-y-3"
+                >
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Edit Details — {u.name}
+                  </p>
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Full Name *</Label>
+                      <Input
+                        value={editForm.name}
+                        onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="Full name"
+                        className="h-8 text-sm"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Department</Label>
+                      <Input
+                        value={editForm.department}
+                        onChange={(e) => setEditForm((f) => ({ ...f, department: e.target.value }))}
+                        placeholder="e.g. Emergency, ICU"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Role</Label>
+                      <Select
+                        value={editForm.role}
+                        onValueChange={(v) => setEditForm((f) => ({ ...f, role: v as StaffRole }))}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STAFF_ROLES.map((r) => (
+                            <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {editError && (
+                    <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{editError}</p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button type="submit" size="sm" disabled={editLoading}>
+                      {editLoading
+                        ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Saving…</>
+                        : "Save Changes"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditingId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {resettingId === u._id && (
+                <form
+                  onSubmit={(e) => submitReset(e, u._id, u.name)}
+                  className="bg-muted/30 border-t border-border rounded-b-xl p-3 space-y-3"
+                >
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Reset Password — {u.name}
+                  </p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">New Password *</Label>
+                      <Input
+                        type="password"
+                        value={pwForm.password}
+                        onChange={(e) => setPwForm((f) => ({ ...f, password: e.target.value }))}
+                        placeholder="Min 6 characters"
+                        className="h-8 text-sm"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Confirm Password *</Label>
+                      <Input
+                        type="password"
+                        value={pwForm.confirm}
+                        onChange={(e) => setPwForm((f) => ({ ...f, confirm: e.target.value }))}
+                        placeholder="Re-enter password"
+                        className="h-8 text-sm"
+                        required
+                      />
+                    </div>
+                  </div>
+                  {pwError && (
+                    <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{pwError}</p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button type="submit" size="sm" disabled={pwLoading}>
+                      {pwLoading
+                        ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Saving…</>
+                        : "Save New Password"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setResettingId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              )}
             </div>
           ))}
         </CardContent>

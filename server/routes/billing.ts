@@ -8,7 +8,7 @@ router.use(authMiddleware);
 
 // ── GET /api/billing ──────────────────────────────────────────────────────────
 router.get("/", requireRole("admin", "finance", "receptionist", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
-  const data = await billingService.listBills(req.user!.tenantId, { id: req.user!.id, role: req.user!.role }, req.query as Record<string, string>);
+  const data = await billingService.listBills(req.user!.tenantId, { id: req.user!.id, role: req.user!.role }, req.user!.timezone, req.query as Record<string, string>);
   res.json({ success: true, data });
 }));
 
@@ -30,6 +30,12 @@ router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pha
   res.json({ success: true, data: bill });
 }));
 
+// ── DELETE /api/billing/:id — permanently delete a draft bill ────────────────
+router.delete("/:id", requireRole("admin", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const data = await billingService.deleteDraftBill(req.user!.tenantId, req.params.id);
+  res.json({ success: true, data });
+}));
+
 // ── POST /api/billing/:id/payments — record a payment installment ─────────────
 router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
   const updated = await billingService.postPayment(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
@@ -40,6 +46,24 @@ router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nu
 router.post("/:id/unlock", requireRole("admin", "finance"), asyncHandler(async (req: AuthRequest, res) => {
   const bill = await billingService.unlockBill(req.user!.tenantId, req.user!.name, req.params.id);
   res.json({ success: true, data: bill });
+}));
+
+// ── POST /api/billing/:id/cancel — void a bill (only if unpaid) ──────────────
+router.post("/:id/cancel", requireRole("admin", "finance", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const bill = await billingService.cancelBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body?.reason);
+  res.json({ success: true, data: bill });
+}));
+
+// ── POST /api/billing/:id/return — return/refund one or more line items ──────
+router.post("/:id/return", requireRole("admin", "finance", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const result = await billingService.returnBillItems(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
+  res.json({ success: true, data: result });
+}));
+
+// ── GET /api/billing/:id/credit-notes — credit notes linked to a bill ────────
+router.get("/:id/credit-notes", requireRole("admin", "finance", "receptionist", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const data = await billingService.listCreditNotes(req.user!.tenantId, req.params.id);
+  res.json({ success: true, data });
 }));
 
 // ── POST /api/billing/:id/pre-auth — submit insurance pre-authorisation ───────

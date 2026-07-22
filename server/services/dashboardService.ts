@@ -15,6 +15,21 @@ const WARD_CAPACITY: Record<string, number> = {
   "Pediatric": 20,
 };
 
+// Revenue for a date range, keyed on when cash actually moved (payments[].paidAt)
+// rather than the bill's own creation date. A late payment recorded today on an
+// old bill correctly credits today, not the old bill's month — and a Credit
+// Note's refund entry (negative amount, paidAt = today) nets out today's
+// collection the same way, with no separate "returns" handling needed.
+async function revenueForRange(tenantId: string, start: Date, end: Date) {
+  const agg = await BillingRecord.aggregate([
+    { $match: { tenantId } },
+    { $unwind: "$payments" },
+    { $match: { "payments.paidAt": { $gte: start, $lt: end } } },
+    { $group: { _id: null, total: { $sum: "$payments.amount" } } },
+  ]);
+  return agg[0]?.total || 0;
+}
+
 export async function getMetrics(tenantId: string, tz: string) {
   const today = todayInTz(tz);
 
@@ -43,16 +58,10 @@ export async function getMetrics(tenantId: string, tz: string) {
   const nextMonth  = todayM === 12 ? `${todayY + 1}-01-01` : `${todayY}-${String(todayM + 1).padStart(2, "0")}-01`;
   const monthEnd   = startOfDayUtc(nextMonth, tz);
 
-  // Revenue aggregations — today and current month, both using bill `date` field
-  const [todayRevAgg, monthRevAgg] = await Promise.all([
-    BillingRecord.aggregate([
-      { $match: { tenantId, date: { $gte: todayStart, $lt: todayEnd } } },
-      { $group: { _id: null, total: { $sum: "$paid" } } },
-    ]),
-    BillingRecord.aggregate([
-      { $match: { tenantId, date: { $gte: monthStart, $lt: monthEnd } } },
-      { $group: { _id: null, total: { $sum: "$paid" } } },
-    ]),
+  // Revenue — today and current month, keyed on payments[].paidAt (see revenueForRange)
+  const [revenueToday, revenueMonth] = await Promise.all([
+    revenueForRange(tenantId, todayStart, todayEnd),
+    revenueForRange(tenantId, monthStart, monthEnd),
   ]);
 
   // Bed occupancy rate from live IPD admissions
@@ -70,8 +79,8 @@ export async function getMetrics(tenantId: string, tz: string) {
     pendingClaims,
     criticalAlerts,
     bedOccupancyRate,
-    revenueToday: todayRevAgg[0]?.total || 0,
-    revenueMonth: monthRevAgg[0]?.total || 0,
+    revenueToday,
+    revenueMonth,
     surgeriesThisWeek: 0,
     avgLOS: 4.2,
   };
@@ -143,11 +152,13 @@ export async function getRevenueTrend(tenantId: string, tz: string) {
   const yearStart = startOfDayUtc(`${currentYear}-01-01`, tz);
   const yearEnd   = startOfDayUtc(`${Number(currentYear) + 1}-01-01`, tz);
 
-  // Single aggregation grouped by bill date month + type (1 query instead of 4×months)
-  // Uses `date` (business bill date) not `createdAt` (insert timestamp)
+  // Grouped by the month each payment/refund actually happened (payments[].paidAt),
+  // not the bill's own creation date — see revenueForRange for why.
   const rawTrend = await BillingRecord.aggregate([
-    { $match: { tenantId, date: { $gte: yearStart, $lt: yearEnd } } },
-    { $group: { _id: { month: { $month: "$date" }, type: "$type" }, total: { $sum: "$paid" } } },
+    { $match: { tenantId } },
+    { $unwind: "$payments" },
+    { $match: { "payments.paidAt": { $gte: yearStart, $lt: yearEnd } } },
+    { $group: { _id: { month: { $month: "$payments.paidAt" }, type: "$type" }, total: { $sum: "$payments.amount" } } },
   ]);
 
   // Build month buckets Jan → current month

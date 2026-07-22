@@ -297,6 +297,7 @@ export type DrugHistoryEntry =
 // ── Billing ───────────────────────────────────────────────────────────────────
 export interface BillItem {
   _id?: string;
+  itemId?: string;
   description: string;
   category: "Consultation" | "Lab" | "Pharmacy" | "Procedure" | "Room" | "Other";
   quantity: number;
@@ -308,13 +309,15 @@ export interface BillItem {
   sgst?: number;
   igst?: number;
   taxableAmount?: number;
+  drugId?: string;
+  batchNo?: string;
 }
 
 export interface PaymentEntry {
   _id?: string;
   paymentId?: string;
   amount: number;
-  paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Advance-Adjustment";
+  paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Advance-Adjustment" | "Adjustment";
   payer: string;
   transactionRef?: string;
   receivedBy?: string;
@@ -367,14 +370,21 @@ export interface BillingRecord {
   totalAdvance?: number;
   advances?: AdvanceEntry[];
   payments?: PaymentEntry[];
-  status: "Draft" | "Paid" | "Partial" | "Pending" | "Claimed";
+  status: "Draft" | "Paid" | "Partial" | "Pending" | "Claimed" | "Cancelled";
   payer: string;
-  paymentMode?: "Cash" | "Card" | "UPI" | "Insurance" | "Online";
+  paymentMode?: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Adjustment";
   type: string;
   notes?: string;
   createdBy?: string;
   createdById?: string;
   isLocked?: boolean;
+  cancelledBy?: string;
+  cancelledById?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
+  docType?: "Bill" | "CreditNote";
+  originalBillId?: string;
+  originalBillNo?: string;
   insurance?: InsuranceClaim;
   totalCgst?: number;
   totalSgst?: number;

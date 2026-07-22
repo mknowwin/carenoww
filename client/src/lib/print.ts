@@ -180,12 +180,23 @@ ${body}
 
 function _billMeta(bill: any, clinic: ClinicInfo, hasGst: boolean | string | undefined) {
   const subtotal = ((bill.items || []) as any[]).reduce((s: number, i: any) => s + (i.total || 0), 0);
+  // `bill.discount` is already the resolved discount *amount* (client sends discountAmt
+  // regardless of Flat/Percent — see BillingModal.tsx), matching what the "Discount" row
+  // below displays. `amount` is rounded to the nearest rupee (billingService.calcAmount)
+  // while subtotal/discount are not — roundOff is that adjustment, shown as its own line
+  // so the printed total is traceable back to the line items instead of looking off by a
+  // few paise.
+  const roundOff = (bill.amount || 0) - Math.max(0, subtotal - (bill.discount || 0));
   const gstSummary = hasGst ? `
     <tr><td>Taxable Amount</td><td class="tr">₹${(bill.taxableAmount || subtotal).toLocaleString()}</td></tr>
     ${bill.totalCgst > 0 ? `<tr><td>CGST</td><td class="tr">₹${bill.totalCgst.toLocaleString()}</td></tr>` : ""}
     ${bill.totalSgst > 0 ? `<tr><td>SGST</td><td class="tr">₹${bill.totalSgst.toLocaleString()}</td></tr>` : ""}
     ${bill.totalIgst > 0 ? `<tr><td>IGST</td><td class="tr">₹${bill.totalIgst.toLocaleString()}</td></tr>` : ""}` : "";
-  return { subtotal, gstSummary };
+  return { subtotal, roundOff, gstSummary };
+}
+
+function _roundOffLabel(roundOff: number): string {
+  return `${roundOff < 0 ? "−" : "+"}₹${Math.abs(roundOff).toFixed(2)}`;
 }
 
 // ── Payment history — used across all invoice styles to show who was paid what, when ──
@@ -207,7 +218,7 @@ function _paymentRows(bill: any) {
 // ── Style 1: Classic ──────────────────────────────────────────────────────────
 function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
   const docLabel = hasGst ? "Tax Invoice" : undefined;
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
 
   const hasBatch = items.some((i: any) => i.batchNo);
   const itemRows = items.map((item, idx) => `
@@ -281,6 +292,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
         <tr><td>Subtotal</td><td class="tr">₹${subtotal.toLocaleString()}</td></tr>
         ${bill.discount > 0 ? `<tr><td>Discount</td><td class="tr" style="color:#d97706;">−₹${bill.discount.toLocaleString()}</td></tr>` : ""}
         ${gstSummary}
+        ${roundOff !== 0 ? `<tr><td>Round Off</td><td class="tr">${_roundOffLabel(roundOff)}</td></tr>` : ""}
         <tr class="tot-row"><td>Total</td><td class="tr">₹${(bill.amount || 0).toLocaleString()}</td></tr>
         <tr class="paid-row"><td>Amount Paid</td><td class="tr">₹${(bill.paid || 0).toLocaleString()}</td></tr>
         ${balance > 0 ? `<tr class="bal-row"><td>Balance Due</td><td class="tr">₹${balance.toLocaleString()}</td></tr>` : ""}
@@ -297,7 +309,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
 // ── Style 2: Modern ───────────────────────────────────────────────────────────
 function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
   const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join("  ·  ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:40px;width:auto;object-fit:contain;margin-bottom:4px;display:block;" />` : "";
 
@@ -396,6 +408,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
         <tr><td style="padding:6px 12px;font-size:12px;">Subtotal</td><td style="padding:6px 12px;text-align:right;font-size:12px;">₹${subtotal.toLocaleString()}</td></tr>
         ${bill.discount > 0 ? `<tr><td style="padding:6px 12px;font-size:12px;color:#d97706;">Discount</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#d97706;">−₹${bill.discount.toLocaleString()}</td></tr>` : ""}
         ${gstSummary ? gstSummary.replace(/<tr>/g, '<tr>').replace(/class="tr"/g, 'style="text-align:right;"') : ""}
+        ${roundOff !== 0 ? `<tr><td style="padding:6px 12px;font-size:12px;">Round Off</td><td style="padding:6px 12px;text-align:right;font-size:12px;">${_roundOffLabel(roundOff)}</td></tr>` : ""}
         <tr style="background:#1a5c4a;"><td style="padding:8px 12px;color:#fff;font-weight:800;font-size:14px;">Total</td><td style="padding:8px 12px;text-align:right;color:#fff;font-weight:800;font-size:14px;">₹${(bill.amount || 0).toLocaleString()}</td></tr>
         <tr><td style="padding:6px 12px;font-size:12px;color:#15803d;font-weight:600;">Paid</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#15803d;font-weight:600;">₹${(bill.paid || 0).toLocaleString()}</td></tr>
         ${balance > 0 ? `<tr><td style="padding:6px 12px;font-size:12px;color:#dc2626;font-weight:600;">Balance Due</td><td style="padding:6px 12px;text-align:right;font-size:12px;color:#dc2626;font-weight:600;">₹${balance.toLocaleString()}</td></tr>` : ""}
@@ -412,7 +425,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
 
 // ── Style 3: Minimal ──────────────────────────────────────────────────────────
 function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
   const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join("  ·  ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:44px;width:auto;object-fit:contain;margin-bottom:6px;display:block;" />` : "";
 
@@ -494,6 +507,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
         ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
         ${hasGst && bill.totalCgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>CGST</span><span>₹${bill.totalCgst.toLocaleString()}</span></div>` : ""}
         ${hasGst && bill.totalSgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>SGST</span><span>₹${bill.totalSgst.toLocaleString()}</span></div>` : ""}
+        ${roundOff !== 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;color:#555;"><span>Round Off</span><span>${_roundOffLabel(roundOff)}</span></div>` : ""}
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #111;margin-top:2px;font-size:16px;font-weight:800;">
           <span>Total</span><span>₹${(bill.amount || 0).toLocaleString()}</span>
         </div>
@@ -514,6 +528,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
 // ── Style 4: Thermal / Slip (A5) ──────────────────────────────────────────────
 function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number): string {
+  const roundOff = (bill.amount || 0) - Math.max(0, subtotal - (bill.discount || 0));
   const sub = [clinic.phone, clinic.address].filter(Boolean).join(" · ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:36px;width:auto;object-fit:contain;display:block;margin:0 auto 4px;" />` : "";
 
@@ -576,6 +591,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
     <div style="border-top:1px dashed #333;padding-top:7px;font-size:11px;">
       ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
+      ${roundOff !== 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Round Off</span><span>${_roundOffLabel(roundOff)}</span></div>` : ""}
       <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;padding-bottom:5px;border-bottom:1px dashed #333;margin-bottom:5px;">
         <span>TOTAL</span><span>₹${(bill.amount || 0).toLocaleString()}</span>
       </div>
@@ -597,7 +613,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
 
 // ── Style 5: Compact (A5) ─────────────────────────────────────────────────────
 function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[], subtotal: number, balance: number, hasGst: boolean | string | undefined): string {
-  const { gstSummary } = _billMeta(bill, clinic, hasGst);
+  const { gstSummary, roundOff } = _billMeta(bill, clinic, hasGst);
   const sub = [clinic.phone, clinic.address, clinic.city].filter(Boolean).join(" · ");
   const logoHtml = clinic.logoUrl ? `<img src="${clinic.logoUrl}" alt="logo" style="height:32px;width:auto;object-fit:contain;" />` : "";
 
@@ -683,6 +699,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${bill.discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;color:#d97706;"><span>Discount</span><span>−₹${bill.discount.toLocaleString()}</span></div>` : ""}
       ${hasGst && bill.totalCgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>CGST</span><span>₹${bill.totalCgst.toLocaleString()}</span></div>` : ""}
       ${hasGst && bill.totalSgst > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>SGST</span><span>₹${bill.totalSgst.toLocaleString()}</span></div>` : ""}
+      ${roundOff !== 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;"><span>Round Off</span><span>${_roundOffLabel(roundOff)}</span></div>` : ""}
       <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;font-weight:800;border-top:2px solid #111;"><span>Total</span><span>₹${(bill.amount || 0).toLocaleString()}</span></div>
       <div style="display:flex;justify-content:space-between;padding:3px 0;color:#15803d;font-weight:600;"><span>Paid</span><span>₹${(bill.paid || 0).toLocaleString()}</span></div>
       ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;color:#dc2626;font-weight:600;"><span>Balance</span><span>₹${balance.toLocaleString()}</span></div>` : ""}
@@ -695,11 +712,83 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
     </div>`;
 }
 
+// ── Credit Note — a return's own printable document, distinct from an invoice.
+// Always uses one consistent layout regardless of the clinic's chosen invoice
+// style, since it's a different kind of document (a refund record referencing
+// an original bill), not just another way to print the same invoice.
+function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): string {
+  const items = (creditNote.items || []) as any[];
+  const returnAmount = Math.abs(creditNote.amount || 0);
+  const refundAmount = Math.abs(creditNote.paid || 0);
+  const hasBatch = items.some((i: any) => i.batchNo);
+
+  const itemRows = items.map((item, idx) => `
+    <tr>
+      <td class="tc" style="width:36px;">${idx + 1}</td>
+      <td><strong>${item.description}</strong></td>
+      <td style="width:90px;">${item.category}</td>
+      ${hasBatch ? `<td style="width:96px;font-family:monospace;font-size:11px;">${item.batchNo || "—"}</td>` : ""}
+      <td class="tc" style="width:44px;">${item.quantity}</td>
+      <td class="tr" style="width:76px;">₹${(item.unitPrice || 0).toLocaleString()}</td>
+      <td class="tr" style="width:88px;font-weight:600;">₹${(item.total || 0).toLocaleString()}</td>
+    </tr>`).join("");
+
+  return `
+    ${clinicHeader(clinic, "Credit Note")}
+    <div class="doc-row">
+      <div>
+        <div class="doc-title" style="color:#b91c1c;">CREDIT NOTE</div>
+        <div style="margin-top:4px;"><span class="badge" style="background:#fee2e2;color:#b91c1c;border-color:#fca5a5;">${creditNote.type || "OPD"}</span></div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:16px;font-weight:800;font-family:monospace;color:#b91c1c;">${creditNote.billId || "—"}</div>
+        <div>Date: ${date}</div>
+        <div style="margin-top:3px;font-size:11px;color:#888;">Ref. Invoice: <strong>${creditNote.originalBillNo || "—"}</strong></div>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="meta-item"><label>Patient Name</label><span>${creditNote.patientName || "—"}</span></div>
+      <div class="meta-item"><label>UHID</label><span>${creditNote.patientId || "—"}</span></div>
+      <div class="meta-item"><label>Payer</label><span>${creditNote.payer || "Self"}</span></div>
+      <div class="meta-item"><label>Refund Mode</label><span>${creditNote.paymentMode || "—"}</span></div>
+      <div class="meta-item"><label>Processed By</label><span>${creditNote.createdBy || "—"}</span></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th class="tc">#</th><th>Description</th><th>Category</th>
+          ${hasBatch ? `<th>Batch No</th>` : ""}
+          <th class="tc">Qty Returned</th>
+          <th class="tr">Rate</th><th class="tr">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="summary">
+      <table>
+        <tr class="tot-row"><td>Return Value</td><td class="tr">₹${returnAmount.toLocaleString()}</td></tr>
+        <tr class="paid-row"><td>Refund Issued</td><td class="tr">₹${refundAmount.toLocaleString()}</td></tr>
+        ${returnAmount > refundAmount ? `<tr><td style="color:#d97706;">Credited to Balance</td><td class="tr" style="color:#d97706;">₹${(returnAmount - refundAmount).toLocaleString()}</td></tr>` : ""}
+      </table>
+    </div>
+    ${creditNote.notes ? `<div class="notes"><strong>Reason for Return</strong>${creditNote.notes}</div>` : ""}
+    <div class="footer">
+      <p>This credit note reduces the value of invoice ${creditNote.originalBillNo || "—"} issued by ${clinic.name}.</p>
+      ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
+    </div>`;
+}
+
 // ── printBill — dispatches to style-specific builder ──────────────────────────
 export function printBill(bill: any, clinicOverride?: ClinicInfo) {
   const clinic   = clinicOverride ?? getStoredClinic();
   const style    = clinic.invoiceStyle || "classic";
   const date     = bill.createdAt ? new Date(bill.createdAt).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+
+  if (bill.docType === "CreditNote") {
+    open(`Credit Note ${bill.billId || bill.id}`, _bodyCreditNote(bill, clinic, date));
+    return;
+  }
+
   const items    = (bill.items || []) as any[];
   const subtotal = items.reduce((s: number, i: any) => s + (i.total || 0), 0);
   const balance  = (bill.amount || 0) - (bill.paid || 0);
