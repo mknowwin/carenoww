@@ -71,7 +71,8 @@ export default function BillingPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "finance";
-  const canCancelReturn = isAdmin || user?.role === "pharmacy_admin";
+  const canDeleteDraft = isAdmin || user?.role === "pharmacy_admin";
+  const canCancelReturn = canDeleteDraft || user?.role === "pharmacist";
 
   const [search,      setSearch]      = useState("");
   const [typeFilter,  setTypeFilter]  = useState("All");
@@ -785,7 +786,7 @@ export default function BillingPage() {
                         </Button>
                       </div>
                     )}
-                    {!isCreditNote && canCancelReturn && bill.status === "Draft" && (
+                    {!isCreditNote && canDeleteDraft && bill.status === "Draft" && (
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-7 text-xs text-red-700 border-red-300 hover:bg-red-50 px-2 gap-1"
                           disabled={deletingId === bill.id} onClick={() => deleteDraft(bill)}>

@@ -49,13 +49,13 @@ router.post("/:id/unlock", requireRole("admin", "finance"), asyncHandler(async (
 }));
 
 // ── POST /api/billing/:id/cancel — void a bill (only if unpaid) ──────────────
-router.post("/:id/cancel", requireRole("admin", "finance", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+router.post("/:id/cancel", requireRole("admin", "finance", "pharmacy_admin", "pharmacist"), asyncHandler(async (req: AuthRequest, res) => {
   const bill = await billingService.cancelBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body?.reason);
   res.json({ success: true, data: bill });
 }));
 
 // ── POST /api/billing/:id/return — return/refund one or more line items ──────
-router.post("/:id/return", requireRole("admin", "finance", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+router.post("/:id/return", requireRole("admin", "finance", "pharmacy_admin", "pharmacist"), asyncHandler(async (req: AuthRequest, res) => {
   const result = await billingService.returnBillItems(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
   res.json({ success: true, data: result });
 }));
