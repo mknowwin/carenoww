@@ -13,7 +13,7 @@ import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
-import { dashboard as dashApi, appointments as apptApi, patients as patientsApi, billing as billingApi } from "@/lib/api";
+import { dashboard as dashApi, appointments as apptApi, patients as patientsApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatCurrency, todayInTz, currentMonthInTz } from "@/lib/utils";
 import { printReferralStats } from "@/lib/print";
@@ -41,44 +41,14 @@ export default function DashboardPage() {
   const { data: highRiskData, isLoading: highRiskLoading } = useQuery({ queryKey: ["patients-highrisk"],   queryFn: () => patientsApi.list({ riskLevel: "Critical", limit: "10" }), retry: false });
   const [referralMonth, setReferralMonth] = useState(() => currentMonthInTz(tz));
   const { data: referralStats = [], isLoading: referralLoading } = useQuery({ queryKey: ["referral-stats", referralMonth], queryFn: () => dashApi.referralStats(referralMonth), retry: false });
-  const { data: billsData, isLoading: billsLoading } = useQuery({ queryKey: ["billing"], queryFn: () => billingApi.list(), retry: false });
+  const { data: revenueTrendData, isLoading: revenueTrendLoading } = useQuery({ queryKey: ["dashboard-revenue-trend"], queryFn: dashApi.revenueTrend, retry: false });
 
-  const ALL_BILLS: any[] = (billsData?.bills ?? []).map((b: any) => ({ ...b, id: b.billId || b._id || b.id }));
-  const todayStr = new Date().toDateString();
-  const nowDate  = new Date();
-  const revenueToday = ALL_BILLS
-    .filter((b) => new Date(b.createdAt).toDateString() === todayStr)
-    .reduce((a, b) => a + (b.paid || 0), 0);
-  const revenueMonth = ALL_BILLS
-    .filter((b) => { const d = new Date(b.createdAt); return d.getMonth() === nowDate.getMonth() && d.getFullYear() === nowDate.getFullYear(); })
-    .reduce((a, b) => a + (b.paid || 0), 0);
-
-  const m = {
-    ...(metricsData ?? {
-      totalPatients: 0, opdToday: 0, ipdCurrent: 0, icuCurrent: 0,
-      appointmentsToday: 0, pendingClaims: 0, criticalAlerts: 0,
-      bedOccupancyRate: 0, surgeriesThisWeek: 0, avgLOS: 0,
-    }),
-    revenueToday,
-    revenueMonth,
+  const m = metricsData ?? {
+    totalPatients: 0, opdToday: 0, ipdCurrent: 0, icuCurrent: 0,
+    appointmentsToday: 0, pendingClaims: 0, criticalAlerts: 0,
+    bedOccupancyRate: 0, revenueToday: 0, revenueMonth: 0, surgeriesThisWeek: 0, avgLOS: 0,
   };
-  const revNow = new Date();
-  const revMonthMap: Record<number, { month: string; opd: number; ipd: number; pharmacy: number }> = {};
-  for (let mo = 0; mo <= revNow.getMonth(); mo++) {
-    revMonthMap[mo] = { month: new Date(revNow.getFullYear(), mo, 1).toLocaleString("default", { month: "short" }), opd: 0, ipd: 0, pharmacy: 0 };
-  }
-  for (const bill of ALL_BILLS) {
-    const d = new Date(bill.createdAt);
-    if (d.getFullYear() !== revNow.getFullYear()) continue;
-    const mo = d.getMonth();
-    if (revMonthMap[mo] === undefined) continue;
-    const paid = bill.paid || 0;
-    if (bill.type === "OPD")           revMonthMap[mo].opd      += paid;
-    else if (bill.type === "IPD")      revMonthMap[mo].ipd      += paid;
-    else if (bill.type === "Pharmacy") revMonthMap[mo].pharmacy += paid;
-    else                               revMonthMap[mo].ipd      += paid;
-  }
-  const REVENUE_TREND = Object.values(revMonthMap);
+  const REVENUE_TREND = revenueTrendData ?? [];
   const DEPT_VOLUME   = deptData     ?? [];
   const BED_OCCUPANCY = bedData      ?? [];
   const AI_ALERTS     = alertsData   ?? [];
@@ -125,7 +95,7 @@ export default function DashboardPage() {
       {/* Today's Revenue highlight */}
       <Card className="bg-teal-50 border-teal-100">
         <CardContent className="p-4 flex items-center justify-between">
-          {billsLoading ? (
+          {metricsLoading ? (
             <div className="w-full space-y-2">
               <Skeleton className="h-3 w-28" />
               <Skeleton className="h-8 w-40" />
@@ -215,7 +185,7 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-semibold">Revenue Trend (Monthly)</CardTitle>
           </CardHeader>
           <CardContent>
-            {billsLoading ? <Skeleton className="h-[200px] w-full" /> : <ResponsiveContainer width="100%" height={200}>
+            {revenueTrendLoading ? <Skeleton className="h-[200px] w-full" /> : <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={REVENUE_TREND} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorOpd" x1="0" y1="0" x2="0" y2="1">

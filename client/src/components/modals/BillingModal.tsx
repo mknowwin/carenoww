@@ -146,7 +146,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setDiscountType(existing?.discountType ?? "Flat");
     setDiscount(existing?.discount ?? 0);
     setDiscountPercent(existing?.discountPercent ?? 0);
-    setPaid(existing?.paid ?? 0);
+    // `paid` always means "amount being added right now" — never the bill's
+    // running total — for both Edit Bill and Record Payment.
+    setPaid(0);
     setPayer(existing?.payer ?? "Self");
     setPaymentMode(existing?.paymentMode ?? "Cash");
     setTransactionRef("");
@@ -224,7 +226,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   const netBeforeRound = Math.max(0, subtotal - discountAmt);
   const totalAmount = Math.round(netBeforeRound);
   const roundOff = totalAmount - netBeforeRound;
-  const balance = totalAmount - paid;
+  // For Edit Bill, `paid` (the form field) is an increment on top of whatever the
+  // bill already has recorded; for a new bill the running total and the increment
+  // coincide since there's nothing recorded yet.
+  const previouslyPaid = isEdit ? (existing?.paid ?? 0) : 0;
+  const cumulativePaid = previouslyPaid + paid;
+  const balance = totalAmount - cumulativePaid;
 
   // ── submit ─────────────────────────────────────────────────────────────────
   // isDraft-in-progress (existing.status === "Draft") never disappears just because
@@ -262,7 +269,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
           discount: discountAmt,
           discountType,
           discountPercent,
-          paid: asDraft ? 0 : paid, payer, paymentMode, notes,
+          paid: asDraft ? 0 : cumulativePaid, payer, paymentMode, notes,
           // Omitted (not "Draft") when finalizing — the server then always
           // recomputes a real Paid/Partial/Pending status from amount vs paid.
           status: asDraft ? "Draft" : undefined,
@@ -282,7 +289,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         billId: result?.billId,
         patientName: patientName || existing?.patientName,
         amount: payOnly ? existing?.amount : totalAmount,
-        paid: payOnly ? (existing?.paid ?? 0) + paid : (asDraft ? 0 : paid),
+        paid: payOnly ? (existing?.paid ?? 0) + paid : (asDraft ? 0 : cumulativePaid),
         balance: payOnly ? Math.max(0, (existing?.balance ?? 0) - paid) : (asDraft ? totalAmount : balance),
         ...result, // includes the server-authoritative `status` (e.g. "Draft")
       });
@@ -588,8 +595,18 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                 )}
 
                 <div className="grid grid-cols-3 gap-3">
-                  <F label={payOnly ? `Amount to Pay (balance ₹${(existing?.balance || 0).toLocaleString()})` : "Amount Paid Now (₹)"}>
-                    <Input className="h-8 text-sm" type="number" min={0} max={payOnly ? existing?.balance : undefined} value={paid || ""} onChange={(e) => setPaid(parseFloat(e.target.value) || 0)} />
+                  <F label={
+                    payOnly
+                      ? `Amount to Pay (balance ₹${(existing?.balance || 0).toLocaleString()})`
+                      : isEdit
+                        ? `Add Payment Now (₹)${previouslyPaid > 0 ? ` — already paid ₹${previouslyPaid.toLocaleString()}` : ""}`
+                        : "Amount Paid Now (₹)"
+                  }>
+                    <Input
+                      className="h-8 text-sm" type="number" min={0}
+                      max={payOnly ? existing?.balance : isEdit ? Math.max(0, totalAmount - previouslyPaid) : undefined}
+                      value={paid || ""} onChange={(e) => setPaid(parseFloat(e.target.value) || 0)}
+                    />
                   </F>
                   <F label="Payment Mode">
                     <Select value={paymentMode} onValueChange={setPaymentMode}>
@@ -625,7 +642,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                   <div className="flex gap-5 text-sm pt-1 border-t flex-wrap">
                     <span>Total: <strong>₹{totalAmount.toLocaleString()}</strong></span>
                     {roundOff !== 0 && <span className="text-muted-foreground">Round Off: {roundOff > 0 ? "+" : "−"}₹{Math.abs(roundOff).toFixed(2)}</span>}
-                    <span>Paid: <strong className="text-green-600">₹{paid.toLocaleString()}</strong></span>
+                    <span>Paid: <strong className="text-green-600">₹{cumulativePaid.toLocaleString()}</strong></span>
                     {balance > 0 && <span>Balance: <strong className="text-red-500">₹{balance.toLocaleString()}</strong></span>}
                     {balance < 0 && <span className="text-green-600">Overpaid: <strong>₹{Math.abs(balance).toLocaleString()}</strong></span>}
                     {balance === 0 && paid > 0 && <span className="text-green-600 font-medium">✓ Fully paid</span>}

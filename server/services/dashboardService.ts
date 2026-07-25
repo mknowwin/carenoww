@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import Appointment from "../models/Appointment.js";
 import BillingRecord from "../models/BillingRecord.js";
@@ -22,7 +23,7 @@ const WARD_CAPACITY: Record<string, number> = {
 // collection the same way, with no separate "returns" handling needed.
 async function revenueForRange(tenantId: string, start: Date, end: Date) {
   const agg = await BillingRecord.aggregate([
-    { $match: { tenantId } },
+    { $match: { tenantId: new mongoose.Types.ObjectId(tenantId) } },
     { $unwind: "$payments" },
     { $match: { "payments.paidAt": { $gte: start, $lt: end } } },
     { $group: { _id: null, total: { $sum: "$payments.amount" } } },
@@ -155,7 +156,7 @@ export async function getRevenueTrend(tenantId: string, tz: string) {
   // Grouped by the month each payment/refund actually happened (payments[].paidAt),
   // not the bill's own creation date — see revenueForRange for why.
   const rawTrend = await BillingRecord.aggregate([
-    { $match: { tenantId } },
+    { $match: { tenantId: new mongoose.Types.ObjectId(tenantId) } },
     { $unwind: "$payments" },
     { $match: { "payments.paidAt": { $gte: yearStart, $lt: yearEnd } } },
     { $group: { _id: { month: { $month: "$payments.paidAt" }, type: "$type" }, total: { $sum: "$payments.amount" } } },
@@ -183,7 +184,7 @@ export async function getRevenueTrend(tenantId: string, tz: string) {
 export async function getDeptVolume(tenantId: string, tz: string) {
   const todayDate = todayInTz(tz);
   return Appointment.aggregate([
-    { $match: { tenantId, date: todayDate } },
+    { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), date: todayDate } },
     { $group: { _id: "$department", patients: { $sum: 1 } } },
     { $project: { _id: 0, name: "$_id", patients: 1 } },
     { $sort: { patients: -1 } },
