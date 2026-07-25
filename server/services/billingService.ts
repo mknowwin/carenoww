@@ -379,7 +379,12 @@ export async function createBill(tenantId: string, user: { name: string; id: str
   return bill;
 }
 
-export async function updateBill(tenantId: string, id: string, body: Record<string, any>) {
+export async function updateBill(
+  tenantId: string,
+  user: { id: string; name: string },
+  id: string,
+  body: Record<string, any>
+) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
   if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
@@ -392,7 +397,7 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
     }
   }
 
-  const { items, paid, discount, discountType, discountPercent, paymentMode, payer, status, notes } = body;
+  const { items, paid, discount, discountType, discountPercent, paymentMode, payer, status, notes, transactionRef } = body;
   const update: any = {};
 
   if (paymentMode !== undefined) update.paymentMode = paymentMode;
@@ -406,10 +411,26 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
   const finalDiscount = discount !== undefined ? discount : existing.discount;
   const finalDiscountType = discountType ?? existing.discountType;
   const finalDiscountPct = discountPercent ?? existing.discountPercent;
-  const finalPaid = paid !== undefined ? paid : existing.paid;
   const finalAmount = finalItems.length
     ? calcAmount(finalItems, finalDiscount, finalDiscountType, finalDiscountPct)
     : existing.amount;
+
+  // `paid` on the wire is still the new cumulative total, but any increase over
+  // what's already on file must be recorded as a proper payment entry (below) —
+  // not silently overwritten. A decrease is rejected: payments aren't "uninvented"
+  // through this route (use a credit note or /return instead).
+  const paidProvided = paid !== undefined;
+  const requestedPaid = paidProvided ? Number(paid) : existing.paid;
+  const payDelta = paidProvided ? Math.round((requestedPaid - existing.paid) * 100) / 100 : 0;
+
+  if (payDelta < 0) {
+    throw AppError.badRequest("paid cannot be decreased through this endpoint — use a credit note or /return");
+  }
+  if (payDelta > 0 && payDelta > finalAmount - existing.paid) {
+    throw AppError.badRequest("Payment exceeds outstanding balance");
+  }
+
+  const finalPaid = existing.paid + payDelta;
 
   update.items = finalItems;
   update.amount = finalAmount;
@@ -418,6 +439,18 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
   update.balance = finalAmount - finalPaid;
   update.isLocked = finalPaid >= finalAmount;
   if (!status) update.status = computeStatus(finalAmount, finalPaid);
+
+  const buildPaymentEntry = (paymentId: string) => ({
+    paymentId,
+    amount: payDelta,
+    paymentMode: paymentMode || existing.paymentMode,
+    payer: payer || existing.payer,
+    transactionRef: transactionRef || "",
+    receivedBy: user.name,
+    receivedById: user.id,
+    notes: notes !== undefined ? notes : "",
+    paidAt: new Date(),
+  });
 
   // Draft → finalize transition: any update to an open Draft that doesn't
   // explicitly resend status: "Draft" finalizes it. This mirrors GRN's
@@ -446,10 +479,18 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
   if (stayingDraft) {
     update.status = "Draft";
     update.isLocked = false;
+    if (payDelta > 0) {
+      throw AppError.badRequest("Drafts cannot record a payment — finalize the bill first");
+    }
   }
 
   if (!becomingFinal) {
-    return BillingRecord.findOneAndUpdate({ _id: id, tenantId }, { $set: update }, { new: true });
+    const mongoUpdate: any = { $set: update };
+    if (payDelta > 0) {
+      const paymentId = await getNextId(tenantId, `pay-${existing.billId}`, "PAY-");
+      mongoUpdate.$push = { payments: buildPaymentEntry(paymentId) };
+    }
+    return BillingRecord.findOneAndUpdate({ _id: id, tenantId }, mongoUpdate, { new: true });
   }
 
   // Finalizing a draft draws a real fiscal invoice number and, for Pharmacy
@@ -474,9 +515,15 @@ export async function updateBill(tenantId: string, id: string, body: Record<stri
         if (!status) update.status = computeStatus(update.amount, finalPaid);
       }
 
+      const mongoUpdate: any = { $set: update };
+      if (payDelta > 0) {
+        const paymentId = await getNextId(tenantId, `pay-${update.billId}`, "PAY-", session);
+        mongoUpdate.$push = { payments: buildPaymentEntry(paymentId) };
+      }
+
       updated = await BillingRecord.findOneAndUpdate(
         { _id: id, tenantId },
-        { $set: update },
+        mongoUpdate,
         { new: true, session }
       );
     });
