@@ -10,6 +10,7 @@ import { billing as billingApi, users as usersApi, ratemaster as ratemasterApi, 
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, IndianRupee, Stethoscope, Printer, CheckCircle2, Search, Pill, Loader2, UserCheck } from "lucide-react";
 import { printBill } from "@/lib/print";
+import { useAuth } from "@/contexts/AuthContext";
 
 const BILL_TYPES = ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"] as const;
 const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online"] as const;
@@ -41,7 +42,22 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
 
 export default function BillingModal({ open, onClose, existing, payOnly = false, prefill }: Props) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const isEdit = !!existing;
+
+  // ── role-restricted bill types ────────────────────────────────────────────
+  const isPharmacyRole = user?.role === "pharmacist" || user?.role === "pharmacy_admin";
+  const isReceptionist = user?.role === "receptionist";
+  const allowedTypes: string[] = isPharmacyRole
+    ? ["Pharmacy"]
+    : isReceptionist
+    ? BILL_TYPES.filter((t) => t !== "Pharmacy")
+    : [...BILL_TYPES];
+  // keep an in-progress edit's existing type selectable even if the role wouldn't
+  // normally see it, so opening an existing bill never shows a blank Select value
+  const typeOptions = existing?.type && !allowedTypes.includes(existing.type)
+    ? [...allowedTypes, existing.type]
+    : allowedTypes;
 
   // ── form state ─────────────────────────────────────────────────────────────
   const [patientId, setPatientId] = useState("");
@@ -140,7 +156,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     const rawId = existing?.patientId ?? prefill?.patientId ?? "";
     setPatientId(rawId.replace(/^UHID-/, ""));
     setPatientName(existing?.patientName ?? prefill?.patientName ?? "");
-    setType(existing?.type ?? prefill?.type ?? "OPD");
+    setType(existing?.type ?? prefill?.type ?? (isPharmacyRole ? "Pharmacy" : "OPD"));
     setDoctorName(existing?.doctor ?? prefill?.doctor ?? "__none__");
     setItems(existing?.items?.length ? existing.items : [emptyItem()]);
     setDiscountType(existing?.discountType ?? "Flat");
@@ -366,7 +382,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                   <F label="Bill Type">
                     <Select value={type} onValueChange={setType}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>{BILL_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                      <SelectContent>{typeOptions.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                     </Select>
                   </F>
                 </div>

@@ -73,6 +73,13 @@ export default function BillingPage() {
   const isAdmin = user?.role === "admin" || user?.role === "finance";
   const canDeleteDraft = isAdmin || user?.role === "pharmacy_admin";
   const canCancelReturn = canDeleteDraft || user?.role === "pharmacist";
+  const isPharmacyRole = user?.role === "pharmacist" || user?.role === "pharmacy_admin";
+  const isReceptionist = user?.role === "receptionist";
+  const visibleTypeTabs = isPharmacyRole
+    ? ["All", "Pharmacy"]
+    : isReceptionist
+    ? TYPE_TABS.filter((t) => t !== "Pharmacy")
+    : TYPE_TABS;
 
   const [search,      setSearch]      = useState("");
   const [typeFilter,  setTypeFilter]  = useState("All");
@@ -552,7 +559,7 @@ export default function BillingPage() {
       {view === "list" && <div className="space-y-2">
         {/* Type tabs */}
         <div className="flex gap-1.5 flex-wrap">
-          {TYPE_TABS.map((t) => (
+          {visibleTypeTabs.map((t) => (
             <button
               key={t}
               onClick={() => setTypeFilter(t)}
