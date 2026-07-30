@@ -45,6 +45,18 @@ export async function createAdjustment(tenantId: string, userName: string, body:
     );
   }
 
+  // A reduction (Damage/Expiry-Writeoff/Theft/Return-to-Supplier) on a
+  // batch-tracked drug removes units from one specific batch. Writing the
+  // reduction straight onto the drug's total instead — with no batch to
+  // attribute it to — is silently discarded the next time syncDrugStock
+  // recomputes stock from batches (e.g. the next bill or dispense), so it
+  // must always be attributed to a real batch.
+  if (!batchId && drug.isBatchTracked && Number(quantityAdjusted) < 0) {
+    throw AppError.badRequest(
+      `"${drug.name}" is batch-tracked. Select the specific batch this reduction applies to.`
+    );
+  }
+
   const quantityBefore = drug.stock;
   const quantityAfter  = Math.max(0, quantityBefore + Number(quantityAdjusted));
 
@@ -69,6 +81,11 @@ export async function createAdjustment(tenantId: string, userName: string, body:
   if (batchId) {
     const batch = await DrugBatch.findOne({ _id: batchId, tenantId });
     if (batch) {
+      if (Number(quantityAdjusted) < 0 && Math.abs(Number(quantityAdjusted)) > batch.quantityRemaining) {
+        throw AppError.badRequest(
+          `Cannot reduce batch "${batch.batchNo}" by ${Math.abs(quantityAdjusted)}: only ${batch.quantityRemaining} unit(s) remaining.`
+        );
+      }
       const newBatchQty = Math.max(0, batch.quantityRemaining + Number(quantityAdjusted));
       await DrugBatch.findByIdAndUpdate(batchId, {
         $set: {
@@ -93,11 +110,9 @@ export async function createAdjustment(tenantId: string, userName: string, body:
     });
     await syncDrugStock(tenantId, drugId);
   } else {
-    // Non-batch-tracked drugs, and reductions without a batchId (Damage/
-    // Expiry-Writeoff/Theft/Return-to-Supplier) — deliberately unchanged.
-    // The reduction case has the same "silently overwritten by the next sync"
-    // flaw for batch-tracked drugs, left out of scope per product decision;
-    // it needs FEFO-ordered batch deduction, not a direct stock $set.
+    // Non-batch-tracked drugs only — batch-tracked reductions are rejected
+    // above unless a batchId is given, and batch-tracked additions with no
+    // batchId are handled by isAdditiveNoBatch above.
     const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
     const ratio = quantityAfter / reorderLevel;
     const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";

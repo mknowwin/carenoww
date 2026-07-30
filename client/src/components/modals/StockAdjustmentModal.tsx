@@ -44,6 +44,9 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
     enabled: open && !!drug?._id,
   });
 
+  // Batches with nothing left can't be picked for any adjustment.
+  const availableBatches = batches.filter((b: any) => b.quantityRemaining > 0);
+
   const isReduction = SIGNED_TYPES.includes(adjustmentType);
   const signedQty = isReduction ? -Math.abs(Number(quantity)) : Math.abs(Number(quantity));
   const projectedStock = drug ? Math.max(0, drug.stock + signedQty) : 0;
@@ -51,6 +54,11 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
   // needs a real batch behind it — otherwise it's silently discarded the next
   // time stock is resynced from batches (see stockAdjustmentService.ts).
   const needsOpeningExpiry = !isReduction && !batchId && !!drug?.isBatchTracked;
+  // A reduction (Damage/Expiry-Writeoff/Theft/Return-to-Supplier) on a
+  // batch-tracked drug removes units from one specific batch — writing it
+  // straight to the drug's total instead is silently undone the next time
+  // stock is resynced from batches (see stockAdjustmentService.ts).
+  const needsBatchForReduction = isReduction && !!drug?.isBatchTracked;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +66,12 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
     if (!reason.trim()) { setError("Reason is required."); return; }
     if (needsOpeningExpiry && !expiryDate) {
       setError(`"${drug!.name}" is batch-tracked. Provide an expiry date for this added stock.`);
+      return;
+    }
+    if (needsBatchForReduction && !batchId) {
+      setError(availableBatches.length === 0
+        ? `"${drug!.name}" has no batches with remaining stock to reduce.`
+        : "Select the batch this reduction applies to.");
       return;
     }
     setLoading(true); setError("");
@@ -125,21 +139,27 @@ export default function StockAdjustmentModal({ open, onClose, drug }: Props) {
               </select>
             </F>
 
-            {batches.length > 0 && (
-              <F label="Batch (optional)">
+            {availableBatches.length > 0 && (
+              <F label={needsBatchForReduction ? "Batch *" : "Batch (optional)"}>
                 <select
                   className="w-full h-9 text-sm border rounded-md px-3 bg-background"
                   value={batchId}
                   onChange={(e) => setBatchId(e.target.value)}
                 >
-                  <option value="">All batches (adjust total stock)</option>
-                  {batches.map((b: any) => (
+                  {!needsBatchForReduction && <option value="">All batches (adjust total stock)</option>}
+                  {needsBatchForReduction && <option value="">Select a batch…</option>}
+                  {availableBatches.map((b: any) => (
                     <option key={b._id} value={b._id}>
                       {b.batchNo} — {b.quantityRemaining} {drug.unit} (exp: {new Date(b.expiryDate).toLocaleDateString("en-IN")})
                     </option>
                   ))}
                 </select>
               </F>
+            )}
+            {needsBatchForReduction && availableBatches.length === 0 && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                "{drug.name}" has no batches with remaining stock to reduce.
+              </p>
             )}
 
             <F label={`Quantity ${isReduction ? "(to write off)" : "(to add)"} *`}>
