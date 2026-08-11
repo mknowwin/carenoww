@@ -11,6 +11,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, IndianRupee, Stethoscope, Printer, CheckCircle2, Search, Pill, Loader2, UserCheck } from "lucide-react";
 import { printBill } from "@/lib/print";
 import { useAuth } from "@/contexts/AuthContext";
+import { allocateFefo, allocationTotal, type BatchAllocation, type FefoBatch } from "@/lib/pharmacyFefo";
 
 const BILL_TYPES = ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"] as const;
 const PAYMENT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online"] as const;
@@ -25,7 +26,7 @@ const BILL_RATE_CATEGORIES: Record<string, string[]> = {
   Lab: ["Lab"],
 };
 
-interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; availableQty?: number; }
+interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; availableQty?: number; batches?: FefoBatch[]; allocations?: BatchAllocation[]; }
 const emptyItem = (): BillItem => ({ description: "", category: "Consultation", quantity: 1, unitPrice: 0, total: 0 });
 
 interface Props {
@@ -126,21 +127,25 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     let batchNo: string | undefined;
     let expiryDate: string | undefined;
     let availableQty: number = drug.stock ?? 0;
+    let batches: FefoBatch[] = [];
+    let allocations: BatchAllocation[] = [];
     try {
-      const batches: any[] = await pharmacyApi.batches.list(drug._id);
-      const activeBatches = batches
+      const fetched: any[] = await pharmacyApi.batches.list(drug._id);
+      batches = fetched
         .filter((b) => b.status === "Active" && b.quantityRemaining > 0)
         .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
-      if (activeBatches.length > 0) {
-        if (activeBatches[0].mrpPerUnit != null) unitPrice = activeBatches[0].mrpPerUnit;
-        batchNo = activeBatches[0].batchNo;
-        expiryDate = activeBatches[0].expiryDate;
-        availableQty = activeBatches.reduce((s, b) => s + b.quantityRemaining, 0);
+      if (batches.length > 0) {
+        availableQty = batches.reduce((s, b) => s + b.quantityRemaining, 0);
+        allocations = allocateFefo(batches, 1);
+        const blendedTotal = allocationTotal(allocations);
+        unitPrice = blendedTotal; // qty is 1 on add, so blended total == per-unit price
+        batchNo = allocations[0]?.batchNo;
+        expiryDate = allocations[0]?.expiryDate;
       }
     } catch {
       // fall back to inventory-level values
     }
-    const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, drugId: drug._id, availableQty };
+    const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, drugId: drug._id, availableQty, batches, allocations };
     setItems((prev) => [
       ...prev.filter((it) => it.description !== "" || it.unitPrice > 0),
       newItem,
@@ -231,7 +236,19 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setItems((prev) => prev.map((it, i) => {
       if (i !== idx) return it;
       const next = { ...it, [field]: value };
-      next.total = Number((next.quantity * next.unitPrice).toFixed(2));
+      // For batch-tracked drugs, quantity changes re-run the FEFO allocation so the
+      // preview always reflects which batches (and prices) will actually be drawn from —
+      // mirrors server/lib/fefo.ts fefoDeduct, which the server runs independently on submit.
+      if (field === "quantity" && next.batches?.length) {
+        const allocations = allocateFefo(next.batches, Number(next.quantity) || 0);
+        next.allocations = allocations;
+        next.total = Number(allocationTotal(allocations).toFixed(2));
+        next.unitPrice = next.quantity > 0 ? Number((next.total / next.quantity).toFixed(2)) : 0;
+        next.batchNo = allocations[0]?.batchNo;
+        next.expiryDate = allocations[0]?.expiryDate;
+      } else {
+        next.total = Number((next.quantity * next.unitPrice).toFixed(2));
+      }
       return next;
     }));
   };
@@ -280,7 +297,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         const payload: any = {
           patientId: effectiveUhid, patientName, type,
           doctor: (doctorName && doctorName !== "__none__") ? doctorName : undefined,
-          items: items.map((it) => ({ ...it, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) })),
+          items: items.map((it) => {
+            // batches/allocations are client-only preview state — the server
+            // independently re-runs FEFO deduction and expansion on submit.
+            const { batches: _batches, allocations: _allocations, ...rest } = it;
+            return { ...rest, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) };
+          }),
           amount: totalAmount,
           discount: discountAmt,
           discountType,
@@ -513,20 +535,35 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                             <div className="grid grid-cols-[2fr_72px_88px_70px_32px] gap-1.5 items-center">
                               <span className="text-sm pl-1 leading-tight">
                                 <span className="truncate block">{item.description}</span>
-                                {item.batchNo && (
+                                {item.allocations && item.allocations.length <= 1 && item.batchNo && (
                                   <span className="block text-[10px] text-muted-foreground">
                                     Batch: {item.batchNo}{item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}
                                   </span>
                                 )}
                               </span>
                               <Input ref={item === justAddedItem ? qtyInputRef : undefined} className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseInt(e.target.value) || 1)} />
-                              <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
+                              {item.allocations && item.allocations.length > 1 ? (
+                                <div className="h-7 text-xs text-right flex items-center justify-end pr-1 text-muted-foreground italic">Multiple</div>
+                              ) : (
+                                <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
+                              )}
                               <div className="text-xs text-right font-semibold pr-1">₹{(item.total || 0).toLocaleString()}</div>
                               <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                 onClick={() => setItems((p) => p.filter((_, i) => i !== items.indexOf(item)))}>
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
+                            {item.allocations && item.allocations.length > 1 && (
+                              <div className="pl-1 pt-0.5 space-y-0.5">
+                                <p className="text-[10px] text-amber-700 font-medium">Spans {item.allocations.length} batches (FEFO):</p>
+                                {item.allocations.map((a, aIdx) => (
+                                  <p key={aIdx} className="text-[10px] text-muted-foreground flex justify-between max-w-xs">
+                                    <span>Batch {a.batchNo}{a.expiryDate ? ` · Exp ${new Date(a.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}</span>
+                                    <span>{a.qty} × ₹{a.mrpPerUnit.toLocaleString()}</span>
+                                  </p>
+                                ))}
+                              </div>
+                            )}
                             {overStock && (
                               <p className="text-[10px] text-red-600 pl-1">Only {item.availableQty} in stock</p>
                             )}
