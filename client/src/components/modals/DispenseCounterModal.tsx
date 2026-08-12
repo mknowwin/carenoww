@@ -8,6 +8,7 @@ import { Trash2, Plus, RefreshCw, Package } from "lucide-react";
 import { pharmacy as pharmApi, describeStockError } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { allocateFefo, allocationTotal, totalAvailable, type BatchAllocation, type FefoBatch } from "@/lib/pharmacyFefo";
 
 type RxSource = "Paper" | "OTC";
 
@@ -20,6 +21,10 @@ interface DrugRow {
   totalAmount: number;
   batchId: string;
   batchNo: string;
+  batches?: FefoBatch[];
+  allocations?: BatchAllocation[];
+  availableQty?: number;
+  manualBatch?: boolean;
 }
 
 interface Props {
@@ -51,7 +56,7 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
   const [result,       setResult]       = useState<{ rxId: string } | null>(null);
 
   // Fetch batches for a drug and return them (sorted FEFO = expiry asc)
-  const fetchBatches = useCallback(async (drugId: string): Promise<any[]> => {
+  const fetchBatches = useCallback(async (drugId: string): Promise<FefoBatch[]> => {
     if (!drugId) return [];
     if (batchMap[drugId]) return batchMap[drugId];
     try {
@@ -66,15 +71,42 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
     }
   }, [batchMap]);
 
-  const applyBatch = (idx: number, batch: any) => {
+  // Default path — mirrors server/lib/fefo.ts fefoDeduct so the preview shows exactly
+  // which batches (and at what price) the requested quantity will actually draw from.
+  const applyFefo = (idx: number, batches: FefoBatch[], qty: number) => {
+    const allocations = allocateFefo(batches, qty);
     setDrugs((prev) => {
       const next = [...prev];
       next[idx] = {
         ...next[idx],
-        batchId:    batch._id,
-        batchNo:    batch.batchNo,
-        mrpPerUnit: batch.mrpPerUnit ?? next[idx].mrpPerUnit,
-        totalAmount: next[idx].quantity * (batch.mrpPerUnit ?? next[idx].mrpPerUnit),
+        batches,
+        allocations,
+        availableQty: totalAvailable(batches),
+        batchId:      allocations[0]?.batchId ?? "",
+        batchNo:      allocations[0]?.batchNo ?? "",
+        mrpPerUnit:   allocations.length ? allocationTotal(allocations) / Math.max(qty, 1) : next[idx].mrpPerUnit,
+        totalAmount:  allocationTotal(allocations),
+        manualBatch:  false,
+      };
+      return next;
+    });
+  };
+
+  // Manual override — pharmacist explicitly forces a single batch via the dropdown.
+  // Note: the server always performs its own FEFO deduction for batch-tracked drugs
+  // regardless of this selection, so this preview reflects intent, not a guarantee.
+  const applyBatch = (idx: number, batch: any) => {
+    setDrugs((prev) => {
+      const next = [...prev];
+      const mrp = batch.mrpPerUnit ?? next[idx].mrpPerUnit;
+      next[idx] = {
+        ...next[idx],
+        batchId:     batch._id,
+        batchNo:     batch.batchNo,
+        mrpPerUnit:  mrp,
+        totalAmount: next[idx].quantity * mrp,
+        allocations: [{ batchId: batch._id, batchNo: batch.batchNo, qty: next[idx].quantity, mrpPerUnit: mrp, expiryDate: batch.expiryDate }],
+        manualBatch: true,
       };
       return next;
     });
@@ -93,6 +125,10 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
         totalAmount: next[idx].quantity * (drug?.mrpPerUnit ?? 0),
         batchId:    "",
         batchNo:    "",
+        batches:    undefined,
+        allocations: undefined,
+        availableQty: drug?.stock ?? 0,
+        manualBatch: false,
       };
       return next;
     });
@@ -100,8 +136,7 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
     if (drugId) {
       const batches = await fetchBatches(drugId);
       if (batches.length > 0) {
-        // Auto-select FEFO batch (earliest expiry)
-        applyBatch(idx, batches[0]);
+        applyFefo(idx, batches, drugs[idx]?.quantity || 1);
       }
     }
   };
@@ -109,12 +144,22 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
   const setRow = (idx: number, field: keyof DrugRow, value: string | number) => {
     setDrugs((prev) => {
       const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
-      if (field === "quantity" || field === "mrpPerUnit") {
-        const qty = field === "quantity"   ? Number(value) : next[idx].quantity;
-        const mrp = field === "mrpPerUnit" ? Number(value) : next[idx].mrpPerUnit;
-        next[idx].totalAmount = qty * mrp;
+      const row = { ...next[idx], [field]: value };
+      if (field === "quantity" && row.batches?.length && !row.manualBatch) {
+        const qty = Number(value) || 0;
+        const allocations = allocateFefo(row.batches, qty);
+        row.allocations = allocations;
+        row.totalAmount = allocationTotal(allocations);
+        row.mrpPerUnit = allocations.length ? allocationTotal(allocations) / Math.max(qty, 1) : row.mrpPerUnit;
+      } else if (field === "quantity" || field === "mrpPerUnit") {
+        const qty = field === "quantity"   ? Number(value) : row.quantity;
+        const mrp = field === "mrpPerUnit" ? Number(value) : row.mrpPerUnit;
+        row.totalAmount = qty * mrp;
+        if (row.manualBatch && row.allocations?.length === 1) {
+          row.allocations = [{ ...row.allocations[0], qty }];
+        }
       }
+      next[idx] = row;
       return next;
     });
   };
@@ -133,6 +178,10 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
     if (!patientName.trim()) { setError("Patient name is required."); return; }
     if (drugs.some((d) => !d.drugId || d.quantity < 1)) {
       setError("All drug rows need a drug selected and a quantity ≥ 1."); return;
+    }
+    const overStock = drugs.find((d) => d.availableQty != null && d.quantity > d.availableQty);
+    if (overStock) {
+      setError(`Only ${overStock.availableQty} units of "${overStock.drugName}" in stock.`); return;
     }
     setLoading(true); setError("");
     try {
@@ -249,6 +298,8 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
 
               {drugs.map((row, idx) => {
                 const batches = batchMap[row.drugId] ?? [];
+                const overStock = row.availableQty != null && row.quantity > row.availableQty;
+                const showBreakdown = !row.manualBatch && row.allocations && row.allocations.length > 1;
                 return (
                   <div key={idx} className="border rounded-lg p-3 space-y-2">
                     {/* Drug + qty row */}
@@ -265,7 +316,7 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
                           </option>
                         ))}
                       </select>
-                      <Input type="number" min={1} className="h-8 text-xs" placeholder="Qty" value={row.quantity}
+                      <Input type="number" min={1} className={`h-8 text-xs ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} placeholder="Qty" value={row.quantity}
                         onChange={(e) => setRow(idx, "quantity", Number(e.target.value))} />
                       <div className="text-xs font-semibold text-right pr-1">
                         {row.totalAmount > 0 ? `₹${row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : ""}
@@ -276,21 +327,31 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
                       </Button>
                     </div>
 
+                    {overStock && (
+                      <p className="text-[10px] text-red-600 pl-1">Only {row.availableQty} in stock</p>
+                    )}
+
                     {/* Batch info row */}
                     {row.drugId && (
-                      <div className="flex items-center gap-2 pl-0.5">
-                        <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <div className="space-y-1">
                         {batches.length === 0 ? (
-                          <span className="text-xs text-muted-foreground">No active batches — using master price ₹{row.mrpPerUnit}/unit</span>
+                          <div className="flex items-center gap-2 pl-0.5">
+                            <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-xs text-muted-foreground">No active batches — using master price ₹{row.mrpPerUnit}/unit</span>
+                          </div>
                         ) : batches.length === 1 ? (
-                          <span className="text-xs text-muted-foreground">
-                            Batch <span className="font-medium text-foreground">{row.batchNo}</span>
-                            {batches[0].expiryDate && <> · Exp {format(new Date(batches[0].expiryDate), "MMM-yyyy")}</>}
-                            {" · "}Stock {batches[0].quantityRemaining}
-                            {" · "}MRP <span className="font-semibold text-foreground">₹{row.mrpPerUnit}/{row.unit}</span>
-                          </span>
+                          <div className="flex items-center gap-2 pl-0.5">
+                            <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-xs text-muted-foreground">
+                              Batch <span className="font-medium text-foreground">{row.batchNo}</span>
+                              {batches[0].expiryDate && <> · Exp {format(new Date(batches[0].expiryDate), "MMM-yyyy")}</>}
+                              {" · "}Stock {batches[0].quantityRemaining}
+                              {" · "}MRP <span className="font-semibold text-foreground">₹{row.mrpPerUnit}/{row.unit}</span>
+                            </span>
+                          </div>
                         ) : (
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 pl-0.5 flex-wrap">
+                            <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             <span className="text-xs text-muted-foreground">Batch:</span>
                             <select
                               className="h-6 text-xs border rounded px-1.5 bg-background"
@@ -303,7 +364,18 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
                                 </option>
                               ))}
                             </select>
-                            <span className="text-xs font-semibold">₹{row.mrpPerUnit}/{row.unit}</span>
+                            {!showBreakdown && <span className="text-xs font-semibold">₹{row.mrpPerUnit}/{row.unit}</span>}
+                          </div>
+                        )}
+                        {showBreakdown && (
+                          <div className="pl-5 space-y-0.5">
+                            <p className="text-[10px] text-amber-700 font-medium">Qty {row.quantity} spans {row.allocations!.length} batches (FEFO) — use the selector above to force a single batch instead:</p>
+                            {row.allocations!.map((a, aIdx) => (
+                              <p key={aIdx} className="text-[10px] text-muted-foreground flex justify-between max-w-xs">
+                                <span>Batch {a.batchNo}{a.expiryDate ? ` · Exp ${format(new Date(a.expiryDate), "MMM-yy")}` : ""}</span>
+                                <span>{a.qty} × ₹{a.mrpPerUnit.toLocaleString()}</span>
+                              </p>
+                            ))}
                           </div>
                         )}
                       </div>
