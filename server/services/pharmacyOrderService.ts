@@ -1,24 +1,45 @@
 import mongoose from "mongoose";
 import PharmacyOrder from "../models/PharmacyOrder.js";
+import Patient from "../models/Patient.js";
 import { getNextId } from "../lib/counter.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
 import { checkPharmacyStock, deductAndExpandPharmacyItems } from "./billingService.js";
 import { AppError } from "../lib/AppError.js";
 
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export interface PharmacyOrderListFilters {
   status?: string;
   patientId?: string;
   rxSource?: string;
+  search?: string;
   page?: string;
   limit?: string;
 }
 
 export async function listOrders(tenantId: string, filters: PharmacyOrderListFilters) {
-  const { status, patientId, rxSource, page = "1", limit = "50" } = filters;
+  const { status, patientId, rxSource, search, page = "1", limit = "50" } = filters;
   const query: any = { tenantId };
   if (status)    query.status    = status;
   if (patientId) query.patientId = patientId;
   if (rxSource)  query.rxSource  = rxSource;
+
+  if (search && search.trim()) {
+    const regex = new RegExp(escapeRegex(search.trim()), "i");
+    // Name/RxId/drug match directly; phone/UHID resolve via the Patient record first
+    // since PharmacyOrder only stores a denormalized patientId string.
+    const matchingPatients = await Patient.find({ tenantId, $or: [{ phone: regex }, { uhid: regex }] }).select("uhid");
+    const patientIds = matchingPatients.map((p) => p.uhid);
+    query.$or = [
+      { patientName: regex },
+      { rxId: regex },
+      { drug: regex },
+      { "items.drugName": regex },
+      ...(patientIds.length ? [{ patientId: { $in: patientIds } }] : []),
+    ];
+  }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const [orders, total] = await Promise.all([
@@ -42,6 +63,7 @@ function buildBillItems(dispensedItems: any[]) {
       unitPrice:   it.mrpPerUnit ?? 0,
       total:       (it.quantity || 1) * (it.mrpPerUnit ?? 0),
       drugId:      it.drugId,
+      batchId:     it.batchId || undefined,
       batchNo:     it.batchNo || "",
     }));
 }

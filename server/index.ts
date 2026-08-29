@@ -20,6 +20,7 @@ import prescriptionsRouter from "./routes/prescriptions.js";
 import ratemasterRouter from "./routes/ratemaster.js";
 import referralDoctorsRouter from "./routes/referralDoctors.js";
 import suppliersRouter from "./routes/suppliers.js";
+import insightsRouter from "./routes/insights.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { notFoundHandler } from "./middleware/notFoundHandler.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -96,6 +97,7 @@ app.use("/api/prescriptions",  prescriptionsRouter);
 app.use("/api/ratemaster",        ratemasterRouter);
 app.use("/api/referral-doctors",  referralDoctorsRouter);
 app.use("/api/suppliers",         suppliersRouter);
+app.use("/api/insights",          insightsRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {

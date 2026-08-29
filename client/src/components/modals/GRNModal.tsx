@@ -18,6 +18,7 @@ interface GRNItem {
   quantityReceived: number;
   purchasePricePerUnit: number;
   mrpPerUnit: number;
+  gstPercent: number;
   totalCost: number;
   openingExpiryDate: string;
 }
@@ -35,7 +36,7 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
 
 const emptyItem = (): GRNItem => ({
   drugName: "", drugId: "", unit: "Tab", batchNo: "", expiryDate: "",
-  quantityReceived: 0, purchasePricePerUnit: 0, mrpPerUnit: 0, totalCost: 0,
+  quantityReceived: 0, purchasePricePerUnit: 0, mrpPerUnit: 0, gstPercent: 0, totalCost: 0,
   openingExpiryDate: "",
 });
 
@@ -91,6 +92,7 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
         quantityReceived:    it.quantityReceived ?? 0,
         purchasePricePerUnit: it.purchasePricePerUnit ?? 0,
         mrpPerUnit:          it.mrpPerUnit ?? 0,
+        gstPercent:          it.gstPercent ?? 0,
         totalCost:           it.totalCost ?? 0,
         openingExpiryDate:   toDateInput(it.openingExpiryDate),
       }));
@@ -343,9 +345,9 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
               </div>
 
               {/* Column headers */}
-              <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 text-xs font-medium text-muted-foreground px-1">
+              <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_0.6fr_32px] gap-1.5 text-xs font-medium text-muted-foreground px-1">
                 <span>Drug</span><span>Unit</span><span>Batch No</span><span>Expiry</span>
-                <span>Qty</span><span>Purchase ₹</span><span>MRP ₹</span><span></span>
+                <span>Qty</span><span>Purchase ₹</span><span>MRP ₹</span><span>GST %</span><span></span>
               </div>
 
               {items.map((item, idx) => {
@@ -357,7 +359,7 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                 const showOpeningExpiry = needsOpeningExpiry(selectedDrug);
                 return (
                 <div key={idx} className="space-y-1.5">
-                <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_32px] gap-1.5 items-center">
+                <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_0.6fr_32px] gap-1.5 items-center">
                   {item.drugId ? (
                     <div className="flex items-center gap-1.5 h-8 border rounded-md px-2 bg-background text-xs">
                       <span className="flex-1 truncate">{item.drugName}</span>
@@ -407,6 +409,7 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                   <Input type="number" min={1} className="h-8 text-xs" placeholder="0" value={item.quantityReceived || ""} onChange={(e) => setItem(idx, "quantityReceived", Number(e.target.value))} />
                   <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.purchasePricePerUnit || ""} onChange={(e) => setItem(idx, "purchasePricePerUnit", Number(e.target.value))} />
                   <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.mrpPerUnit || ""} onChange={(e) => setItem(idx, "mrpPerUnit", Number(e.target.value))} />
+                  <Input type="number" min={0} max={100} step="0.01" className="h-8 text-xs" placeholder="0" value={item.gstPercent || ""} onChange={(e) => setItem(idx, "gstPercent", Number(e.target.value))} />
                   <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600" disabled={items.length === 1} onClick={() => removeRow(idx)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>

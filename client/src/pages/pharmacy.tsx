@@ -12,10 +12,11 @@ import {
   Clock, Package, RefreshCw, FileText, History, ShoppingCart, SlidersHorizontal, Pencil, Trash2,
   BarChart3, Printer, Upload, ChevronLeft, ChevronRight, Layers,
 } from "lucide-react";
-import { printExpiryReport, printCurrentStockReport } from "@/lib/print";
+import { printExpiryReport, printCurrentStockReport, printDrugSalesReport, printNonMovingDrugs } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { pharmacy as pharmacyApi, describeStockError } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { todayInTz } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
 import GRNModal from "@/components/modals/GRNModal";
@@ -227,6 +228,8 @@ export default function PharmacyPage() {
   const [stockSearch, setStockSearch]       = useState("");
   const [expiryWithin, setExpiryWithin]     = useState("90");
   const [includeExpired, setIncludeExpired] = useState(true);
+  const [drugSalesDate, setDrugSalesDate]   = useState(todayInTz(user?.timezone ?? "Asia/Kolkata"));
+  const [nonMovingSinceDays, setNonMovingSinceDays] = useState("90");
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -235,6 +238,17 @@ export default function PharmacyPage() {
     queryFn: () => pharmacyApi.orders.list(),
     retry: false,
     refetchInterval: 20_000,
+  });
+
+  // Server-side search (name/RxId/drug/phone/UHID) — only hit when a term is typed,
+  // so the base `orders` list above (used for the Pending/Verified/Dispensed counts)
+  // stays unaffected by whatever's in the search box.
+  const orderSearchTerm = orderSearch.trim();
+  const { data: orderSearchData, isLoading: orderSearchLoading } = useQuery({
+    queryKey: ["pharmacy-orders-search", orderSearchTerm],
+    queryFn: () => pharmacyApi.orders.list({ search: orderSearchTerm, limit: "200" }),
+    enabled: orderSearchTerm.length >= 2,
+    retry: false,
   });
 
   // Paginated + server-side searched list backing the Inventory tab table
@@ -288,6 +302,20 @@ export default function PharmacyPage() {
     retry: false,
   });
 
+  const { data: drugSalesData, isLoading: drugSalesLoading } = useQuery({
+    queryKey: ["pharmacy-drug-sales", drugSalesDate],
+    queryFn: () => pharmacyApi.reports.drugSales(drugSalesDate),
+    enabled: activeTab === "reports",
+    retry: false,
+  });
+
+  const { data: nonMovingData, isLoading: nonMovingLoading } = useQuery({
+    queryKey: ["pharmacy-non-moving", nonMovingSinceDays],
+    queryFn: () => pharmacyApi.reports.nonMoving(nonMovingSinceDays),
+    enabled: activeTab === "reports",
+    retry: false,
+  });
+
   const orders: PharmacyOrder[]   = ordersData?.orders  ?? [];
   // Full active catalog: drives stock stats and the GRN/Dispense drug-picker dropdowns
   const inventory: DrugInventory[] = inventoryFullData?.drugs ?? [];
@@ -308,9 +336,14 @@ export default function PharmacyPage() {
 
   // ── Filtered lists ─────────────────────────────────────────────────────────
 
-  const filteredOrders = orders.filter((o) => {
-    const q = orderSearch.toLowerCase();
-    const matchSearch = !q || o.patientName.toLowerCase().includes(q) || o.rxId.toLowerCase().includes(q) || o.drug.toLowerCase().includes(q);
+  // When a search term is active (2+ chars), source rows from the server-searched
+  // result (covers phone/UHID, not just what's client-side visible) instead of the
+  // locally-fetched page — status filter still applies on top either way.
+  const searchedOrders: PharmacyOrder[] = orderSearchTerm.length >= 2 ? (orderSearchData?.orders ?? []) : orders;
+  const filteredOrders = searchedOrders.filter((o) => {
+    const q = orderSearchTerm.toLowerCase();
+    const matchSearch = orderSearchTerm.length >= 2 || !q
+      || o.patientName.toLowerCase().includes(q) || o.rxId.toLowerCase().includes(q) || o.drug.toLowerCase().includes(q);
     return matchSearch && (statusFilter === "All" || o.status === statusFilter);
   });
 
@@ -455,7 +488,7 @@ export default function PharmacyPage() {
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search patient, RxId or drug…" className="pl-9 h-9" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
+              <Input placeholder="Search name, phone, UHID, RxId or drug…" className="pl-9 h-9" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
             </div>
             <div className="flex gap-1.5 flex-wrap">
               {(["All", "Pending", "Verified", "Dispensed"] as const).map((s) => (
@@ -464,7 +497,7 @@ export default function PharmacyPage() {
             </div>
           </div>
 
-          {ordersLoading ? (
+          {(ordersLoading || (orderSearchTerm.length >= 2 && orderSearchLoading)) ? (
             <div className="text-sm text-muted-foreground py-8 text-center">Loading orders…</div>
           ) : filteredOrders.length === 0 ? (
             <div className="text-sm text-muted-foreground py-8 text-center">No orders found.</div>
@@ -908,6 +941,138 @@ export default function PharmacyPage() {
                   </Card>
                 )}
               </div>
+
+          <div className="border-t" />
+
+          {/* Section B: Drug-wise Day Sales Report */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-sm">Drug-wise Sales Report</h3>
+                <p className="text-xs text-muted-foreground">Quantity and money dispensed, for a single day</p>
+              </div>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5 shrink-0"
+                onClick={() => printDrugSalesReport(drugSalesData?.rows ?? [], drugSalesDate)}>
+                <Printer className="h-4 w-4" /> Print
+              </Button>
+            </div>
+
+            <Input type="date" className="h-8 w-44 text-sm" value={drugSalesDate} onChange={(e) => setDrugSalesDate(e.target.value)} />
+
+            {drugSalesLoading ? (
+              <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
+            ) : (drugSalesData?.rows ?? []).length === 0 ? (
+              <Card>
+                <CardContent className="py-10 text-center">
+                  <Package className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No dispensed items for this day</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-0 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/40">
+                          {["#", "Drug Name", "Quantity", "Amount"].map((h, i) => (
+                            <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 2 ? "text-left" : "text-right"}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(drugSalesData?.rows ?? []).map((r: any, idx: number) => (
+                          <tr key={r.drugName} className="border-b last:border-0 hover:bg-muted/20">
+                            <td className="py-2.5 px-4 text-muted-foreground">{idx + 1}</td>
+                            <td className="py-2.5 px-4 font-medium">{r.drugName}</td>
+                            <td className="py-2.5 px-4 text-right">{r.quantity}</td>
+                            <td className="py-2.5 px-4 text-right font-semibold">₹{r.amount.toLocaleString("en-IN")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-4 py-2 text-xs text-muted-foreground border-t flex items-center gap-4">
+                    <span>Total Qty: {drugSalesData?.totalQuantity ?? 0}</span>
+                    <span>Total Amount: ₹{(drugSalesData?.totalAmount ?? 0).toLocaleString("en-IN")}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="border-t" />
+
+          {/* Section C: Non-Moving Drug List */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-sm">Non-Moving Drug List</h3>
+                <p className="text-xs text-muted-foreground">Active drugs with no dispensed order in the selected window</p>
+              </div>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5 shrink-0"
+                onClick={() => printNonMovingDrugs(nonMovingData ?? [], nonMovingSinceDays)}>
+                <Printer className="h-4 w-4" /> Print
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground shrink-0">No dispense within:</span>
+              <Select value={nonMovingSinceDays} onValueChange={setNonMovingSinceDays}>
+                <SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">30 days</SelectItem>
+                  <SelectItem value="60">60 days</SelectItem>
+                  <SelectItem value="90">90 days</SelectItem>
+                  <SelectItem value="180">180 days</SelectItem>
+                  <SelectItem value="365">1 year</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {nonMovingLoading ? (
+              <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
+            ) : (nonMovingData ?? []).length === 0 ? (
+              <Card>
+                <CardContent className="py-10 text-center">
+                  <Package className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No non-moving drugs found</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-0 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/40">
+                          {["#", "Drug Name", "Category", "Stock", "Last Dispensed"].map((h, i) => (
+                            <th key={h} className={`py-2.5 px-4 text-xs font-semibold text-muted-foreground ${i < 3 ? "text-left" : "text-right"} ${i === 4 ? "text-center" : ""}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(nonMovingData ?? []).map((d: any, idx: number) => (
+                          <tr key={d._id} className="border-b last:border-0 hover:bg-muted/20">
+                            <td className="py-2.5 px-4 text-muted-foreground">{idx + 1}</td>
+                            <td className="py-2.5 px-4 font-medium">{d.name}</td>
+                            <td className="py-2.5 px-4 text-muted-foreground">{d.category || "—"}</td>
+                            <td className="py-2.5 px-4 text-right">{d.stock} {d.unit}</td>
+                            <td className="py-2.5 px-4 text-center text-muted-foreground">
+                              {d.lastDispensedAt ? new Date(d.lastDispensedAt).toLocaleDateString("en-IN") : "Never"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-4 py-2 text-xs text-muted-foreground border-t">
+                    {(nonMovingData ?? []).length} drug{(nonMovingData ?? []).length !== 1 ? "s" : ""}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
 
           <div className="border-t" />
 

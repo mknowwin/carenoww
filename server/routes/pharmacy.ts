@@ -6,6 +6,7 @@ import * as drugInventoryService from "../services/drugInventoryService.js";
 import * as drugBatchService from "../services/drugBatchService.js";
 import * as grnService from "../services/grnService.js";
 import * as stockAdjustmentService from "../services/stockAdjustmentService.js";
+import * as pharmacyReportService from "../services/pharmacyReportService.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -137,6 +138,22 @@ router.get("/adjustments", requireRole("admin", "pharmacist", "pharmacy_admin"),
 router.post("/adjustments", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
   const adjustment = await stockAdjustmentService.createAdjustment(req.user!.tenantId, req.user!.name, req.body);
   res.status(201).json({ success: true, data: adjustment });
+}));
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+// GET /api/pharmacy/reports/drug-sales?date=YYYY-MM-DD — drug-wise day sales, qty + money
+router.get("/reports/drug-sales", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const { date } = req.query as Record<string, string>;
+  const data = await pharmacyReportService.getDrugSalesReport(req.user!.tenantId, req.user!.timezone, date);
+  res.json({ success: true, data });
+}));
+
+// GET /api/pharmacy/reports/non-moving?sinceDays=90 — active drugs with no dispense in the window
+router.get("/reports/non-moving", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const { sinceDays } = req.query as Record<string, string>;
+  const data = await pharmacyReportService.getNonMovingDrugs(req.user!.tenantId, parseInt(sinceDays) || 90);
+  res.json({ success: true, data });
 }));
 
 export default router;

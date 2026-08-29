@@ -22,6 +22,17 @@ const DEPARTMENTS = [
   "ENT","Ophthalmology","Psychiatry","Dental",
 ];
 
+const REFERRAL_SOURCES = ["", "Doctor", "VHN", "Medical Shop", "Lab", "Self", "Other"];
+const REFERRAL_SOURCE_LABELS: Record<string, string> = {
+  "": "Not specified",
+  Doctor: "Doctor",
+  VHN: "VHN",
+  "Medical Shop": "Medical Shop",
+  Lab: "Lab",
+  Self: "Self",
+  Other: "Other",
+};
+
 function F({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1"><Label className="text-xs font-medium">{label}</Label>{children}</div>;
 }
@@ -79,6 +90,9 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
     status:           existing?.status           ?? "Scheduled",
     notes:            existing?.notes            ?? "",
     referringDoctor:  existing?.referringDoctor  ?? "",
+    referralSource:   existing?.referralSource   ?? "",
+    referralDetail:   existing?.referralDetail   ?? "",
+    area:             existing?.area             ?? "",
   });
 
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
@@ -477,7 +491,37 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
             />
           </F>
 
+          {/* Referral source + area — captured per visit */}
+          <div className="grid grid-cols-2 gap-3">
+            <F label="Referral Source (optional)">
+              <select
+                value={form.referralSource}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  set("referralSource", v);
+                  if (v !== "Doctor") { set("referringDoctor", ""); clearRefDoc(); }
+                  if (v === "Doctor" || v === "Self" || v === "") set("referralDetail", "");
+                }}
+                className="w-full h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                {REFERRAL_SOURCES.map((s) => (
+                  <option key={s} value={s}>{REFERRAL_SOURCE_LABELS[s]}</option>
+                ))}
+              </select>
+            </F>
+            <F label="Area / Locality (optional)">
+              <SI value={form.area} onChange={(v) => set("area", v)} placeholder="e.g. Anna Nagar" />
+            </F>
+          </div>
+
+          {form.referralSource && !["Doctor", "Self", ""].includes(form.referralSource) && (
+            <F label={`${form.referralSource} Name (optional)`}>
+              <SI value={form.referralDetail} onChange={(v) => set("referralDetail", v)} placeholder={`Name of the referring ${form.referralSource.toLowerCase()}`} />
+            </F>
+          )}
+
           {/* Referring Doctor — searchable combobox */}
+          {form.referralSource === "Doctor" && (
           <F label="Referring Doctor (optional)">
             {form.referringDoctor ? (
               <div className="flex items-center gap-2 h-8 border rounded-md px-3 bg-background">
@@ -528,6 +572,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
               </div>
             )}
           </F>
+          )}
 
           {/* Token preview */}
           {!isEdit && form.doctor && (

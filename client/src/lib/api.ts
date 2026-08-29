@@ -154,6 +154,31 @@ export const dashboard = {
   referralStats:(month?: string) => get<any[]>(`/dashboard/referral-stats${month ? `?month=${month}` : ""}`),
 };
 
+// ── Insights ──────────────────────────────────────────────────────────────────
+const insightsGet = <T>(path: string, params?: Record<string, string>) => {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return get<T>(`/insights${path}${qs}`);
+};
+export const insights = {
+  doctorWise:      (from?: string, to?: string) => insightsGet<any[]>("/doctor-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  departmentWise:  (from?: string, to?: string) => insightsGet<any[]>("/department-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  investigationWise:(from?: string, to?: string) => insightsGet<any[]>("/investigation-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  cardiologyList:  (params: { from?: string; to?: string; doctor?: string; department?: string; diagnosis?: string; modality?: string }) => {
+    const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v)) as Record<string, string>;
+    return insightsGet<any[]>("/cardiology-list", clean);
+  },
+  cardiologyDiagnoses: () => insightsGet<string[]>("/cardiology-diagnoses"),
+  cashCollected:   (date?: string) => insightsGet<{ rows: any[]; grandTotal: number }>("/cash-collected", date ? { date } : undefined),
+  dailyBillsCount: (date?: string) => insightsGet<{ rows: any[]; totalBills: number; totalAmount: number }>("/daily-bills-count", date ? { date } : undefined),
+  referralsBySource:(from?: string, to?: string) => insightsGet<any[]>("/referrals-by-source", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  referralsByArea: (from?: string, to?: string) => insightsGet<any[]>("/referrals-by-area", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  returnBills:     (from?: string, to?: string) => insightsGet<{ notes: any[]; totalReturned: number }>("/return-bills", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  timewiseSales:   (date?: string) => insightsGet<any[]>("/timewise-sales", date ? { date } : undefined),
+  discountDaywise: (from?: string, to?: string) => insightsGet<any[]>("/discount-daywise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  discountBillwise:(from?: string, to?: string) => insightsGet<any[]>("/discount-billwise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  cashFlow:        (date?: string) => insightsGet<{ cashIn: number; cashOut: number; netCash: number; cancelledBills: number; cancelledAmount: number }>("/cash-flow", date ? { date } : undefined),
+};
+
 // ── Patients ──────────────────────────────────────────────────────────────────
 export const patients = {
   list:   (params?: Record<string, string>) => {
@@ -264,6 +289,10 @@ export const pharmacy = {
       return get<any>(`/pharmacy/adjustments${qs}`);
     },
     create: (data: any)  => post<any>("/pharmacy/adjustments", data),
+  },
+  reports: {
+    drugSales: (date?: string) => get<{ rows: any[]; totalQuantity: number; totalAmount: number }>(`/pharmacy/reports/drug-sales${date ? `?date=${date}` : ""}`),
+    nonMoving: (sinceDays?: string) => get<any[]>(`/pharmacy/reports/non-moving${sinceDays ? `?sinceDays=${sinceDays}` : ""}`),
   },
 };
 

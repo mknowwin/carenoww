@@ -1525,6 +1525,251 @@ export function printReferralStats(
   open("Referral Statistics", body);
 }
 
+// ── Insights / new business reports ────────────────────────────────────────────
+
+function reportDoc(opts: { title: string; periodLabel: string; theadHtml: string; rowHtml: string; colCount: number; emptyLabel: string; footerHtml?: string; footerLabel: string; clinicOverride?: ClinicInfo }) {
+  const clinic = opts.clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">${opts.title}</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">${opts.periodLabel}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>${opts.theadHtml}</thead>
+      <tbody>
+        ${opts.rowHtml || `<tr><td colspan="${opts.colCount}" style="text-align:center;color:#888;padding:20px;">${opts.emptyLabel}</td></tr>`}
+      </tbody>
+      ${opts.footerHtml ? `<tfoot>${opts.footerHtml}</tfoot>` : ""}
+    </table>
+
+    <div class="footer">
+      <p>${opts.footerLabel} — ${clinic.name} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+  open(opts.title, body);
+}
+
+function periodLabel(from?: string, to?: string): string {
+  if (!from && !to) return "All dates";
+  if (from && to && from !== to) return `Period: ${from} — ${to}`;
+  return `Date: ${from || to}`;
+}
+
+// #9 Drug-wise day sales report
+export function printDrugSalesReport(rows: { drugName: string; quantity: number; amount: number }[], date: string, clinicOverride?: ClinicInfo) {
+  const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
+  const totalAmt = rows.reduce((s, r) => s + r.amount, 0);
+  const rowHtml = rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td><strong>${r.drugName}</strong></td><td class="tr">${r.quantity}</td><td class="tr">₹${r.amount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "DRUG-WISE SALES REPORT", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Drug Name</th><th class="tr" style="width:100px;">Quantity</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+    rowHtml, colCount: 4, emptyLabel: "No dispensed items for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${totalQty}</td><td class="tr">₹${totalAmt.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Drug-wise Sales Report",
+  });
+}
+
+// #20 Non-moving drug list
+export function printNonMovingDrugs(rows: any[], sinceDays: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = rows.map((d, i) => `
+    <tr><td class="tc">${i + 1}</td><td><strong>${d.name}</strong></td><td>${d.category || "—"}</td><td class="tr">${d.stock} ${d.unit}</td>
+      <td class="tc">${d.lastDispensedAt ? new Date(d.lastDispensedAt).toLocaleDateString("en-IN") : "Never"}</td></tr>`).join("");
+  reportDoc({
+    title: "NON-MOVING DRUG LIST", periodLabel: `No dispense in the last ${sinceDays} days`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Drug Name</th><th style="width:120px;">Category</th><th class="tr" style="width:110px;">Current Stock</th><th class="tc" style="width:120px;">Last Dispensed</th></tr>`,
+    rowHtml, colCount: 5, emptyLabel: "No non-moving drugs found", footerLabel: "Non-Moving Drug List",
+  });
+}
+
+// #1 Doctor-wise visit list
+export function printDoctorWise(rows: { doctor: string; visits: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.visits, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.doctor || "—"}</td><td class="tr">${r.visits}</td></tr>`).join("");
+  reportDoc({
+    title: "DOCTOR-WISE LIST", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Doctor</th><th class="tr" style="width:110px;">Visits</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No visits found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Doctor-wise List",
+  });
+}
+
+// #2 Department-wise visit list
+export function printDepartmentWise(rows: { department: string; visits: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.visits, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.department || "—"}</td><td class="tr">${r.visits}</td></tr>`).join("");
+  reportDoc({
+    title: "DEPARTMENT-WISE LIST", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Department</th><th class="tr" style="width:110px;">Visits</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No visits found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Department-wise List",
+  });
+}
+
+// #3 Investigation-wise order list
+export function printInvestigationWise(rows: { test: string; orders: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.orders, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.test || "—"}</td><td class="tr">${r.orders}</td></tr>`).join("");
+  reportDoc({
+    title: "INVESTIGATION-WISE LIST", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Investigation</th><th class="tr" style="width:110px;">Orders</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No orders found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Investigation-wise List",
+  });
+}
+
+// #4-8 Combined cardiology investigation list with diagnosis
+export function printCardiologyList(rows: any[], filters: { from?: string; to?: string; modality?: string; doctor?: string; department?: string; diagnosis?: string }, clinicOverride?: ClinicInfo) {
+  const activeFilters = [
+    filters.modality && `Modality: ${filters.modality}`,
+    filters.doctor && `Doctor: ${filters.doctor}`,
+    filters.department && `Department: ${filters.department}`,
+    filters.diagnosis && `Diagnosis: ${filters.diagnosis}`,
+  ].filter(Boolean).join(" · ");
+  const rowHtml = rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${r.patientName}</td><td class="tc">${r.test}</td><td>${r.doctor || "—"}</td><td>${r.department || "—"}</td>
+      <td class="tc">${new Date(r.ordered).toLocaleDateString("en-IN")}</td><td>${r.diagnosis || "—"}</td></tr>`).join("");
+  reportDoc({
+    title: "CARDIOLOGY INVESTIGATIONS", periodLabel: `${periodLabel(filters.from, filters.to)}${activeFilters ? " · " + activeFilters : ""}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Patient</th><th class="tc" style="width:80px;">Test</th><th>Doctor</th><th>Department</th><th class="tc" style="width:90px;">Date</th><th>Diagnosis</th></tr>`,
+    rowHtml, colCount: 7, emptyLabel: "No investigations found for these filters", footerLabel: "Cardiology Investigations",
+  });
+}
+
+// #10 Cash collected, by payment mode
+export function printCashCollected(data: { rows: { paymentMode: string; total: number }[]; grandTotal: number }, date: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = data.rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.paymentMode}</td><td class="tr">₹${r.total.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "CASH COLLECTED", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Payment Mode</th><th class="tr" style="width:130px;">Amount</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No collections for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">₹${data.grandTotal.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Cash Collected",
+  });
+}
+
+// #11 Total bills generated per day
+export function printDailyBillsCount(data: { rows: { type: string; status: string; count: number; amount: number }[]; totalBills: number; totalAmount: number }, date: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = data.rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${r.type}</td><td>${r.status}</td><td class="tr">${r.count}</td><td class="tr">₹${r.amount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "TOTAL BILLS GENERATED — DAY SUMMARY", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Type</th><th>Status</th><th class="tr" style="width:90px;">Bills</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+    rowHtml, colCount: 5, emptyLabel: "No bills generated for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td colspan="2"><strong>TOTAL</strong></td><td class="tr">${data.totalBills}</td><td class="tr">₹${data.totalAmount.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Total Bills — Day Summary",
+  });
+}
+
+// #12 Referrals by source (Doctor/VHN/Medical Shop/Lab/Self/Other)
+export function printReferralsBySource(rows: { referralSource: string; count: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.referralSource}</td><td class="tr">${r.count}</td></tr>`).join("");
+  reportDoc({
+    title: "REFERRALS BY SOURCE", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Referral Source</th><th class="tr" style="width:110px;">Count</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No referrals found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Referrals by Source",
+  });
+}
+
+// #13 Referrals by geographical area
+export function printReferralsByArea(rows: { area: string; count: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.area}</td><td class="tr">${r.count}</td></tr>`).join("");
+  reportDoc({
+    title: "REFERRALS BY AREA", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Area</th><th class="tr" style="width:110px;">Count</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No referrals found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Referrals by Area",
+  });
+}
+
+// #14 Return bill (Credit Note) summary
+export function printReturnBills(data: { notes: any[]; totalReturned: number }, from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = data.notes.map((n, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${n.billId}</td><td>${n.originalBillNo || "—"}</td><td>${n.patientName}</td>
+      <td class="tc">${new Date(n.date).toLocaleDateString("en-IN")}</td><td class="tr">₹${Math.abs(n.amount).toLocaleString("en-IN")}</td><td>${n.cancelReason || "—"}</td></tr>`).join("");
+  reportDoc({
+    title: "RETURN BILL SUMMARY", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Credit Note</th><th>Original Bill</th><th>Patient</th><th class="tc" style="width:90px;">Date</th><th class="tr" style="width:110px;">Amount</th><th>Reason</th></tr>`,
+    rowHtml, colCount: 7, emptyLabel: "No returns for this period",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td colspan="5"></td><td class="tr"><strong>₹${data.totalReturned.toLocaleString("en-IN")}</strong></td><td></td></tr>`,
+    footerLabel: "Return Bill Summary",
+  });
+}
+
+// #15 Timewise sales summary (hourly)
+export function printTimewiseSales(rows: { hour: number; total: number; count: number }[], date: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  const fmtHour = (h: number) => `${String(h % 12 === 0 ? 12 : h % 12).padStart(2, "0")}:00 ${h < 12 ? "AM" : "PM"}`;
+  const rowHtml = rows.filter((r) => r.count > 0).map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${fmtHour(r.hour)} – ${fmtHour((r.hour + 1) % 24)}</td><td class="tr">${r.count}</td><td class="tr">₹${r.total.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "TIMEWISE SALES SUMMARY", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Hour</th><th class="tr" style="width:100px;">Payments</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+    rowHtml, colCount: 4, emptyLabel: "No sales recorded for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${rows.reduce((s, r) => s + r.count, 0)}</td><td class="tr">₹${total.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Timewise Sales Summary",
+  });
+}
+
+// #16 Daywise discount summary
+export function printDiscountDaywise(rows: { day: string; totalDiscount: number; bills: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.totalDiscount, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.day}</td><td class="tr">${r.bills}</td><td class="tr">₹${r.totalDiscount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "DAYWISE DISCOUNT SUMMARY", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Day</th><th class="tr" style="width:90px;">Bills</th><th class="tr" style="width:130px;">Total Discount</th></tr>`,
+    rowHtml, colCount: 4, emptyLabel: "No discounts given in this period",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td></td><td class="tr">₹${total.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Daywise Discount Summary",
+  });
+}
+
+// #17 Billwise discount summary
+export function printDiscountBillwise(rows: any[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.discount, 0);
+  const rowHtml = rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${r.billId}</td><td>${r.patientName}</td><td class="tc">${new Date(r.date).toLocaleDateString("en-IN")}</td>
+      <td class="tr">₹${r.amount.toLocaleString("en-IN")}</td><td>${r.discountType}${r.discountType === "Percent" ? ` (${r.discountPercent}%)` : ""}</td><td class="tr">₹${r.discount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "BILLWISE DISCOUNT SUMMARY", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Bill No</th><th>Patient</th><th class="tc" style="width:90px;">Date</th><th class="tr" style="width:100px;">Bill Amount</th><th>Discount Type</th><th class="tr" style="width:100px;">Discount</th></tr>`,
+    rowHtml, colCount: 7, emptyLabel: "No discounted bills in this period",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td colspan="6"><strong>TOTAL</strong></td><td class="tr">₹${total.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Billwise Discount Summary",
+  });
+}
+
+// #18 Day IN-OUT cash flow summary
+export function printCashFlow(data: { cashIn: number; cashOut: number; netCash: number; cancelledBills: number; cancelledAmount: number }, date: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = `
+    <tr><td class="tc">1</td><td>Cash In (collections)</td><td class="tr" style="color:#15803d;">₹${data.cashIn.toLocaleString("en-IN")}</td></tr>
+    <tr><td class="tc">2</td><td>Cash Out (returns/credit notes)</td><td class="tr" style="color:#dc2626;">₹${data.cashOut.toLocaleString("en-IN")}</td></tr>
+    <tr><td class="tc">3</td><td>Cancelled Bills (informational — paid=0, no cash impact)</td><td class="tr">${data.cancelledBills} bill${data.cancelledBills !== 1 ? "s" : ""} · ₹${data.cancelledAmount.toLocaleString("en-IN")}</td></tr>`;
+  reportDoc({
+    title: "DAY IN-OUT CASH FLOW SUMMARY", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Item</th><th class="tr" style="width:220px;">Value</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No cash flow for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>NET CASH</strong></td><td class="tr">₹${data.netCash.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Day Cash Flow Summary",
+  });
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 function open(title: string, body: string) {
   const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");

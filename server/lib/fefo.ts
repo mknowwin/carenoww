@@ -3,13 +3,21 @@ import DrugInventory from "../models/DrugInventory.js";
 import DrugBatch from "../models/DrugBatch.js";
 import InventoryAuditLog from "../models/InventoryAuditLog.js";
 
-export async function getAvailableStock(tenantId: string, drugId: string, session?: mongoose.ClientSession): Promise<number> {
+export async function getAvailableStock(
+  tenantId: string,
+  drugId: string,
+  session?: mongoose.ClientSession,
+  forcedBatchId?: string
+): Promise<number> {
   const drug = await DrugInventory.findOne({ _id: drugId, tenantId }).session(session ?? null);
   if (!drug) return 0;
   if (!drug.isBatchTracked) return drug.stock;
 
+  const match: any = { tenantId: new mongoose.Types.ObjectId(tenantId), drugId: new mongoose.Types.ObjectId(drugId), status: "Active" };
+  if (forcedBatchId) match._id = new mongoose.Types.ObjectId(forcedBatchId);
+
   const agg = await DrugBatch.aggregate([
-    { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), drugId: new mongoose.Types.ObjectId(drugId), status: "Active" } },
+    { $match: match },
     { $group: { _id: null, total: { $sum: "$quantityRemaining" } } },
   ]).session(session ?? null);
   return agg[0]?.total ?? 0;
@@ -76,18 +84,26 @@ export async function syncDrugStock(tenantId: string, drugId: string, session?: 
   await DrugInventory.findByIdAndUpdate(drugId, { $set: { stock, status } }, { session });
 }
 
+// When forcedBatchId is set (pharmacist manually picked a batch at dispense time),
+// deduction is restricted to that one batch only — no spillover to other batches,
+// and an insufficient-stock error if that batch alone can't cover the quantity.
+// Otherwise deducts across active batches in expiry order (FEFO), as before.
 export async function fefoDeduct(
   tenantId: string,
   drugId: string,
   quantity: number,
-  session?: mongoose.ClientSession
+  session?: mongoose.ClientSession,
+  forcedBatchId?: string
 ): Promise<Array<{ batchId: mongoose.Types.ObjectId; batchNo: string; deducted: number; mrpPerUnit: number; expiryDate: Date }>> {
-  const batches = await DrugBatch.find({
+  const query: any = {
     tenantId: new mongoose.Types.ObjectId(tenantId),
     drugId: new mongoose.Types.ObjectId(drugId),
     status: "Active",
     quantityRemaining: { $gt: 0 },
-  }).sort({ expiryDate: 1 }).session(session ?? null);
+  };
+  if (forcedBatchId) query._id = new mongoose.Types.ObjectId(forcedBatchId);
+
+  const batches = await DrugBatch.find(query).sort({ expiryDate: 1 }).session(session ?? null);
 
   const available = batches.reduce((s, b) => s + b.quantityRemaining, 0);
   if (available < quantity) {

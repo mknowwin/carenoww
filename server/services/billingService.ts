@@ -32,7 +32,7 @@ export async function checkPharmacyStock(tenantId: string, pharmacyItems: any[],
   const shortages: Array<{ drugId: string; name?: string; required: number; available: number }> = [];
   for (const item of pharmacyItems) {
     const qty = item.quantity ?? 1;
-    const available = await getAvailableStock(tenantId.toString(), item.drugId, session);
+    const available = await getAvailableStock(tenantId.toString(), item.drugId, session, item.batchId);
     if (available < qty) {
       shortages.push({ drugId: item.drugId, name: item.name || item.drugName, required: qty, available });
     }
@@ -72,7 +72,7 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
     if (drug.isBatchTracked) {
       // FEFO batch deduction — syncs DrugInventory.stock from batches, and
       // may span multiple batches; expand into one line item per batch drawn.
-      const used = await fefoDeduct(tenantId.toString(), item.drugId, qty, session);
+      const used = await fefoDeduct(tenantId.toString(), item.drugId, qty, session, item.batchId);
       await syncDrugStock(tenantId.toString(), item.drugId, session);
       for (const u of used) {
         result.push({
