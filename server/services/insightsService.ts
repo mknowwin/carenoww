@@ -149,9 +149,12 @@ export async function getDepartmentWise(tenantId: string, tz: string, from?: str
 
 // ══ #3 Investigation-wise order counts ═══════════════════════════════════════
 
+// Completed only — an order the doctor placed but the patient never came back for
+// (or that's still Pending/Collected/Processing) isn't a real investigation done,
+// and would show a null diagnosis anyway.
 async function liveInvestigationWise(tenantId: string, start: Date, end: Date) {
   return LabOrder.aggregate([
-    { $match: { tenantId: oid(tenantId), ordered: { $gte: start, $lte: end } } },
+    { $match: { tenantId: oid(tenantId), ordered: { $gte: start, $lte: end }, status: "Completed" } },
     { $group: { _id: "$test", orders: { $sum: 1 } } },
     { $project: { _id: 0, test: "$_id", orders: 1 } },
     { $sort: { orders: -1 } },
@@ -197,11 +200,15 @@ export interface InvestigationListFilters {
 // of the selected atomic names (test is free-text and sometimes comma-joined across
 // several tests ordered together — see LabOrder.test); omitted, it covers every
 // investigation recorded for the tenant.
+// Completed only — same reasoning as liveInvestigationWise above: an order that was
+// placed but never resulted (patient didn't return, sample never collected, etc.)
+// isn't a completed investigation and shouldn't appear as one.
 export async function getInvestigationList(tenantId: string, tz: string, filters: InvestigationListFilters) {
   const { start, end } = resolveDateRange(tz, filters.from, filters.to);
   const query: any = {
     tenantId,
     ordered: { $gte: start, $lte: end },
+    status: "Completed",
   };
   if (filters.investigationTypes?.length) {
     query.test = { $regex: filters.investigationTypes.map(escapeRegex).join("|"), $options: "i" };
