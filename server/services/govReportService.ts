@@ -46,11 +46,16 @@ function matchesAnyType(test: string, types?: string[]): boolean {
 // Service Rate Master catalog on the client) — no doctor/department/referral sections.
 async function buildSnapshot(tenantId: string, tz: string, reportType: GovReportType, periodFrom: string, periodTo: string, investigationTypes?: string[]) {
   if (reportType === "HMIS-Monthly") {
-    const all = await insightsService.getInvestigationWise(tenantId, tz, periodFrom, periodTo);
+    const [all, investigationDetails] = await Promise.all([
+      insightsService.getInvestigationWise(tenantId, tz, periodFrom, periodTo),
+      // Same row-level detail as Insights → Investigations (patient/doctor/department/diagnosis) —
+      // reuses the exact same filter shape and query, just fed this report's period + selection.
+      insightsService.getInvestigationList(tenantId, tz, { from: periodFrom, to: periodTo, investigationTypes }),
+    ]);
     const investigationWise = investigationTypes?.length
       ? all.filter((r: any) => matchesAnyType(r.test, investigationTypes))
       : all;
-    return { investigationWise, investigationTypes: investigationTypes || [] };
+    return { investigationWise, investigationDetails, investigationTypes: investigationTypes || [] };
   }
 
   // PharmacyAudit

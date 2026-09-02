@@ -1817,6 +1817,14 @@ export function printGovernmentReport(submission: any, clinicOverride?: ClinicIn
   let sectionsHtml = "";
   if (isHmis) {
     sectionsHtml += govCountTable(s.investigationWise || [], "test", "Investigation", "orders", "Orders", "No investigations recorded");
+
+    // Same row-level detail as Insights → Investigations (patient/doctor/department/diagnosis)
+    const detailRows = (s.investigationDetails || []).map((r: any) => `
+      <tr><td>${r.patientName}</td><td class="tc">${r.test}</td><td>${r.doctor || "—"}</td><td>${r.department || "—"}</td>
+        <td class="tc">${new Date(r.ordered).toLocaleDateString("en-IN")}</td><td>${r.diagnosis || "—"}</td></tr>`).join("");
+    sectionsHtml += govSection("Investigation Details",
+      `<tr><th>Patient</th><th class="tc" style="width:110px;">Investigation</th><th>Doctor</th><th>Department</th><th class="tc" style="width:90px;">Date</th><th>Diagnosis</th></tr>`,
+      detailRows, 6, "No investigation records for this period");
   } else {
     const drugSalesRows = (s.drugSales?.rows || []).map((r: any) => `<tr><td>${r.drugName}</td><td class="tr">${r.quantity}</td><td class="tr">₹${(r.amount || 0).toLocaleString("en-IN")}</td></tr>`).join("");
     sectionsHtml += govSection("Drug-wise Sales (Period)",
