@@ -7,13 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileCheck2, Printer, Loader2, CheckCircle2 } from "lucide-react";
-import { govReports as govReportsApi } from "@/lib/api";
+import { govReports as govReportsApi, ratemaster as ratemasterApi } from "@/lib/api";
 import { printGovernmentReport } from "@/lib/print";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 
 const REPORT_TYPES = [
-  { value: "HMIS-Monthly", label: "HMIS Monthly Return (OPD/IPD/Investigations)" },
+  { value: "HMIS-Monthly", label: "HMIS Monthly Return (Investigations)" },
   { value: "PharmacyAudit", label: "Pharmacy Audit (Drug Control)" },
 ];
 
@@ -60,6 +60,7 @@ export default function StatutoryReportsPage() {
   const [reportType, setReportType] = useState<"HMIS-Monthly" | "PharmacyAudit">("HMIS-Monthly");
   const [periodFrom, setPeriodFrom] = useState(today.slice(0, 8) + "01"); // first of this month
   const [periodTo, setPeriodTo] = useState(today);
+  const [investigationTypes, setInvestigationTypes] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
 
@@ -71,10 +72,26 @@ export default function StatutoryReportsPage() {
   });
   const submissions = data?.submissions ?? [];
 
+  // Investigation catalog for the HMIS-Monthly dropdown — the clinic's configured
+  // billable Lab services, not just investigations that happen to have history.
+  const { data: labServices } = useQuery({
+    queryKey: ["ratemaster-lab"],
+    queryFn: () => ratemasterApi.list({ category: "Lab" }),
+    retry: false,
+    enabled: canManage && reportType === "HMIS-Monthly",
+  });
+
+  const toggleInvestigation = (name: string) => {
+    setInvestigationTypes((prev) => prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name]);
+  };
+
   const handleGenerate = async () => {
     setGenerating(true); setError("");
     try {
-      await govReportsApi.generate({ reportType, periodFrom, periodTo });
+      await govReportsApi.generate({
+        reportType, periodFrom, periodTo,
+        ...(reportType === "HMIS-Monthly" ? { investigationTypes } : {}),
+      });
       qc.invalidateQueries({ queryKey: ["gov-reports"] });
     } catch (e: any) {
       setError(e.message || "Failed to generate report");
@@ -139,6 +156,35 @@ export default function StatutoryReportsPage() {
               <Input type="date" className="h-9 text-sm" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
             </div>
           </div>
+
+          {reportType === "HMIS-Monthly" && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">
+                  Investigations {investigationTypes.length > 0 ? `(${investigationTypes.length} selected)` : "(all, if none selected)"}
+                </Label>
+                {investigationTypes.length > 0 && (
+                  <button className="text-xs text-primary hover:underline" onClick={() => setInvestigationTypes([])}>Clear</button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(labServices ?? []).map((s: any) => (
+                  <button key={s._id} type="button" onClick={() => toggleInvestigation(s.name)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                      investigationTypes.includes(s.name)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:border-primary/40"
+                    }`}>
+                    {s.name}
+                  </button>
+                ))}
+                {(labServices ?? []).length === 0 && (
+                  <span className="text-xs text-muted-foreground italic">No Lab services configured in Rate Master yet</span>
+                )}
+              </div>
+            </div>
+          )}
+
           {error && <p className="text-xs text-destructive">{error}</p>}
           <Button size="sm" disabled={generating} onClick={handleGenerate} className="gap-1.5">
             {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />}

@@ -21,10 +21,10 @@ router.get("/:id", asyncHandler(async (req: AuthRequest, res) => {
 
 // POST /api/gov-reports/generate
 router.post("/generate", asyncHandler(async (req: AuthRequest, res) => {
-  const { reportType, periodFrom, periodTo } = req.body;
+  const { reportType, periodFrom, periodTo, investigationTypes } = req.body;
   const data = await govReportService.generateReport(
     req.user!.tenantId, req.user!.timezone, req.user!.name, req.user!.id,
-    reportType, periodFrom, periodTo
+    reportType, periodFrom, periodTo, investigationTypes
   );
   res.status(201).json({ success: true, data });
 }));

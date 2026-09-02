@@ -35,16 +35,22 @@ async function periodDrugSales(tenantId: string, tz: string, periodFrom: string,
   return { rows, totalQuantity: rows.reduce((s, r) => s + r.quantity, 0), totalAmount: rows.reduce((s, r) => s + r.amount, 0) };
 }
 
-async function buildSnapshot(tenantId: string, tz: string, reportType: GovReportType, periodFrom: string, periodTo: string) {
+function matchesAnyType(test: string, types?: string[]): boolean {
+  if (!types || types.length === 0) return true;
+  const lower = test.toLowerCase();
+  return types.some((t) => lower.includes(t.toLowerCase()));
+}
+
+// HMIS-Monthly is investigation-only: volume counts per investigation type for the
+// period, optionally narrowed to a selected set of investigations (sourced from the
+// Service Rate Master catalog on the client) — no doctor/department/referral sections.
+async function buildSnapshot(tenantId: string, tz: string, reportType: GovReportType, periodFrom: string, periodTo: string, investigationTypes?: string[]) {
   if (reportType === "HMIS-Monthly") {
-    const [doctorWise, departmentWise, investigationWise, referralsBySource, referralsByArea] = await Promise.all([
-      insightsService.getDoctorWise(tenantId, tz, periodFrom, periodTo),
-      insightsService.getDepartmentWise(tenantId, tz, periodFrom, periodTo),
-      insightsService.getInvestigationWise(tenantId, tz, periodFrom, periodTo),
-      insightsService.getReferralsBySource(tenantId, tz, periodFrom, periodTo),
-      insightsService.getReferralsByArea(tenantId, tz, periodFrom, periodTo),
-    ]);
-    return { doctorWise, departmentWise, investigationWise, referralsBySource, referralsByArea };
+    const all = await insightsService.getInvestigationWise(tenantId, tz, periodFrom, periodTo);
+    const investigationWise = investigationTypes?.length
+      ? all.filter((r: any) => matchesAnyType(r.test, investigationTypes))
+      : all;
+    return { investigationWise, investigationTypes: investigationTypes || [] };
   }
 
   // PharmacyAudit
@@ -59,10 +65,10 @@ async function buildSnapshot(tenantId: string, tz: string, reportType: GovReport
 
 export async function generateReport(
   tenantId: string, tz: string, userName: string, userId: string,
-  reportType: GovReportType, periodFrom: string, periodTo: string
+  reportType: GovReportType, periodFrom: string, periodTo: string, investigationTypes?: string[]
 ) {
   if (!periodFrom || !periodTo) throw AppError.badRequest("periodFrom and periodTo are required");
-  const snapshotData = await buildSnapshot(tenantId, tz, reportType, periodFrom, periodTo);
+  const snapshotData = await buildSnapshot(tenantId, tz, reportType, periodFrom, periodTo, investigationTypes);
   const submissionId = await getNextId(tenantId, "govsub", "GOVSUB-");
 
   return GovernmentReportSubmission.create({

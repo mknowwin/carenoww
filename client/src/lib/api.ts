@@ -191,7 +191,7 @@ export const govReports = {
     return get<{ submissions: any[]; total: number }>(`/gov-reports${qs}`);
   },
   get:       (id: string) => get<any>(`/gov-reports/${id}`),
-  generate:  (data: { reportType: "HMIS-Monthly" | "PharmacyAudit"; periodFrom: string; periodTo: string }) =>
+  generate:  (data: { reportType: "HMIS-Monthly" | "PharmacyAudit"; periodFrom: string; periodTo: string; investigationTypes?: string[] }) =>
     post<any>("/gov-reports/generate", data),
   finalize:  (id: string) => post<any>(`/gov-reports/${id}/finalize`, {}),
   submit:    (id: string, referenceNo: string) => post<any>(`/gov-reports/${id}/submit`, { referenceNo }),

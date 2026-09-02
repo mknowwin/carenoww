@@ -1816,11 +1816,7 @@ export function printGovernmentReport(submission: any, clinicOverride?: ClinicIn
 
   let sectionsHtml = "";
   if (isHmis) {
-    sectionsHtml += govCountTable(s.doctorWise || [], "doctor", "Doctor", "visits", "Visits", "No visits recorded");
-    sectionsHtml += govCountTable(s.departmentWise || [], "department", "Department", "visits", "Visits", "No visits recorded");
     sectionsHtml += govCountTable(s.investigationWise || [], "test", "Investigation", "orders", "Orders", "No investigations recorded");
-    sectionsHtml += govCountTable(s.referralsBySource || [], "referralSource", "Referral Source", "count", "Count", "No referrals recorded");
-    sectionsHtml += govCountTable(s.referralsByArea || [], "area", "Area", "count", "Count", "No referrals recorded");
   } else {
     const drugSalesRows = (s.drugSales?.rows || []).map((r: any) => `<tr><td>${r.drugName}</td><td class="tr">${r.quantity}</td><td class="tr">₹${(r.amount || 0).toLocaleString("en-IN")}</td></tr>`).join("");
     sectionsHtml += govSection("Drug-wise Sales (Period)",
@@ -1863,8 +1859,9 @@ export function printGovernmentReport(submission: any, clinicOverride?: ClinicIn
 
     <div class="doc-row">
       <div>
-        <div class="doc-title">${isHmis ? "HMIS MONTHLY RETURN" : "PHARMACY AUDIT REPORT"}</div>
+        <div class="doc-title">${isHmis ? "HMIS MONTHLY RETURN — INVESTIGATIONS" : "PHARMACY AUDIT REPORT"}</div>
         <div style="font-size:12px;color:#555;margin-top:4px;">Period: ${submission.periodFrom} — ${submission.periodTo}</div>
+        ${isHmis && s.investigationTypes?.length ? `<div style="font-size:11px;color:#888;margin-top:2px;">Investigations: ${s.investigationTypes.join(", ")}</div>` : ""}
       </div>
       <div class="doc-id">
         <div style="font-size:12px;font-weight:600;">Submission ID: ${submission.submissionId}</div>
