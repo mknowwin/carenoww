@@ -61,6 +61,7 @@ export default function StatutoryReportsPage() {
   const [reportType, setReportType] = useState<"HMIS-Monthly" | "PharmacyAudit">("HMIS-Monthly");
   const [periodFrom, setPeriodFrom] = useState(today.slice(0, 8) + "01"); // first of this month
   const [periodTo, setPeriodTo] = useState(today);
+  const [serviceCategory, setServiceCategory] = useState<"Lab" | "Diagnosis" | "Procedure">("Lab");
   const [investigationTypes, setInvestigationTypes] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
@@ -74,13 +75,21 @@ export default function StatutoryReportsPage() {
   const submissions = data?.submissions ?? [];
 
   // Investigation catalog for the HMIS-Monthly dropdown — the clinic's configured
-  // billable Lab services, not just investigations that happen to have history.
-  const { data: labServices } = useQuery({
-    queryKey: ["ratemaster-lab"],
-    queryFn: () => ratemasterApi.list({ category: "Lab" }),
+  // billable services under the chosen category (Lab/Diagnosis/Procedure), not just
+  // investigations that happen to have history.
+  const { data: categoryServices } = useQuery({
+    queryKey: ["ratemaster-category", serviceCategory],
+    queryFn: () => ratemasterApi.list({ category: serviceCategory }),
     retry: false,
     enabled: canManage && reportType === "HMIS-Monthly",
   });
+
+  // Switching category invalidates whatever was picked from the previous one —
+  // those names won't be in the new list, so clear rather than leave ghost selections.
+  const handleCategoryChange = (v: string) => {
+    setServiceCategory(v as typeof serviceCategory);
+    setInvestigationTypes([]);
+  };
 
   const toggleInvestigation = (name: string) => {
     setInvestigationTypes((prev) => prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name]);
@@ -162,6 +171,15 @@ export default function StatutoryReportsPage() {
             <div className="space-y-1.5">
               <Label className="text-xs">Investigations</Label>
               <div className="flex items-center gap-2 flex-wrap">
+                <Select value={serviceCategory} onValueChange={handleCategoryChange}>
+                  <SelectTrigger className="h-9 w-36 text-xs shrink-0"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Lab">Lab</SelectItem>
+                    <SelectItem value="Diagnosis">Diagnosis</SelectItem>
+                    <SelectItem value="Procedure">Procedure</SelectItem>
+                  </SelectContent>
+                </Select>
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5 shrink-0">
@@ -170,12 +188,12 @@ export default function StatutoryReportsPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent className="w-60 max-h-72 overflow-y-auto">
-                    <DropdownMenuLabel className="text-xs">Select investigations (none = all)</DropdownMenuLabel>
+                    <DropdownMenuLabel className="text-xs">{serviceCategory} services (none selected = all)</DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    {(labServices ?? []).length === 0 && (
-                      <div className="px-2 py-1.5 text-xs text-muted-foreground italic">No Lab services configured in Rate Master yet</div>
+                    {(categoryServices ?? []).length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground italic">No {serviceCategory} services configured in Rate Master yet</div>
                     )}
-                    {(labServices ?? []).map((s: any) => (
+                    {(categoryServices ?? []).map((s: any) => (
                       <DropdownMenuCheckboxItem
                         key={s._id}
                         className="text-xs"
