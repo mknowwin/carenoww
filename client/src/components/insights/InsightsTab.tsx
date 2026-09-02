@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { Users, Heart, IndianRupee, Share2 } from "lucide-react";
+import { Users, FlaskConical, IndianRupee, Share2 } from "lucide-react";
 import ClinicalVolumeReports from "./ClinicalVolumeReports";
-import CardiologyReport from "./CardiologyReport";
+import InvestigationReport from "./InvestigationReport";
 import BillingCashReports from "./BillingCashReports";
 import ReferralReports from "./ReferralReports";
 
 const CLUSTERS = [
   { id: "clinical", label: "Clinical Volume", icon: Users },
-  { id: "cardiology", label: "Cardiology Investigations", icon: Heart },
+  { id: "investigations", label: "Investigations", icon: FlaskConical },
   { id: "billing", label: "Billing & Cash", icon: IndianRupee },
   { id: "referrals", label: "Referrals", icon: Share2 },
 ] as const;
@@ -29,7 +29,7 @@ export default function InsightsTab() {
       </div>
 
       {cluster === "clinical" && <ClinicalVolumeReports />}
-      {cluster === "cardiology" && <CardiologyReport />}
+      {cluster === "investigations" && <InvestigationReport />}
       {cluster === "billing" && <BillingCashReports />}
       {cluster === "referrals" && <ReferralReports />}
     </div>

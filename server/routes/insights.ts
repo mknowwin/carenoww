@@ -25,14 +25,23 @@ router.get("/investigation-wise", asyncHandler(async (req: AuthRequest, res) => 
   res.json({ success: true, data });
 }));
 
-router.get("/cardiology-list", asyncHandler(async (req: AuthRequest, res) => {
-  const { from, to, doctor, department, diagnosis, modality } = req.query as Record<string, string>;
-  const data = await insightsService.getCardiologyList(req.user!.tenantId, req.user!.timezone, { from, to, doctor, department, diagnosis, modality });
+router.get("/investigation-list", asyncHandler(async (req: AuthRequest, res) => {
+  const { from, to, doctor, department, diagnosis } = req.query as Record<string, string>;
+  const raw = req.query.investigationTypes;
+  const investigationTypes = Array.isArray(raw)
+    ? raw as string[]
+    : (typeof raw === "string" && raw ? raw.split(",") : undefined);
+  const data = await insightsService.getInvestigationList(req.user!.tenantId, req.user!.timezone, { from, to, doctor, department, diagnosis, investigationTypes });
   res.json({ success: true, data });
 }));
 
-router.get("/cardiology-diagnoses", asyncHandler(async (req: AuthRequest, res) => {
-  const data = await insightsService.getCardiologyDiagnoses(req.user!.tenantId);
+router.get("/investigation-types", asyncHandler(async (req: AuthRequest, res) => {
+  const data = await insightsService.getInvestigationTypes(req.user!.tenantId);
+  res.json({ success: true, data });
+}));
+
+router.get("/diagnoses", asyncHandler(async (req: AuthRequest, res) => {
+  const data = await insightsService.getDiagnoses(req.user!.tenantId);
   res.json({ success: true, data });
 }));
 

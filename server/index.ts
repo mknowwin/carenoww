@@ -5,6 +5,7 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { connectDB } from "./db.js";
+import { startRollupCron } from "./jobs/rollupCron.js";
 import authRouter from "./routes/auth.js";
 import superadminRouter from "./routes/superadmin.js";
 import patientsRouter from "./routes/patients.js";
@@ -21,6 +22,7 @@ import ratemasterRouter from "./routes/ratemaster.js";
 import referralDoctorsRouter from "./routes/referralDoctors.js";
 import suppliersRouter from "./routes/suppliers.js";
 import insightsRouter from "./routes/insights.js";
+import govReportsRouter from "./routes/govReports.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { notFoundHandler } from "./middleware/notFoundHandler.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -64,10 +66,12 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: false }));
 
 // ── Connect to MongoDB ─────────────────────────────────────────────────────────
-connectDB().catch((err) => {
-  console.error("Failed to connect to MongoDB:", err);
-  console.warn("⚠️  Running without database — some routes will not work.");
-});
+connectDB()
+  .then(() => startRollupCron())
+  .catch((err) => {
+    console.error("Failed to connect to MongoDB:", err);
+    console.warn("⚠️  Running without database — some routes will not work.");
+  });
 
 // ── Public display route (no auth — for TV/kiosk token display) ───────────────
 // GET /api/public/display?tenantId=xxx  OR  ?slug=xxx
@@ -98,6 +102,7 @@ app.use("/api/ratemaster",        ratemasterRouter);
 app.use("/api/referral-doctors",  referralDoctorsRouter);
 app.use("/api/suppliers",         suppliersRouter);
 app.use("/api/insights",          insightsRouter);
+app.use("/api/gov-reports",       govReportsRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {

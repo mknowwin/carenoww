@@ -115,6 +115,8 @@ export const auth = {
   updateClinicSettings: (data: {
     name?: string; logoUrl?: string; clinicPhone?: string; clinicAddress?: string;
     gstNo?: string; invoicePrefix?: string; timezone?: string;
+    hmisFacilityCode?: string; drugLicenseNo?: string; registrationNo?: string;
+    signatoryName?: string; signatoryDesignation?: string;
     taxConfig?: { cgstRate?: number; sgstRate?: number; igstRate?: number; taxInclusivePricing?: boolean };
   }) => put<any>("/auth/clinic-settings", data),
 };
@@ -163,11 +165,14 @@ export const insights = {
   doctorWise:      (from?: string, to?: string) => insightsGet<any[]>("/doctor-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   departmentWise:  (from?: string, to?: string) => insightsGet<any[]>("/department-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   investigationWise:(from?: string, to?: string) => insightsGet<any[]>("/investigation-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
-  cardiologyList:  (params: { from?: string; to?: string; doctor?: string; department?: string; diagnosis?: string; modality?: string }) => {
-    const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v)) as Record<string, string>;
-    return insightsGet<any[]>("/cardiology-list", clean);
+  investigationList: (params: { from?: string; to?: string; doctor?: string; department?: string; diagnosis?: string; investigationTypes?: string[] }) => {
+    const { investigationTypes, ...rest } = params;
+    const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v)) as Record<string, string>;
+    if (investigationTypes?.length) clean.investigationTypes = investigationTypes.join(",");
+    return insightsGet<any[]>("/investigation-list", clean);
   },
-  cardiologyDiagnoses: () => insightsGet<string[]>("/cardiology-diagnoses"),
+  investigationTypes: () => insightsGet<string[]>("/investigation-types"),
+  diagnoses:       () => insightsGet<string[]>("/diagnoses"),
   cashCollected:   (date?: string) => insightsGet<{ rows: any[]; grandTotal: number }>("/cash-collected", date ? { date } : undefined),
   dailyBillsCount: (date?: string) => insightsGet<{ rows: any[]; totalBills: number; totalAmount: number }>("/daily-bills-count", date ? { date } : undefined),
   referralsBySource:(from?: string, to?: string) => insightsGet<any[]>("/referrals-by-source", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
@@ -177,6 +182,19 @@ export const insights = {
   discountDaywise: (from?: string, to?: string) => insightsGet<any[]>("/discount-daywise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   discountBillwise:(from?: string, to?: string) => insightsGet<any[]>("/discount-billwise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   cashFlow:        (date?: string) => insightsGet<{ cashIn: number; cashOut: number; netCash: number; cancelledBills: number; cancelledAmount: number }>("/cash-flow", date ? { date } : undefined),
+};
+
+// ── Government / Statutory Reports ──────────────────────────────────────────────
+export const govReports = {
+  list:      (params?: Record<string, string>) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return get<{ submissions: any[]; total: number }>(`/gov-reports${qs}`);
+  },
+  get:       (id: string) => get<any>(`/gov-reports/${id}`),
+  generate:  (data: { reportType: "HMIS-Monthly" | "PharmacyAudit"; periodFrom: string; periodTo: string }) =>
+    post<any>("/gov-reports/generate", data),
+  finalize:  (id: string) => post<any>(`/gov-reports/${id}/finalize`, {}),
+  submit:    (id: string, referenceNo: string) => post<any>(`/gov-reports/${id}/submit`, { referenceNo }),
 };
 
 // ── Patients ──────────────────────────────────────────────────────────────────

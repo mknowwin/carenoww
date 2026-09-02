@@ -198,5 +198,8 @@ const BillingRecordSchema = new Schema<IBillingRecord>(
 );
 
 BillingRecordSchema.index({ tenantId: 1, billId: 1 }, { unique: true });
+BillingRecordSchema.index({ tenantId: 1, date: 1, docType: 1 });
+BillingRecordSchema.index({ tenantId: 1, "payments.paidAt": 1 });
+BillingRecordSchema.index({ tenantId: 1, status: 1, cancelledAt: 1 });
 
 export default mongoose.model<IBillingRecord>("BillingRecord", BillingRecordSchema);

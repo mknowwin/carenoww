@@ -20,6 +20,7 @@ const PAGE_TITLES: Record<string, { title: string; description: string }> = {
   "/pharmacy":     { title: "Pharmacy Management",     description: "Prescription dispensing, drug inventory and MAR" },
   "/billing":      { title: "Billing & Revenue Cycle", description: "Patient billing, insurance claims and financial management" },
   "/analytics":    { title: "Clinical & Business Analytics", description: "Hospital performance metrics and AI-generated insights" },
+  "/statutory-reports": { title: "Statutory Reports", description: "Generate and track government report submissions" },
   "/settings":     { title: "Settings",                description: "Account, system and notification preferences" },
 };
 

@@ -27,6 +27,11 @@ export interface ITenant extends Document {
     gstNo?: string;
     invoicePrefix?: string;
     timezone?: string;
+    hmisFacilityCode?: string;
+    drugLicenseNo?: string;
+    registrationNo?: string;
+    signatoryName?: string;
+    signatoryDesignation?: string;
     taxConfig?: {
       cgstRate: number;
       sgstRate: number;
@@ -68,6 +73,11 @@ const TenantSchema = new Schema<ITenant>(
       gstNo:         { type: String, default: "" },
       invoicePrefix: { type: String, default: "BILL" },
       timezone:      { type: String, default: "Asia/Kolkata" },
+      hmisFacilityCode:     { type: String, default: "" },
+      drugLicenseNo:        { type: String, default: "" },
+      registrationNo:       { type: String, default: "" },
+      signatoryName:        { type: String, default: "" },
+      signatoryDesignation: { type: String, default: "" },
       taxConfig: {
         cgstRate:            { type: Number, default: 0 },
         sgstRate:            { type: Number, default: 0 },

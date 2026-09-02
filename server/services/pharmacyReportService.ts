@@ -1,13 +1,16 @@
 import mongoose from "mongoose";
 import PharmacyOrder from "../models/PharmacyOrder.js";
 import DrugInventory from "../models/DrugInventory.js";
+import TenantDailyRollup from "../models/TenantDailyRollup.js";
 import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 
 const oid = (tenantId: string) => new mongoose.Types.ObjectId(tenantId);
 
-// #9 Drug-wise day sales report — quantity + money, from dispensed order items
-export async function getDrugSalesReport(tenantId: string, tz: string, date?: string) {
-  const dateStr = date || todayInTz(tz);
+// #9 Drug-wise day sales report — quantity + money, from dispensed order items.
+// Same day-bucketed shape as doctor-wise/investigation-wise (see insightsService.ts),
+// so it's materialized into TenantDailyRollup.pharmacy — checked here before falling
+// back to the live aggregation below.
+export async function liveDrugSalesReport(tenantId: string, tz: string, dateStr: string) {
   const start = startOfDayUtc(dateStr, tz);
   const end = endOfDayUtc(dateStr, tz);
 
@@ -21,6 +24,16 @@ export async function getDrugSalesReport(tenantId: string, tz: string, date?: st
   const totalQuantity = rows.reduce((s, r) => s + r.quantity, 0);
   const totalAmount = rows.reduce((s, r) => s + r.amount, 0);
   return { rows, totalQuantity, totalAmount };
+}
+
+export async function getDrugSalesReport(tenantId: string, tz: string, date?: string) {
+  const dateStr = date || todayInTz(tz);
+  const today = todayInTz(tz);
+  if (dateStr < today) {
+    const rollup = await TenantDailyRollup.findOne({ tenantId, date: dateStr, status: "final" }).lean();
+    if (rollup) return { rows: rollup.pharmacy.drugSales, totalQuantity: rollup.pharmacy.totalQuantity, totalAmount: rollup.pharmacy.totalAmount };
+  }
+  return liveDrugSalesReport(tenantId, tz, dateStr);
 }
 
 // #20 Non-moving drug list — active drugs with no dispensed order within the window

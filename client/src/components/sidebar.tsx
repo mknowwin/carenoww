@@ -5,7 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   LayoutDashboard, Users, CalendarDays, Stethoscope, BedDouble,
   FlaskConical, Pill, CreditCard, BarChart3, Settings, ChevronLeft,
-  Activity, LogOut, Heart, UserCheck,
+  Activity, LogOut, Heart, UserCheck, FileCheck2,
 } from "lucide-react";
 import { useAuth, UserRole } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -29,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "/pharmacy",     label: "Pharmacy",     icon: Pill,            description: "Dispensing & drug inventory",   roles: ["admin","pharmacist","pharmacy_admin","nurse"] },
   { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",     roles: ["admin","finance","receptionist","pharmacist","pharmacy_admin"] },
   { id: "/analytics",    label: "Analytics",    icon: BarChart3,       description: "Clinical & business insights",  roles: ["admin","finance"] },
+  { id: "/statutory-reports", label: "Statutory Reports", icon: FileCheck2, description: "Government report submissions", roles: ["admin","finance"] },
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {

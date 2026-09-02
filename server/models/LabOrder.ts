@@ -67,5 +67,9 @@ const LabOrderSchema = new Schema<ILabOrder>(
 );
 
 LabOrderSchema.index({ tenantId: 1, labId: 1 }, { unique: true });
+LabOrderSchema.index({ tenantId: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, doctor: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, department: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, diagnosis: 1, ordered: 1 });
 
 export default mongoose.model<ILabOrder>("LabOrder", LabOrderSchema);

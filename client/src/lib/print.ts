@@ -12,6 +12,11 @@ export interface ClinicInfo {
   city?: string;
   gstNo?: string;
   invoiceStyle?: InvoiceStyle;
+  hmisFacilityCode?: string;
+  drugLicenseNo?: string;
+  registrationNo?: string;
+  signatoryName?: string;
+  signatoryDesignation?: string;
 }
 
 const DEFAULT_CLINIC: ClinicInfo = {
@@ -33,6 +38,12 @@ function getStoredClinic(): ClinicInfo {
         address:      u.clinicAddress || "",
         city:         u.clinicCity    || "",
         invoiceStyle: u.invoiceStyle  || "classic",
+        gstNo:                u.gstNo                || "",
+        hmisFacilityCode:     u.hmisFacilityCode      || "",
+        drugLicenseNo:        u.drugLicenseNo         || "",
+        registrationNo:       u.registrationNo        || "",
+        signatoryName:        u.signatoryName         || "",
+        signatoryDesignation: u.signatoryDesignation  || "",
       };
     }
   } catch {}
@@ -1629,10 +1640,10 @@ export function printInvestigationWise(rows: { test: string; orders: number }[],
   });
 }
 
-// #4-8 Combined cardiology investigation list with diagnosis
-export function printCardiologyList(rows: any[], filters: { from?: string; to?: string; modality?: string; doctor?: string; department?: string; diagnosis?: string }, clinicOverride?: ClinicInfo) {
+// #4-8 (generalized) — any investigation with a diagnosis, filterable by type/doctor/department/diagnosis
+export function printInvestigationList(rows: any[], filters: { from?: string; to?: string; investigationTypes?: string[]; doctor?: string; department?: string; diagnosis?: string }, clinicOverride?: ClinicInfo) {
   const activeFilters = [
-    filters.modality && `Modality: ${filters.modality}`,
+    filters.investigationTypes?.length && `Types: ${filters.investigationTypes.join(", ")}`,
     filters.doctor && `Doctor: ${filters.doctor}`,
     filters.department && `Department: ${filters.department}`,
     filters.diagnosis && `Diagnosis: ${filters.diagnosis}`,
@@ -1641,9 +1652,9 @@ export function printCardiologyList(rows: any[], filters: { from?: string; to?: 
     <tr><td class="tc">${i + 1}</td><td>${r.patientName}</td><td class="tc">${r.test}</td><td>${r.doctor || "—"}</td><td>${r.department || "—"}</td>
       <td class="tc">${new Date(r.ordered).toLocaleDateString("en-IN")}</td><td>${r.diagnosis || "—"}</td></tr>`).join("");
   reportDoc({
-    title: "CARDIOLOGY INVESTIGATIONS", periodLabel: `${periodLabel(filters.from, filters.to)}${activeFilters ? " · " + activeFilters : ""}`, clinicOverride,
-    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Patient</th><th class="tc" style="width:80px;">Test</th><th>Doctor</th><th>Department</th><th class="tc" style="width:90px;">Date</th><th>Diagnosis</th></tr>`,
-    rowHtml, colCount: 7, emptyLabel: "No investigations found for these filters", footerLabel: "Cardiology Investigations",
+    title: "INVESTIGATIONS WITH DIAGNOSIS", periodLabel: `${periodLabel(filters.from, filters.to)}${activeFilters ? " · " + activeFilters : ""}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Patient</th><th class="tc" style="width:110px;">Investigation</th><th>Doctor</th><th>Department</th><th class="tc" style="width:90px;">Date</th><th>Diagnosis</th></tr>`,
+    rowHtml, colCount: 7, emptyLabel: "No investigations found for these filters", footerLabel: "Investigations with Diagnosis",
   });
 }
 
@@ -1768,6 +1779,108 @@ export function printCashFlow(data: { cashIn: number; cashOut: number; netCash: 
     footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>NET CASH</strong></td><td class="tr">₹${data.netCash.toLocaleString("en-IN")}</td></tr>`,
     footerLabel: "Day Cash Flow Summary",
   });
+}
+
+// ── Government report submission (formal letterhead + signatory block) ────────
+
+function govSection(title: string, theadHtml: string, rowHtml: string, colCount: number, emptyLabel: string): string {
+  return `
+    <div style="margin:18px 0 10px;">
+      <div style="font-size:13px;font-weight:700;color:#111;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:8px;">${title}</div>
+      <table>
+        <thead>${theadHtml}</thead>
+        <tbody>${rowHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:#888;padding:14px;">${emptyLabel}</td></tr>`}</tbody>
+      </table>
+    </div>`;
+}
+
+function govCountTable(rows: any[], keyField: string, keyLabel: string, valueField: string, valueLabel: string, emptyLabel: string): string {
+  const rowHtml = rows.map((r) => `<tr><td>${r[keyField] ?? "—"}</td><td class="tr">${r[valueField] ?? 0}</td></tr>`).join("");
+  return govSection(`${keyLabel} — ${valueLabel}`,
+    `<tr><th>${keyLabel}</th><th class="tr" style="width:120px;">${valueLabel}</th></tr>`,
+    rowHtml, 2, emptyLabel);
+}
+
+export function printGovernmentReport(submission: any, clinicOverride?: ClinicInfo) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date(submission.generatedAt || Date.now()).toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const s = submission.snapshotData || {};
+  const isHmis = submission.reportType === "HMIS-Monthly";
+
+  const identityLine = [
+    clinic.registrationNo && `Registration No: ${clinic.registrationNo}`,
+    clinic.hmisFacilityCode && `HMIS Facility Code: ${clinic.hmisFacilityCode}`,
+    clinic.drugLicenseNo && `Drug License No: ${clinic.drugLicenseNo}`,
+    clinic.gstNo && `GSTIN: ${clinic.gstNo}`,
+  ].filter(Boolean).join(" &nbsp;·&nbsp; ");
+
+  let sectionsHtml = "";
+  if (isHmis) {
+    sectionsHtml += govCountTable(s.doctorWise || [], "doctor", "Doctor", "visits", "Visits", "No visits recorded");
+    sectionsHtml += govCountTable(s.departmentWise || [], "department", "Department", "visits", "Visits", "No visits recorded");
+    sectionsHtml += govCountTable(s.investigationWise || [], "test", "Investigation", "orders", "Orders", "No investigations recorded");
+    sectionsHtml += govCountTable(s.referralsBySource || [], "referralSource", "Referral Source", "count", "Count", "No referrals recorded");
+    sectionsHtml += govCountTable(s.referralsByArea || [], "area", "Area", "count", "Count", "No referrals recorded");
+  } else {
+    const drugSalesRows = (s.drugSales?.rows || []).map((r: any) => `<tr><td>${r.drugName}</td><td class="tr">${r.quantity}</td><td class="tr">₹${(r.amount || 0).toLocaleString("en-IN")}</td></tr>`).join("");
+    sectionsHtml += govSection("Drug-wise Sales (Period)",
+      `<tr><th>Drug Name</th><th class="tr" style="width:100px;">Quantity</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+      drugSalesRows, 3, "No dispensed items in this period");
+
+    const nonMovingRows = (s.nonMovingDrugs || []).map((d: any) => `<tr><td>${d.name}</td><td>${d.category || "—"}</td><td class="tr">${d.stock} ${d.unit}</td><td class="tc">${d.lastDispensedAt ? new Date(d.lastDispensedAt).toLocaleDateString("en-IN") : "Never"}</td></tr>`).join("");
+    sectionsHtml += govSection("Non-Moving Drugs (90 days)",
+      `<tr><th>Drug Name</th><th style="width:120px;">Category</th><th class="tr" style="width:100px;">Stock</th><th class="tc" style="width:110px;">Last Dispensed</th></tr>`,
+      nonMovingRows, 4, "No non-moving drugs");
+
+    const grnRows = (s.grns || []).map((g: any) => `<tr><td>${g.grnId}</td><td>${g.supplierName}</td><td class="tc">${new Date(g.receivedDate).toLocaleDateString("en-IN")}</td><td class="tr">₹${(g.totalValue || 0).toLocaleString("en-IN")}</td><td>${g.status}</td></tr>`).join("");
+    sectionsHtml += govSection("Goods Receipt Notes (Period)",
+      `<tr><th>GRN ID</th><th>Supplier</th><th class="tc" style="width:100px;">Received</th><th class="tr" style="width:110px;">Value</th><th style="width:90px;">Status</th></tr>`,
+      grnRows, 5, "No GRNs in this period");
+
+    const expiryRows = (s.expiryReport || []).map((b: any) => `<tr><td>${b.drugName}</td><td>${b.batchNo}</td><td class="tc">${new Date(b.expiryDate).toLocaleDateString("en-IN")}</td><td class="tr">${b.quantityRemaining}</td></tr>`).join("");
+    sectionsHtml += govSection("Batch Expiry Report (180 days)",
+      `<tr><th>Drug Name</th><th>Batch No</th><th class="tc" style="width:100px;">Expiry</th><th class="tr" style="width:90px;">Qty</th></tr>`,
+      expiryRows, 4, "No batches expiring in this window");
+  }
+
+  const signatureBlock = `
+    <div style="display:flex;justify-content:space-between;margin-top:48px;padding-top:8px;">
+      <div style="text-align:center;">
+        <div style="border-top:1px solid #333;width:200px;margin-bottom:4px;"></div>
+        <div style="font-size:11px;color:#555;">Prepared By</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="border-top:1px solid #333;width:200px;margin-bottom:4px;"></div>
+        <div style="font-size:11px;color:#555;">Authorized Signatory</div>
+        ${clinic.signatoryName ? `<div style="font-size:11px;font-weight:600;margin-top:2px;">${clinic.signatoryName}</div>` : ""}
+        ${clinic.signatoryDesignation ? `<div style="font-size:10px;color:#777;">${clinic.signatoryDesignation}</div>` : ""}
+      </div>
+    </div>`;
+
+  const body = `
+    ${clinicHeader(clinic)}
+    ${identityLine ? `<div style="font-size:11px;color:#555;margin-top:-6px;margin-bottom:10px;">${identityLine}</div>` : ""}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">${isHmis ? "HMIS MONTHLY RETURN" : "PHARMACY AUDIT REPORT"}</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Period: ${submission.periodFrom} — ${submission.periodTo}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:12px;font-weight:600;">Submission ID: ${submission.submissionId}</div>
+        <div style="font-size:11px;color:#888;margin-top:2px;">Status: ${submission.status}${submission.referenceNo ? ` &nbsp;·&nbsp; Ref: ${submission.referenceNo}` : ""}</div>
+      </div>
+    </div>
+
+    ${sectionsHtml}
+
+    <div class="footer" style="margin-top:8px;">
+      <p>System-generated report — Submission ID: ${submission.submissionId} &nbsp;·&nbsp; Generated: ${generatedAt} by ${submission.generatedBy || "—"}</p>
+    </div>
+
+    ${signatureBlock}`;
+
+  open(`${isHmis ? "HMIS Monthly Return" : "Pharmacy Audit Report"} — ${submission.submissionId}`, body);
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
