@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileCheck2, Printer, Loader2, CheckCircle2 } from "lucide-react";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { FileCheck2, Printer, Loader2, CheckCircle2, ChevronDown, X } from "lucide-react";
 import { govReports as govReportsApi, ratemaster as ratemasterApi } from "@/lib/api";
 import { printGovernmentReport } from "@/lib/print";
 import { useAuth } from "@/contexts/AuthContext";
@@ -159,28 +160,53 @@ export default function StatutoryReportsPage() {
 
           {reportType === "HMIS-Monthly" && (
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">
-                  Investigations {investigationTypes.length > 0 ? `(${investigationTypes.length} selected)` : "(all, if none selected)"}
-                </Label>
-                {investigationTypes.length > 0 && (
-                  <button className="text-xs text-primary hover:underline" onClick={() => setInvestigationTypes([])}>Clear</button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {(labServices ?? []).map((s: any) => (
-                  <button key={s._id} type="button" onClick={() => toggleInvestigation(s.name)}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                      investigationTypes.includes(s.name)
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background text-muted-foreground border-border hover:border-primary/40"
-                    }`}>
-                    {s.name}
-                  </button>
-                ))}
-                {(labServices ?? []).length === 0 && (
-                  <span className="text-xs text-muted-foreground italic">No Lab services configured in Rate Master yet</span>
-                )}
+              <Label className="text-xs">Investigations</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5 shrink-0">
+                      {investigationTypes.length > 0 ? `${investigationTypes.length} selected` : "All investigations"}
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-60 max-h-72 overflow-y-auto">
+                    <DropdownMenuLabel className="text-xs">Select investigations (none = all)</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(labServices ?? []).length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground italic">No Lab services configured in Rate Master yet</div>
+                    )}
+                    {(labServices ?? []).map((s: any) => (
+                      <DropdownMenuCheckboxItem
+                        key={s._id}
+                        className="text-xs"
+                        checked={investigationTypes.includes(s.name)}
+                        onSelect={(e) => e.preventDefault()}
+                        onCheckedChange={() => toggleInvestigation(s.name)}
+                      >
+                        {s.name}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Selected investigations as removable snippets */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {investigationTypes.length === 0 ? (
+                    <span className="text-xs text-muted-foreground italic">All investigations included</span>
+                  ) : (
+                    <>
+                      {investigationTypes.map((name) => (
+                        <Badge key={name} variant="secondary" className="gap-1 pr-1 font-normal">
+                          {name}
+                          <button type="button" onClick={() => toggleInvestigation(name)} className="hover:text-destructive">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                      <button className="text-xs text-primary hover:underline" onClick={() => setInvestigationTypes([])}>Clear</button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}
