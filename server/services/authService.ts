@@ -116,12 +116,20 @@ export async function getClinicSettings(tenantId: string) {
     invoicePrefix: (tenant.settings as any)?.invoicePrefix || "BILL",
     timezone:      tenant.settings?.timezone || "Asia/Kolkata",
     taxConfig:     (tenant.settings as any)?.taxConfig || { cgstRate: 0, sgstRate: 0, igstRate: 0, taxInclusivePricing: false },
+    hmisFacilityCode:     (tenant.settings as any)?.hmisFacilityCode || "",
+    drugLicenseNo:        (tenant.settings as any)?.drugLicenseNo || "",
+    registrationNo:       (tenant.settings as any)?.registrationNo || "",
+    signatoryName:        (tenant.settings as any)?.signatoryName || "",
+    signatoryDesignation: (tenant.settings as any)?.signatoryDesignation || "",
   };
 }
 
 export async function updateClinicSettings(tenantId: string, role: string, body: Record<string, unknown>) {
   if (role !== "admin") throw AppError.forbidden("Admins only");
-  const { name, logoUrl, clinicPhone, clinicAddress, gstNo, invoicePrefix, timezone, taxConfig } = body as any;
+  const {
+    name, logoUrl, clinicPhone, clinicAddress, gstNo, invoicePrefix, timezone, taxConfig,
+    hmisFacilityCode, drugLicenseNo, registrationNo, signatoryName, signatoryDesignation,
+  } = body as any;
   const update: any = {};
   if (name !== undefined)          update["name"] = name;
   if (logoUrl !== undefined)       update["settings.logoUrl"] = logoUrl;
@@ -130,6 +138,11 @@ export async function updateClinicSettings(tenantId: string, role: string, body:
   if (gstNo !== undefined)         update["settings.gstNo"] = gstNo;
   if (invoicePrefix !== undefined) update["settings.invoicePrefix"] = invoicePrefix;
   if (timezone !== undefined)      update["settings.timezone"] = timezone;
+  if (hmisFacilityCode !== undefined)     update["settings.hmisFacilityCode"] = hmisFacilityCode;
+  if (drugLicenseNo !== undefined)        update["settings.drugLicenseNo"] = drugLicenseNo;
+  if (registrationNo !== undefined)       update["settings.registrationNo"] = registrationNo;
+  if (signatoryName !== undefined)        update["settings.signatoryName"] = signatoryName;
+  if (signatoryDesignation !== undefined) update["settings.signatoryDesignation"] = signatoryDesignation;
   if (taxConfig !== undefined) {
     if (taxConfig.cgstRate !== undefined)            update["settings.taxConfig.cgstRate"] = taxConfig.cgstRate;
     if (taxConfig.sgstRate !== undefined)            update["settings.taxConfig.sgstRate"] = taxConfig.sgstRate;

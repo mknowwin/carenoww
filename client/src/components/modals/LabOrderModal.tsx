@@ -12,7 +12,7 @@ import { todayInTz } from "@/lib/utils";
 import { LAB_TEST_MASTER, buildParameterTemplate } from "@/lib/labTestMaster";
 
 const COMMON_TESTS = Object.keys(LAB_TEST_MASTER);
-const EXTRA_TESTS  = ["MRI Brain", "CT Scan", "2D Echo", "Bone Density", "PFT", "Sputum Culture"];
+const EXTRA_TESTS  = ["MRI Brain", "CT Scan", "Bone Density", "PFT", "Sputum Culture"];
 
 interface LabParam {
   testName: string;

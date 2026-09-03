@@ -13,6 +13,7 @@ import PharmacyPage from "./pages/pharmacy";
 import LabPage from "./pages/lab";
 import BillingPage from "./pages/billing";
 import AnalyticsPage from "./pages/analytics";
+import StatutoryReportsPage from "./pages/statutory-reports";
 import SettingsPage from "./pages/settings";
 import NotFound from "./pages/not-found";
 import ReceptionPage from "./pages/reception";
@@ -120,6 +121,7 @@ export default function App() {
       <Route path="/lab"           component={() => <ProtectedRoute component={LabPage} />} />
       <Route path="/billing"       component={() => <ProtectedRoute component={BillingPage} />} />
       <Route path="/analytics"     component={() => <ProtectedRoute component={AnalyticsPage} />} />
+      <Route path="/statutory-reports" component={() => <ProtectedRoute component={StatutoryReportsPage} />} />
       <Route path="/settings"      component={() => <ProtectedRoute component={SettingsPage} />} />
       <Route component={NotFound} />
     </Switch>

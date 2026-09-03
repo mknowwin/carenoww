@@ -8,6 +8,7 @@ export interface IGRNItem {
   quantityReceived: number;
   purchasePricePerUnit: number;
   mrpPerUnit: number;
+  gstPercent: number;
   totalCost: number;
 }
 
@@ -35,6 +36,7 @@ const GRNItemSchema = new Schema<IGRNItem>({
   quantityReceived:     { type: Number, required: true },
   purchasePricePerUnit: { type: Number, default: 0 },
   mrpPerUnit:           { type: Number, default: 0 },
+  gstPercent:           { type: Number, default: 0 },
   totalCost:            { type: Number, default: 0 },
 }, { _id: true });
 

@@ -18,9 +18,12 @@ export interface ILabOrder extends Document {
   sampleDate: Date | null;
   status: "Pending" | "Collected" | "Processing" | "Completed" | "Scheduled";
   result: string | null;
+  diagnosis: string | null;
+  category: "Pathology" | "Radiology" | "Cardiology" | "Other";
   parameters: ILabParameter[];
   priority: "Routine" | "Urgent" | "STAT";
   doctor: string;
+  department?: string;
   reportedBy: string;
   appointmentId?: string;
   notes?: string;
@@ -50,9 +53,12 @@ const LabOrderSchema = new Schema<ILabOrder>(
     sampleDate:  { type: Date, default: null },
     status:      { type: String, enum: ["Pending", "Collected", "Processing", "Completed", "Scheduled"], default: "Pending" },
     result:      { type: String, default: null },
+    diagnosis:   { type: String, default: null },
+    category:    { type: String, enum: ["Pathology", "Radiology", "Cardiology", "Other"], default: "Pathology" },
     parameters:  { type: [LabParameterSchema], default: [] },
     priority:    { type: String, enum: ["Routine", "Urgent", "STAT"], default: "Routine" },
     doctor:      { type: String, default: "" },
+    department:  { type: String, default: "" },
     reportedBy:  { type: String, default: "" },
     appointmentId: { type: String, default: "" },
     notes:       { type: String, default: "" },
@@ -61,5 +67,9 @@ const LabOrderSchema = new Schema<ILabOrder>(
 );
 
 LabOrderSchema.index({ tenantId: 1, labId: 1 }, { unique: true });
+LabOrderSchema.index({ tenantId: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, doctor: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, department: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, diagnosis: 1, ordered: 1 });
 
 export default mongoose.model<ILabOrder>("LabOrder", LabOrderSchema);

@@ -938,6 +938,11 @@ function HospitalSection({ user }: { user: any }) {
   const [gstNo,         setGstNo]         = useState("");
   const [invoicePrefix, setInvoicePrefix] = useState("BILL");
   const [timezone,      setTimezone]      = useState("Asia/Kolkata");
+  const [hmisFacilityCode,     setHmisFacilityCode]     = useState("");
+  const [drugLicenseNo,        setDrugLicenseNo]        = useState("");
+  const [registrationNo,       setRegistrationNo]       = useState("");
+  const [signatoryName,        setSignatoryName]        = useState("");
+  const [signatoryDesignation, setSignatoryDesignation] = useState("");
   const [cgstRate,      setCgstRate]      = useState(0);
   const [sgstRate,      setSgstRate]      = useState(0);
   const [igstRate,      setIgstRate]      = useState(0);
@@ -954,6 +959,11 @@ function HospitalSection({ user }: { user: any }) {
       if (s.gstNo         !== undefined) setGstNo(s.gstNo);
       if (s.invoicePrefix !== undefined) setInvoicePrefix(s.invoicePrefix);
       if (s.timezone      !== undefined) setTimezone(s.timezone);
+      if (s.hmisFacilityCode     !== undefined) setHmisFacilityCode(s.hmisFacilityCode);
+      if (s.drugLicenseNo        !== undefined) setDrugLicenseNo(s.drugLicenseNo);
+      if (s.registrationNo       !== undefined) setRegistrationNo(s.registrationNo);
+      if (s.signatoryName        !== undefined) setSignatoryName(s.signatoryName);
+      if (s.signatoryDesignation !== undefined) setSignatoryDesignation(s.signatoryDesignation);
       if (s.taxConfig) {
         setCgstRate(s.taxConfig.cgstRate ?? 0);
         setSgstRate(s.taxConfig.sgstRate ?? 0);
@@ -986,6 +996,11 @@ function HospitalSection({ user }: { user: any }) {
         gstNo:         gstNo,
         invoicePrefix: invoicePrefix,
         timezone:      timezone,
+        hmisFacilityCode:     hmisFacilityCode,
+        drugLicenseNo:        drugLicenseNo,
+        registrationNo:       registrationNo,
+        signatoryName:        signatoryName,
+        signatoryDesignation: signatoryDesignation,
         taxConfig: {
           cgstRate:            cgstRate,
           sgstRate:            sgstRate,
@@ -1003,6 +1018,12 @@ function HospitalSection({ user }: { user: any }) {
           u.clinicAddress   = clinicAddress;
           u.invoiceStyle    = invoiceStyle;
           u.timezone        = timezone;
+          u.gstNo                = gstNo;
+          u.hmisFacilityCode     = hmisFacilityCode;
+          u.drugLicenseNo        = drugLicenseNo;
+          u.registrationNo       = registrationNo;
+          u.signatoryName        = signatoryName;
+          u.signatoryDesignation = signatoryDesignation;
           localStorage.setItem("carenoww_user", JSON.stringify(u));
         }
       } catch {}
@@ -1217,6 +1238,74 @@ function HospitalSection({ user }: { user: any }) {
           </Button>
           {user?.role !== "admin" && (
             <p className="text-xs text-muted-foreground">Only administrators can update tax settings.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Statutory / Regulatory Identity — appears on government report letterheads */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Building2 className="h-4 w-4" /> Statutory &amp; Regulatory Identity
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground -mt-1">
+            Shown on government/statutory report submissions (HMIS returns, pharmacy audits) — see Statutory Reports.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">HMIS Facility Code</Label>
+              <Input
+                value={hmisFacilityCode}
+                onChange={(e) => setHmisFacilityCode(e.target.value)}
+                placeholder="Health dept. facility registration code"
+                className="h-9 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Drug License Number</Label>
+              <Input
+                value={drugLicenseNo}
+                onChange={(e) => setDrugLicenseNo(e.target.value)}
+                placeholder="Drug Control license no."
+                className="h-9 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Hospital/Clinic Registration Number</Label>
+              <Input
+                value={registrationNo}
+                onChange={(e) => setRegistrationNo(e.target.value)}
+                placeholder="Registration / accreditation no."
+                className="h-9 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Authorized Signatory Name</Label>
+              <Input
+                value={signatoryName}
+                onChange={(e) => setSignatoryName(e.target.value)}
+                placeholder="Dr. Jane Doe"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Signatory Designation</Label>
+              <Input
+                value={signatoryDesignation}
+                onChange={(e) => setSignatoryDesignation(e.target.value)}
+                placeholder="Medical Superintendent"
+                className="h-9"
+              />
+            </div>
+          </div>
+
+          <Button size="sm" onClick={saveSettings} disabled={saving || user?.role !== "admin"}>
+            {saving ? "Saving..." : "Save Statutory Details"}
+          </Button>
+          {user?.role !== "admin" && (
+            <p className="text-xs text-muted-foreground">Only administrators can update statutory identity.</p>
           )}
         </CardContent>
       </Card>

@@ -115,6 +115,8 @@ export const auth = {
   updateClinicSettings: (data: {
     name?: string; logoUrl?: string; clinicPhone?: string; clinicAddress?: string;
     gstNo?: string; invoicePrefix?: string; timezone?: string;
+    hmisFacilityCode?: string; drugLicenseNo?: string; registrationNo?: string;
+    signatoryName?: string; signatoryDesignation?: string;
     taxConfig?: { cgstRate?: number; sgstRate?: number; igstRate?: number; taxInclusivePricing?: boolean };
   }) => put<any>("/auth/clinic-settings", data),
 };
@@ -152,6 +154,47 @@ export const dashboard = {
   revenueTrend: () => get<any>("/dashboard/revenue-trend"),
   deptVolume:   () => get<any>("/dashboard/dept-volume"),
   referralStats:(month?: string) => get<any[]>(`/dashboard/referral-stats${month ? `?month=${month}` : ""}`),
+};
+
+// ── Insights ──────────────────────────────────────────────────────────────────
+const insightsGet = <T>(path: string, params?: Record<string, string>) => {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return get<T>(`/insights${path}${qs}`);
+};
+export const insights = {
+  doctorWise:      (from?: string, to?: string) => insightsGet<any[]>("/doctor-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  departmentWise:  (from?: string, to?: string) => insightsGet<any[]>("/department-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  investigationWise:(from?: string, to?: string) => insightsGet<any[]>("/investigation-wise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  investigationList: (params: { from?: string; to?: string; doctor?: string; department?: string; diagnosis?: string; investigationTypes?: string[] }) => {
+    const { investigationTypes, ...rest } = params;
+    const clean = Object.fromEntries(Object.entries(rest).filter(([, v]) => v)) as Record<string, string>;
+    if (investigationTypes?.length) clean.investigationTypes = investigationTypes.join(",");
+    return insightsGet<any[]>("/investigation-list", clean);
+  },
+  investigationTypes: () => insightsGet<string[]>("/investigation-types"),
+  diagnoses:       () => insightsGet<string[]>("/diagnoses"),
+  cashCollected:   (date?: string) => insightsGet<{ rows: any[]; grandTotal: number }>("/cash-collected", date ? { date } : undefined),
+  dailyBillsCount: (date?: string) => insightsGet<{ rows: any[]; totalBills: number; totalAmount: number }>("/daily-bills-count", date ? { date } : undefined),
+  referralsBySource:(from?: string, to?: string) => insightsGet<any[]>("/referrals-by-source", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  referralsByArea: (from?: string, to?: string) => insightsGet<any[]>("/referrals-by-area", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  returnBills:     (from?: string, to?: string) => insightsGet<{ notes: any[]; totalReturned: number }>("/return-bills", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  timewiseSales:   (date?: string) => insightsGet<any[]>("/timewise-sales", date ? { date } : undefined),
+  discountDaywise: (from?: string, to?: string) => insightsGet<any[]>("/discount-daywise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  discountBillwise:(from?: string, to?: string) => insightsGet<any[]>("/discount-billwise", { ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  cashFlow:        (date?: string) => insightsGet<{ cashIn: number; cashOut: number; netCash: number; cancelledBills: number; cancelledAmount: number }>("/cash-flow", date ? { date } : undefined),
+};
+
+// ── Government / Statutory Reports ──────────────────────────────────────────────
+export const govReports = {
+  list:      (params?: Record<string, string>) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return get<{ submissions: any[]; total: number }>(`/gov-reports${qs}`);
+  },
+  get:       (id: string) => get<any>(`/gov-reports/${id}`),
+  generate:  (data: { reportType: "HMIS-Monthly" | "PharmacyAudit"; periodFrom: string; periodTo: string; investigationTypes?: string[] }) =>
+    post<any>("/gov-reports/generate", data),
+  finalize:  (id: string) => post<any>(`/gov-reports/${id}/finalize`, {}),
+  submit:    (id: string, referenceNo: string) => post<any>(`/gov-reports/${id}/submit`, { referenceNo }),
 };
 
 // ── Patients ──────────────────────────────────────────────────────────────────
@@ -264,6 +307,10 @@ export const pharmacy = {
       return get<any>(`/pharmacy/adjustments${qs}`);
     },
     create: (data: any)  => post<any>("/pharmacy/adjustments", data),
+  },
+  reports: {
+    drugSales: (date?: string) => get<{ rows: any[]; totalQuantity: number; totalAmount: number }>(`/pharmacy/reports/drug-sales${date ? `?date=${date}` : ""}`),
+    nonMoving: (sinceDays?: string) => get<any[]>(`/pharmacy/reports/non-moving${sinceDays ? `?sinceDays=${sinceDays}` : ""}`),
   },
 };
 

@@ -1,8 +1,10 @@
 import LabOrder from "../models/LabOrder.js";
+import Appointment from "../models/Appointment.js";
 import ServiceRateMaster from "../models/ServiceRateMaster.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
 import { getNextId } from "../lib/counter.js";
 import { AppError } from "../lib/AppError.js";
+import { categorizeTest } from "../lib/testCategories.js";
 
 async function nextLabId(tenantId: string): Promise<string> {
   return getNextId(tenantId, "lab", "LAB-");
@@ -45,23 +47,32 @@ export async function createOrder(tenantId: string, doctorName: string, body: Re
     throw AppError.badRequest("patientId, patientName, test required");
   }
   const labId = await nextLabId(tenantId);
+
+  let department = body.department;
+  if (!department && body.appointmentId) {
+    const appt = await Appointment.findOne({ tenantId, _id: body.appointmentId }).select("department");
+    department = appt?.department || "";
+  }
+
   return LabOrder.create({
     ...body,
     tenantId,
     labId,
     doctor: body.doctor || doctorName,
+    department: department || "",
+    category: categorizeTest(test),
     parameters: body.parameters || [],
     sampleDate: body.sampleDate || null,
   });
 }
 
 export async function updateOrder(tenantId: string, userName: string, id: string, body: Record<string, any>) {
-  const allowed = ["status", "result", "priority", "notes", "parameters", "sampleDate", "reportedBy"];
+  const allowed = ["status", "result", "diagnosis", "priority", "notes", "parameters", "sampleDate", "reportedBy"];
   const update: any = {};
   allowed.forEach((k) => { if (body[k] !== undefined) update[k] = body[k]; });
 
-  // Auto-set status to Completed when result is entered
-  if ((update.result || (update.parameters && update.parameters.length > 0)) && !update.status) {
+  // Auto-set status to Completed when result/diagnosis is entered
+  if ((update.result || update.diagnosis || (update.parameters && update.parameters.length > 0)) && !update.status) {
     update.status = "Completed";
   }
 
