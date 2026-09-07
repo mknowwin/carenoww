@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search, Plus, User, Phone, Droplets, AlertTriangle,
-  CheckCircle2, Clock, Bed, Brain, QrCode, Upload, Pencil, LogOut, Stethoscope,
+  CheckCircle2, Clock, Bed, Brain, QrCode, Upload, Pencil, LogOut, Stethoscope, CalendarPlus,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { patients as patientsApi } from "@/lib/api";
@@ -266,6 +266,18 @@ export default function PatientsPage() {
                   </Button>
                   <Button size="sm" variant="outline" className="flex-1 gap-1" onClick={() => { setEditPatient(selectedPatient); setModalOpen(true); }}>
                     <Pencil className="h-3 w-3" /> Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 gap-1"
+                    onClick={() =>
+                      setLocation(
+                        `/appointments?patientId=${encodeURIComponent(selectedPatient.id)}&patientName=${encodeURIComponent(selectedPatient.name)}&patientAge=${encodeURIComponent(String(selectedPatient.age ?? ""))}&patientGender=${encodeURIComponent(selectedPatient.gender ?? "")}&patientPhone=${encodeURIComponent(selectedPatient.phone ?? "")}`
+                      )
+                    }
+                  >
+                    <CalendarPlus className="h-3 w-3" /> Book Appointment
                   </Button>
                 </div>
                 {selectedPatient.status !== "Discharged" && (

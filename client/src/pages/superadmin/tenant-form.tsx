@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useSuperAdmin } from "../../contexts/SuperAdminContext";
 import { superadmin as saApi } from "../../lib/api";
+import { MODULE_KEYS, MODULE_LABELS } from "../../lib/modules";
 import { Shield, LogOut, ArrowLeft, Save, Loader2, Database, Users, CheckCircle2, XCircle } from "lucide-react";
 import { confirm } from "@/hooks/use-confirm";
 
@@ -47,6 +48,7 @@ export default function TenantFormPage() {
     name: "", slug: "", plan: "trial", status: "trial",
     contactEmail: "", contactPhone: "", contactAddress: "", contactCity: "", contactState: "", contactCountry: "India",
     maxUsers: "10", maxPatients: "1000",
+    modules: [...MODULE_KEYS] as string[],
     adminName: "", adminEmail: "", adminPassword: "",
   });
   const [tenant, setTenant] = useState<any>(null);
@@ -69,6 +71,7 @@ export default function TenantFormPage() {
             contactAddress: t.contact?.address || "", contactCity: t.contact?.city || "",
             contactState: t.contact?.state || "", contactCountry: t.contact?.country || "India",
             maxUsers: String(t.settings?.maxUsers || 10), maxPatients: String(t.settings?.maxPatients || 1000),
+            modules: t.settings?.modules?.length ? t.settings.modules : [...MODULE_KEYS],
             adminName: "", adminEmail: "", adminPassword: "",
           });
         })
@@ -78,6 +81,11 @@ export default function TenantFormPage() {
   }, [params.id]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const toggleModule = (key: string) =>
+    setForm((f) => ({
+      ...f,
+      modules: f.modules.includes(key) ? f.modules.filter((m) => m !== key) : [...f.modules, key],
+    }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,7 +94,7 @@ export default function TenantFormPage() {
       const payload = {
         name: form.name, slug: form.slug, plan: form.plan, status: form.status,
         contact: { email: form.contactEmail, phone: form.contactPhone, address: form.contactAddress, city: form.contactCity, state: form.contactState, country: form.contactCountry },
-        settings: { maxUsers: parseInt(form.maxUsers), maxPatients: parseInt(form.maxPatients) },
+        settings: { maxUsers: parseInt(form.maxUsers), maxPatients: parseInt(form.maxPatients), modules: form.modules },
         ...(isNew ? { adminName: form.adminName, adminEmail: form.adminEmail, adminPassword: form.adminPassword } : {}),
       };
       if (isNew) {
@@ -236,6 +244,25 @@ export default function TenantFormPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="Max Users"><FormInput value={form.maxUsers} onChange={(v) => set("maxUsers", v)} type="number" /></Field>
                     <Field label="Max Patients"><FormInput value={form.maxPatients} onChange={(v) => set("maxPatients", v)} type="number" /></Field>
+                  </div>
+                </div>
+
+                {/* Modules */}
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 space-y-4">
+                  <h2 className="font-semibold text-sm text-slate-300 uppercase tracking-wider">Modules</h2>
+                  <p className="text-xs text-slate-500">Enable or disable which modules this tenant has access to.</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {MODULE_KEYS.map((key) => (
+                      <label key={key} className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.modules.includes(key)}
+                          onChange={() => toggleModule(key)}
+                          className="rounded border-slate-600 bg-slate-700 text-red-600 focus:ring-red-500"
+                        />
+                        {MODULE_LABELS[key]}
+                      </label>
+                    ))}
                   </div>
                 </div>
 

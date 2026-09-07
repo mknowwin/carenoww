@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
-import Tenant from "../models/Tenant.js";
+import Tenant, { MODULE_KEYS } from "../models/Tenant.js";
 import { AppError } from "../lib/AppError.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "carenoww_dev_secret_change_in_prod";
@@ -54,6 +54,7 @@ export async function login(email: string, password: string) {
       clinicPhone:    tenant.settings?.clinicPhone   || tenant.contact?.phone   || "",
       clinicAddress:  tenant.settings?.clinicAddress || tenant.contact?.address || "",
       timezone,
+      modules: tenant.settings?.modules?.length ? tenant.settings.modules : [...MODULE_KEYS],
     },
   };
 }
@@ -75,6 +76,7 @@ export async function getMe(userId: string) {
     clinicAddress:  tenant?.settings?.clinicAddress || tenant?.contact?.address || "",
     clinicCity:     tenant?.contact?.city || "",
     timezone:       tenant?.settings?.timezone || "Asia/Kolkata",
+    modules: tenant?.settings?.modules?.length ? tenant.settings.modules : [...MODULE_KEYS],
     aiScribeEnabled:  user.aiScribeEnabled ?? false,
     aiScribeProvider: user.aiScribeProvider ?? "deepgram",
     aiScribeApiKey:   user.aiScribeApiKey ?? "",
@@ -121,6 +123,7 @@ export async function getClinicSettings(tenantId: string) {
     registrationNo:       (tenant.settings as any)?.registrationNo || "",
     signatoryName:        (tenant.settings as any)?.signatoryName || "",
     signatoryDesignation: (tenant.settings as any)?.signatoryDesignation || "",
+    operational: (tenant.settings as any)?.operational || { notifyEmail: true, notifySms: false },
   };
 }
 
@@ -128,7 +131,7 @@ export async function updateClinicSettings(tenantId: string, role: string, body:
   if (role !== "admin") throw AppError.forbidden("Admins only");
   const {
     name, logoUrl, clinicPhone, clinicAddress, gstNo, invoicePrefix, timezone, taxConfig,
-    hmisFacilityCode, drugLicenseNo, registrationNo, signatoryName, signatoryDesignation,
+    hmisFacilityCode, drugLicenseNo, registrationNo, signatoryName, signatoryDesignation, operational,
   } = body as any;
   const update: any = {};
   if (name !== undefined)          update["name"] = name;
@@ -148,6 +151,10 @@ export async function updateClinicSettings(tenantId: string, role: string, body:
     if (taxConfig.sgstRate !== undefined)            update["settings.taxConfig.sgstRate"] = taxConfig.sgstRate;
     if (taxConfig.igstRate !== undefined)            update["settings.taxConfig.igstRate"] = taxConfig.igstRate;
     if (taxConfig.taxInclusivePricing !== undefined) update["settings.taxConfig.taxInclusivePricing"] = taxConfig.taxInclusivePricing;
+  }
+  if (operational !== undefined) {
+    if (operational.notifyEmail !== undefined) update["settings.operational.notifyEmail"] = operational.notifyEmail;
+    if (operational.notifySms !== undefined)   update["settings.operational.notifySms"] = operational.notifySms;
   }
   const tenant = await Tenant.findByIdAndUpdate(tenantId, { $set: update }, { new: true });
   if (!tenant) throw AppError.notFound("Tenant not found");

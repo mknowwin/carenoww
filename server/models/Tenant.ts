@@ -3,6 +3,11 @@ import mongoose, { Schema, Document } from "mongoose";
 export type TenantPlan = "trial" | "starter" | "professional" | "enterprise";
 export type TenantStatus = "trial" | "active" | "suspended" | "cancelled";
 
+export const MODULE_KEYS = [
+  "dashboard", "patients", "appointments", "opd", "ipd",
+  "lab", "pharmacy", "billing", "analytics",
+] as const;
+
 export interface ITenant extends Document {
   name: string;
   slug: string;
@@ -38,6 +43,10 @@ export interface ITenant extends Document {
       igstRate: number;
       taxInclusivePricing: boolean;
     };
+    operational?: {
+      notifyEmail: boolean;
+      notifySms: boolean;
+    };
   };
   subscription: {
     startedAt: Date;
@@ -66,7 +75,7 @@ const TenantSchema = new Schema<ITenant>(
     settings: {
       maxUsers:      { type: Number, default: 10 },
       maxPatients:   { type: Number, default: 1000 },
-      modules:       { type: [String], default: ["dashboard", "patients", "appointments", "opd", "ipd", "lab", "pharmacy", "billing", "analytics"] },
+      modules:       { type: [String], default: [...MODULE_KEYS] },
       logoUrl:       { type: String, default: "" },
       clinicPhone:   { type: String, default: "" },
       clinicAddress: { type: String, default: "" },
@@ -83,6 +92,10 @@ const TenantSchema = new Schema<ITenant>(
         sgstRate:            { type: Number, default: 0 },
         igstRate:            { type: Number, default: 0 },
         taxInclusivePricing: { type: Boolean, default: false },
+      },
+      operational: {
+        notifyEmail: { type: Boolean, default: true },
+        notifySms:   { type: Boolean, default: false },
       },
     },
     subscription: {

@@ -14,6 +14,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   existing?: any;
+  initialPatient?: { uhid?: string; name?: string; age?: string; gender?: string; phone?: string };
 }
 
 const DEPARTMENTS = [
@@ -69,18 +70,18 @@ function Sel({ value, onChange, opts, disabled }: {
   );
 }
 
-export default function AppointmentModal({ open, onClose, existing }: Props) {
+export default function AppointmentModal({ open, onClose, existing, initialPatient }: Props) {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isEdit = !!existing;
   const today = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const [form, setForm] = useState({
-    patientId:    (existing?.patientId ?? "").replace(/^UHID-/, ""),
-    patientName:  existing?.patientName  ?? "",
-    patientAge:   existing?.patientAge   ?? "",
-    patientGender:existing?.patientGender?? "",
-    patientPhone: existing?.patientPhone ?? "",
+    patientId:    (existing?.patientId ?? initialPatient?.uhid ?? "").replace(/^UHID-/, ""),
+    patientName:  existing?.patientName  ?? initialPatient?.name   ?? "",
+    patientAge:   existing?.patientAge   ?? initialPatient?.age    ?? "",
+    patientGender:existing?.patientGender?? initialPatient?.gender ?? "",
+    patientPhone: existing?.patientPhone ?? initialPatient?.phone  ?? "",
     doctorId:         existing?.doctorId         ?? "",
     doctor:           existing?.doctor           ?? "",
     department:       existing?.department       ?? "Cardiology",
@@ -100,7 +101,7 @@ export default function AppointmentModal({ open, onClose, existing }: Props) {
   const [patientSearch, setPatientSearch] = useState("");
   const [patientResults, setPatientResults] = useState<any[]>([]);
   const [searchingPatient, setSearchingPatient] = useState(false);
-  const [patientSelected, setPatientSelected] = useState(false);
+  const [patientSelected, setPatientSelected] = useState(!isEdit && !!initialPatient?.name);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 

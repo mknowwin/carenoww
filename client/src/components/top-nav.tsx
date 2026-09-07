@@ -51,7 +51,7 @@ export default function TopNav({ onToggleSidebar }: TopNavProps) {
   const handleLogout = () => { logout(); setLocation("/login"); };
 
   return (
-    <header className="h-14 bg-card border-b border-border flex items-center px-4 gap-3 shrink-0">
+    <header className="h-14 bg-card border-b border-border flex items-center px-2 sm:px-4 gap-1.5 sm:gap-3 shrink-0">
       <Button variant="ghost" size="sm" onClick={onToggleSidebar} className="h-8 w-8 p-0 shrink-0">
         <PanelLeft className="h-4 w-4" />
       </Button>
@@ -63,7 +63,7 @@ export default function TopNav({ onToggleSidebar }: TopNavProps) {
         <p className="text-xs text-muted-foreground truncate hidden sm:block">{page.description}</p>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         {/* Critical AI Alert indicator */}
         {criticalCount > 0 && (
           <Button variant="ghost" size="sm" className="h-8 px-2 gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50">

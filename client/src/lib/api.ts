@@ -118,6 +118,7 @@ export const auth = {
     hmisFacilityCode?: string; drugLicenseNo?: string; registrationNo?: string;
     signatoryName?: string; signatoryDesignation?: string;
     taxConfig?: { cgstRate?: number; sgstRate?: number; igstRate?: number; taxInclusivePricing?: boolean };
+    operational?: { notifyEmail?: boolean; notifySms?: boolean };
   }) => put<any>("/auth/clinic-settings", data),
 };
 

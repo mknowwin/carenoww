@@ -1,4 +1,5 @@
-import { useState, Fragment } from "react";
+import { useEffect, useState, Fragment } from "react";
+import { useSearch as useWouterSearch, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,8 @@ function rangeForFilter(dateFilter: string, dateFrom: string, dateTo: string): {
 export default function BillingPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
+  const wouterSearch = useWouterSearch();
   const isAdmin = user?.role === "admin" || user?.role === "finance";
   const canDeleteDraft = isAdmin || user?.role === "pharmacy_admin";
   const canCancelReturn = canDeleteDraft || user?.role === "pharmacist";
@@ -96,6 +99,24 @@ export default function BillingPage() {
   const [returnBill,  setReturnBill]  = useState<any>(null);
   const [deletingId,  setDeletingId]  = useState<string | null>(null);
   const [unlockingId, setUnlockingId] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<{ patientId?: string; type?: string; doctor?: string } | undefined>(undefined);
+
+  // Deep-link from OPD sign-off: ?patientId=...&appointmentId=...&type=...&doctor=... auto-opens a new invoice prefilled.
+  useEffect(() => {
+    const params = new URLSearchParams(wouterSearch);
+    const patientId = params.get("patientId");
+    if (!patientId) return;
+    setPrefill({
+      patientId,
+      type: params.get("type") ?? undefined,
+      doctor: params.get("doctor") ?? undefined,
+    });
+    setEditBill(null);
+    setPayOnly(false);
+    setModalOpen(true);
+    setLocation("/billing", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wouterSearch]);
 
   const [staffFilter,   setStaffFilter]   = useState<string | null>(null);
 
@@ -245,9 +266,9 @@ export default function BillingPage() {
     }
   };
 
-  const openNew    = () => { setEditBill(null); setPayOnly(false); setModalOpen(true); };
-  const openEdit   = (bill: any) => { setEditBill(bill); setPayOnly(false); setModalOpen(true); };
-  const openPayment= (bill: any) => { setEditBill(bill); setPayOnly(true);  setModalOpen(true); };
+  const openNew    = () => { setPrefill(undefined); setEditBill(null); setPayOnly(false); setModalOpen(true); };
+  const openEdit   = (bill: any) => { setPrefill(undefined); setEditBill(bill); setPayOnly(false); setModalOpen(true); };
+  const openPayment= (bill: any) => { setPrefill(undefined); setEditBill(bill); setPayOnly(true);  setModalOpen(true); };
 
   return (
     <div className="space-y-4 animate-fadeIn">
@@ -895,6 +916,7 @@ export default function BillingPage() {
           onClose={() => setModalOpen(false)}
           existing={editBill}
           payOnly={payOnly}
+          prefill={prefill}
         />
         <ReturnBillModal
           open={!!returnBill}
