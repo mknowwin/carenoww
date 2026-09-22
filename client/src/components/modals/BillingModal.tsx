@@ -26,7 +26,7 @@ const BILL_RATE_CATEGORIES: Record<string, string[]> = {
   Lab: ["Lab"],
 };
 
-interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; availableQty?: number; batches?: FefoBatch[]; allocations?: BatchAllocation[]; }
+interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; combination?: string; availableQty?: number; batches?: FefoBatch[]; allocations?: BatchAllocation[]; batchId?: string; manualBatch?: boolean; }
 const emptyItem = (): BillItem => ({ description: "", category: "Consultation", quantity: 1, unitPrice: 0, total: 0 });
 
 interface Props {
@@ -126,6 +126,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     let unitPrice = drug.mrpPerUnit ?? 0;
     let batchNo: string | undefined;
     let expiryDate: string | undefined;
+    let batchId: string | undefined;
     let availableQty: number = drug.stock ?? 0;
     let batches: FefoBatch[] = [];
     let allocations: BatchAllocation[] = [];
@@ -141,17 +142,63 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         unitPrice = blendedTotal; // qty is 1 on add, so blended total == per-unit price
         batchNo = allocations[0]?.batchNo;
         expiryDate = allocations[0]?.expiryDate;
+        batchId = allocations[0]?.batchId;
       }
     } catch {
       // fall back to inventory-level values
     }
-    const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, drugId: drug._id, availableQty, batches, allocations };
+    const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, batchId, manualBatch: false, drugId: drug._id, combination: drug.combination || undefined, availableQty, batches, allocations };
     setItems((prev) => [
       ...prev.filter((it) => it.description !== "" || it.unitPrice > 0),
       newItem,
     ]);
     setDrugSearch("");
     setJustAddedItem(newItem);
+  };
+
+  // Manual override — user explicitly forces a single batch via the dropdown,
+  // mirroring DispenseCounterModal.tsx's applyBatch. The server honors this
+  // (deducts only from this batch) instead of running FEFO.
+  const applyManualBatch = (idx: number, batch: FefoBatch) => {
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const mrp = batch.mrpPerUnit ?? it.unitPrice;
+      const total = Number((it.quantity * mrp).toFixed(2));
+      return {
+        ...it,
+        batchId: batch._id,
+        batchNo: batch.batchNo,
+        expiryDate: batch.expiryDate,
+        unitPrice: mrp,
+        total,
+        allocations: [{ batchId: batch._id, batchNo: batch.batchNo, qty: it.quantity, mrpPerUnit: mrp, expiryDate: batch.expiryDate }],
+        manualBatch: true,
+      };
+    }));
+  };
+
+  const changeBatch = (idx: number, batchId: string) => {
+    const batch = items[idx]?.batches?.find((b) => b._id === batchId);
+    if (batch) applyManualBatch(idx, batch);
+  };
+
+  // Drop the manual pin and go back to FEFO auto-allocation for this line item.
+  const resetToFefo = (idx: number) => {
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== idx || !it.batches?.length) return it;
+      const allocations = allocateFefo(it.batches, it.quantity);
+      const total = Number(allocationTotal(allocations).toFixed(2));
+      return {
+        ...it,
+        manualBatch: false,
+        allocations,
+        total,
+        unitPrice: it.quantity > 0 ? Number((total / it.quantity).toFixed(2)) : 0,
+        batchNo: allocations[0]?.batchNo,
+        expiryDate: allocations[0]?.expiryDate,
+        batchId: allocations[0]?.batchId,
+      };
+    }));
   };
 
   // ── reset / populate on open ──────────────────────────────────────────────
@@ -239,13 +286,20 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
       // For batch-tracked drugs, quantity changes re-run the FEFO allocation so the
       // preview always reflects which batches (and prices) will actually be drawn from —
       // mirrors server/lib/fefo.ts fefoDeduct, which the server runs independently on submit.
-      if (field === "quantity" && next.batches?.length) {
+      // Skipped when the user manually pinned a batch — that batch stays fixed regardless of qty.
+      if (field === "quantity" && next.manualBatch) {
+        next.total = Number((next.quantity * next.unitPrice).toFixed(2));
+        if (next.allocations?.length === 1) {
+          next.allocations = [{ ...next.allocations[0], qty: next.quantity }];
+        }
+      } else if (field === "quantity" && next.batches?.length) {
         const allocations = allocateFefo(next.batches, Number(next.quantity) || 0);
         next.allocations = allocations;
         next.total = Number(allocationTotal(allocations).toFixed(2));
         next.unitPrice = next.quantity > 0 ? Number((next.total / next.quantity).toFixed(2)) : 0;
         next.batchNo = allocations[0]?.batchNo;
         next.expiryDate = allocations[0]?.expiryDate;
+        next.batchId = allocations[0]?.batchId;
       } else {
         next.total = Number((next.quantity * next.unitPrice).toFixed(2));
       }
@@ -298,10 +352,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
           patientId: effectiveUhid, patientName, type,
           doctor: (doctorName && doctorName !== "__none__") ? doctorName : undefined,
           items: items.map((it) => {
-            // batches/allocations are client-only preview state — the server
-            // independently re-runs FEFO deduction and expansion on submit.
-            const { batches: _batches, allocations: _allocations, ...rest } = it;
-            return { ...rest, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) };
+            // batches/allocations/manualBatch are client-only preview state — the server
+            // independently re-runs FEFO deduction and expansion on submit. batchId is only
+            // forwarded when the user explicitly pinned a batch; otherwise omitted so the
+            // server runs its default FEFO split (mirrors DispenseCounterModal.tsx).
+            const { batches: _batches, allocations: _allocations, manualBatch, batchId, ...rest } = it;
+            return { ...rest, batchId: manualBatch ? batchId : undefined, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) };
           }),
           amount: totalAmount,
           discount: discountAmt,
@@ -553,9 +609,26 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
-                            {item.allocations && item.allocations.length > 1 && (
+                            {item.batches && item.batches.length > 1 && (
+                              <div className="flex items-center gap-1.5 pl-1 pt-0.5 flex-wrap">
+                                <span className="text-[10px] text-muted-foreground">Batch:</span>
+                                <select
+                                  className="h-6 text-[10px] border rounded px-1.5 bg-background"
+                                  value={item.manualBatch ? item.batchId : ""}
+                                  onChange={(e) => e.target.value ? changeBatch(items.indexOf(item), e.target.value) : resetToFefo(items.indexOf(item))}
+                                >
+                                  <option value="">Auto (FEFO — earliest expiry first)</option>
+                                  {item.batches.map((b) => (
+                                    <option key={b._id} value={b._id}>
+                                      {b.batchNo} · Exp {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" }) : "?"} · Stock {b.quantityRemaining} · ₹{b.mrpPerUnit}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                            {!item.manualBatch && item.allocations && item.allocations.length > 1 && (
                               <div className="pl-1 pt-0.5 space-y-0.5">
-                                <p className="text-[10px] text-amber-700 font-medium">Spans {item.allocations.length} batches (FEFO):</p>
+                                <p className="text-[10px] text-amber-700 font-medium">Spans {item.allocations.length} batches (FEFO) — use the selector above to force a single batch instead:</p>
                                 {item.allocations.map((a, aIdx) => (
                                   <p key={aIdx} className="text-[10px] text-muted-foreground flex justify-between max-w-xs">
                                     <span>Batch {a.batchNo}{a.expiryDate ? ` · Exp ${new Date(a.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}</span>

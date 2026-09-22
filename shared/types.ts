@@ -253,6 +253,7 @@ export interface DrugInventory {
   hsnCode?: string;
   mrpPerUnit?: number;
   purchasePricePerUnit?: number;
+  combination?: string;
   isBatchTracked?: boolean;
   isActive?: boolean;
 }

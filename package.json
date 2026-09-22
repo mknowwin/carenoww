@@ -20,6 +20,7 @@
     "migrate:receivedby-id": "dotenv -- tsx server/migrate-receivedby-id.ts",
     "rollup:refresh": "dotenv -- tsx server/refresh-rollups.ts",
     "rollup:backfill": "dotenv -- tsx server/refresh-rollups.ts",
+    "backup:mongo": "bash scripts/backup-mongo.sh",
     "check": "tsc",
     "typecheck": "tsc --noEmit"
   },

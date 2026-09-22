@@ -210,6 +210,15 @@ function _roundOffLabel(roundOff: number): string {
   return `${roundOff < 0 ? "−" : "+"}₹${Math.abs(roundOff).toFixed(2)}`;
 }
 
+// ── Drug combination sub-line — shown under a Pharmacy line item's description
+// when the underlying DrugInventory record has an optional "combination" set.
+function _comboLine(item: any, opts?: { color?: string; fontSize?: string }): string {
+  if (!item.combination) return "";
+  const color = opts?.color ?? "#1a6b5e";
+  const fontSize = opts?.fontSize ?? "10px";
+  return `<div style="font-size:${fontSize};color:${color};font-style:italic;">${item.combination}</div>`;
+}
+
 // ── Payment history — used across all invoice styles to show who was paid what, when ──
 function _paymentRows(bill: any) {
   return ((bill.payments || []) as any[])
@@ -235,7 +244,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
   const itemRows = items.map((item, idx) => `
     <tr>
       <td class="tc" style="width:36px;">${idx + 1}</td>
-      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
+      <td><strong>${item.description}</strong>${_comboLine(item)}${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
       <td style="width:90px;">${item.category}</td>
       ${hasBatch ? `<td style="width:96px;font-family:monospace;font-size:11px;">${item.batchNo || "—"}</td>` : ""}
       ${hasBatch ? `<td style="width:76px;font-size:11px;text-align:center;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
@@ -330,6 +339,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;width:32px;text-align:center;color:#888;">${idx + 1}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;">
         <strong>${item.description}</strong>
+        ${_comboLine(item)}
         ${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}
       </td>
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;color:#555;width:80px;">${item.category}</td>
@@ -446,6 +456,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       <td style="padding:8px 4px;border-bottom:1px solid #f0f0f0;color:#aaa;width:28px;font-size:11px;">${idx + 1}</td>
       <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;">
         <span style="font-weight:600;">${item.description}</span>
+        ${_comboLine(item)}
       </td>
       <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;color:#888;font-size:11px;width:80px;">${item.category}</td>
       ${hasBatch ? `<td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;font-family:monospace;font-size:11px;width:90px;">${item.batchNo || "—"}</td>` : ""}
@@ -547,6 +558,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
     <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
       <span style="flex:1;margin-right:8px;">
         ${item.description}${item.quantity > 1 ? ` <span style="color:#888;">×${item.quantity}</span>` : ""}
+        ${_comboLine(item, { fontSize: "9px" })}
         ${item.batchNo ? `<div style="font-size:9px;color:#aaa;">Batch: ${item.batchNo}${item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" })}` : ""}</div>` : ""}
       </span>
       <span style="font-weight:700;white-space:nowrap;">₹${(item.total || 0).toLocaleString()}</span>
@@ -632,7 +644,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
   const itemRows = items.map((item, idx) => `
     <tr>
       <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;color:#888;width:24px;text-align:center;">${idx + 1}</td>
-      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;font-weight:600;">${item.description}</td>
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;font-weight:600;">${item.description}${_comboLine(item, { fontSize: "9px" })}</td>
       ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;font-family:monospace;width:84px;">${item.batchNo || "—"}</td>` : ""}
       ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;text-align:center;width:68px;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
       <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;text-align:center;width:30px;">${item.quantity}</td>
@@ -909,6 +921,7 @@ export function printPrescription(rx: any, clinicOverride?: ClinicInfo) {
   const drugs = ((rx.items || []) as any[]).map((item, i) => `
     <div class="drug">
       <div class="d-name">${i + 1}. ${item.drug}</div>
+      ${item.combination ? `<div class="d-note" style="color:#1a6b5e;font-style:normal;">Composition: ${item.combination}</div>` : ""}
       <div class="d-detail">
         Dose: <strong>${item.dose}</strong> &nbsp;·&nbsp;
         Route: <strong>${item.route}</strong> &nbsp;·&nbsp;

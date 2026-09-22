@@ -16,6 +16,7 @@ export interface IBillItem {
   batchNo?: string;
   expiryDate?: Date;
   drugId?: string;
+  combination?: string;
 }
 
 export interface IPaymentEntry {
@@ -114,6 +115,7 @@ const BillItemSchema = new Schema<IBillItem>({
   batchNo:      { type: String },
   expiryDate:   { type: Date },
   drugId:       { type: String },
+  combination:  { type: String },
 }, { _id: true });
 
 const PaymentEntrySchema = new Schema<IPaymentEntry>({

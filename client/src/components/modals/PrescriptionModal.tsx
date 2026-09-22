@@ -22,6 +22,7 @@ interface RxItem {
   duration: string;
   instructions: string;
   quantity: number;
+  combination?: string;
 }
 
 interface InventoryDrug {
@@ -30,6 +31,7 @@ interface InventoryDrug {
   stock: number;
   unit: string;
   status: "OK" | "Low" | "Critical";
+  combination?: string;
 }
 
 interface Props {
@@ -203,7 +205,7 @@ export default function PrescriptionModal({
   const handleDrugSelect = (idx: number, drug: InventoryDrug) => {
     const dose = parseDoseFromName(drug.name);
     setItems((prev) => prev.map((it, i) =>
-      i === idx ? { ...it, drug: drug.name, dose: dose || it.dose } : it
+      i === idx ? { ...it, drug: drug.name, dose: dose || it.dose, combination: drug.combination || "" } : it
     ));
   };
 
@@ -302,12 +304,17 @@ export default function PrescriptionModal({
                 </div>
 
                 {/* ── Drug name with autocomplete ── */}
-                <DrugAutocomplete
-                  value={item.drug}
-                  onChange={(v) => updateItem(idx, "drug", v)}
-                  onSelect={(drug) => handleDrugSelect(idx, drug)}
-                  placeholder="Type to search inventory…"
-                />
+                <div className="space-y-0.5">
+                  <DrugAutocomplete
+                    value={item.drug}
+                    onChange={(v) => { updateItem(idx, "drug", v); if (item.combination) updateItem(idx, "combination", ""); }}
+                    onSelect={(drug) => handleDrugSelect(idx, drug)}
+                    placeholder="Type to search inventory…"
+                  />
+                  {item.combination && (
+                    <p className="text-[10px] text-teal-700 italic pl-1 truncate" title={item.combination}>{item.combination}</p>
+                  )}
+                </div>
 
                 <Input
                   className="h-9 text-sm"
