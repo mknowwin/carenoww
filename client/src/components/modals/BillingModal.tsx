@@ -450,7 +450,13 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
+      <DialogContent
+        className="max-w-3xl max-h-[92vh] overflow-y-auto"
+        // Belt-and-braces alongside the Print Receipt delay below: skip Radix's
+        // default post-close focus hand-off back to the trigger, since Print
+        // Receipt's trigger is about to be replaced by a new browsing context.
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
 
         {/* ── Success screen ── */}
         {savedBill ? (
@@ -474,12 +480,14 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                   <Button
                     className="flex-1 gap-2"
                     onClick={() => {
-                      // Close first, then open the print tab on the next tick. Opening
-                      // the print tab steals window focus, and background tabs get their
-                      // CSS animations throttled — if that focus steal lands mid-animation,
-                      // Radix's animationend-gated unmount can stall until the user tabs
-                      // back, making the dialog look stuck open. Closing first lets the
-                      // exit animation actually run/finish while this tab still has focus.
+                      // Close first, then open the print tab after the close transition
+                      // has actually finished (Dialog's exit animation is duration-200 —
+                      // see ui/dialog.tsx). Opening the print tab steals window focus, and
+                      // once this tab is no longer foregrounded, the browser suspends its
+                      // paint/compositor work — so if that focus steal lands mid-animation,
+                      // the animationend event Radix's Presence waits on to unmount never
+                      // fires, and the dialog is stuck open until the user tabs back.
+                      // Waiting out the transition first avoids the race entirely.
                       handleClose();
                       setTimeout(() => {
                         try {
@@ -487,7 +495,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                         } catch (err) {
                           console.error("printBill failed:", err);
                         }
-                      }, 50);
+                      }, 260);
                     }}
                   >
                     <Printer className="h-4 w-4" /> Print Receipt
