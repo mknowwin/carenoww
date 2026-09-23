@@ -208,7 +208,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
 
   // ── reset / populate on open ──────────────────────────────────────────────
   useEffect(() => {
-    if (!open) { setError(""); setSavedBill(null); return; }
+    // Do NOT touch state on close — Radix keeps the dialog's content mounted
+    // during its exit animation, so clearing `savedBill` here would swap the
+    // success screen for the empty form mid-transition (the "print receipt
+    // flashes back to Generate/Edit Bill" bug). State resets only when the
+    // dialog next opens, which is exactly when it needs to be fresh anyway.
+    if (!open) return;
     // Store only the numeric portion; strip "UHID-" prefix from existing/prefill values.
     const rawId = existing?.patientId ?? prefill?.patientId ?? "";
     setPatientId(rawId.replace(/^UHID-/, ""));
@@ -406,7 +411,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     }
   };
 
-  const handleClose = () => { setSavedBill(null); onClose(); };
+  // `savedBill` is intentionally left as-is here — see the [open] effect above
+  // for why clearing it on close (rather than on next open) causes a flash.
+  const handleClose = () => { onClose(); };
 
   const submitBillNote = async () => {
     const text = noteDraft.trim();
@@ -464,7 +471,25 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
               </div>
               <div className="flex gap-2">
                 {savedBill.status !== "Draft" && (
-                  <Button className="flex-1 gap-2" onClick={() => { printBill(savedBill); handleClose(); }}>
+                  <Button
+                    className="flex-1 gap-2"
+                    onClick={() => {
+                      // Close first, then open the print tab on the next tick. Opening
+                      // the print tab steals window focus, and background tabs get their
+                      // CSS animations throttled — if that focus steal lands mid-animation,
+                      // Radix's animationend-gated unmount can stall until the user tabs
+                      // back, making the dialog look stuck open. Closing first lets the
+                      // exit animation actually run/finish while this tab still has focus.
+                      handleClose();
+                      setTimeout(() => {
+                        try {
+                          printBill(savedBill);
+                        } catch (err) {
+                          console.error("printBill failed:", err);
+                        }
+                      }, 50);
+                    }}
+                  >
                     <Printer className="h-4 w-4" /> Print Receipt
                   </Button>
                 )}

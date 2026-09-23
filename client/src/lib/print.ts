@@ -1910,16 +1910,35 @@ export function printGovernmentReport(submission: any, clinicOverride?: ClinicIn
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+// Popup blockers vary: some return null outright (handled below), others hand back
+// a window that then throws on write/close (extensions, strict blockers). Either
+// failure degrades to the same toast instead of throwing back into the caller —
+// a print failure must never abort whatever the caller does next (e.g. closing a
+// success-screen modal).
+function popupBlockedToast() {
+  toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." });
+}
+
 function open(title: string, body: string) {
-  const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
-  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
-  win.document.write(base(title, body));
-  win.document.close();
+  try {
+    const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
+    if (!win) { popupBlockedToast(); return; }
+    win.document.write(base(title, body));
+    win.document.close();
+  } catch (err) {
+    console.error("print open() failed:", err);
+    popupBlockedToast();
+  }
 }
 
 function openA5(title: string, body: string) {
-  const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
-  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
-  win.document.write(baseA5(title, body));
-  win.document.close();
+  try {
+    const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
+    if (!win) { popupBlockedToast(); return; }
+    win.document.write(baseA5(title, body));
+    win.document.close();
+  } catch (err) {
+    console.error("print openA5() failed:", err);
+    popupBlockedToast();
+  }
 }
