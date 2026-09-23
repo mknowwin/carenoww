@@ -300,7 +300,7 @@ export async function createBill(tenantId: string, user: { name: string; id: str
       payer: payer || "Self",
       paymentMode: paymentMode || "Cash",
       type: type || "OPD",
-      notes: notes || "",
+      notes: notes ? [{ authorId: user.id, authorName: user.name, text: notes, createdAt: new Date() }] : [],
       createdBy: user.name,
       createdById: user.id,
       payments,
@@ -402,7 +402,8 @@ export async function updateBill(
 
   if (paymentMode !== undefined) update.paymentMode = paymentMode;
   if (payer !== undefined) update.payer = payer;
-  if (notes !== undefined) update.notes = notes;
+  // Bill-level notes are per-author entries now (see addBillNote/updateBillNote) —
+  // this route no longer accepts a raw overwrite of the whole notes list.
   if (status !== undefined) update.status = status;
   if (discountType !== undefined) update.discountType = discountType;
   if (discountPercent !== undefined) update.discountPercent = discountPercent;
@@ -585,16 +586,53 @@ export async function postPayment(tenantId: string, user: { id: string; name: st
   );
 }
 
-export async function unlockBill(tenantId: string, userName: string, id: string) {
+export async function unlockBill(tenantId: string, user: { id: string; name: string }, id: string) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
   if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
+  // Recorded as a note (not a formatted string) so it carries a real Date —
+  // author + full date/time are read off authorName/createdAt on display,
+  // rather than being baked into a date-only string.
   return BillingRecord.findOneAndUpdate(
     { _id: id, tenantId },
-    { $set: { isLocked: false }, $push: { notes: `\n[Unlocked by ${userName} on ${new Date().toLocaleDateString("en-IN")}]` } },
+    {
+      $set: { isLocked: false },
+      $push: { notes: { authorId: user.id, authorName: user.name, text: "Bill unlocked", createdAt: new Date() } },
+    },
     { new: true }
   );
+}
+
+// Adds a note to a bill. Any billing-accessible role may add one — notes are
+// visible to everyone but only editable by their own author (see updateBillNote).
+export async function addBillNote(tenantId: string, user: { id: string; name: string }, id: string, text: string) {
+  if (!text?.trim()) throw AppError.badRequest("Note text is required");
+
+  const bill = await BillingRecord.findOneAndUpdate(
+    { _id: id, tenantId },
+    { $push: { notes: { authorId: user.id, authorName: user.name, text: text.trim(), createdAt: new Date() } } },
+    { new: true }
+  );
+  if (!bill) throw AppError.notFound("Bill not found");
+  return bill;
+}
+
+// Edits an existing note — only the original author may edit their own note.
+export async function updateBillNote(tenantId: string, user: { id: string; name: string }, id: string, noteId: string, text: string) {
+  if (!text?.trim()) throw AppError.badRequest("Note text is required");
+
+  const bill = await BillingRecord.findOne({ _id: id, tenantId });
+  if (!bill) throw AppError.notFound("Bill not found");
+
+  const note = (bill.notes as any).id(noteId);
+  if (!note) throw AppError.notFound("Note not found");
+  if (note.authorId !== user.id) throw AppError.forbidden("You can only edit your own notes");
+
+  note.text = text.trim();
+  note.editedAt = new Date();
+  await bill.save();
+  return bill;
 }
 
 // Cancels a bill outright. Only allowed before any payment has been
@@ -745,7 +783,7 @@ export async function returnBillItems(
         payer: bill.payer,
         paymentMode: refundMode || "Cash",
         type: bill.type,
-        notes: reason.trim(),
+        notes: reason.trim() ? [{ authorId: user.id, authorName: user.name, text: reason.trim(), createdAt: new Date() }] : [],
         createdBy: user.name,
         createdById: user.id,
         isLocked: true,

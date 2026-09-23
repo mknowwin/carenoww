@@ -333,6 +333,8 @@ export const billing = {
   // Payment
   postPayment:(id: string, data: any) => post<any>(`/billing/${id}/payments`, data),
   unlock:     (id: string) => post<any>(`/billing/${id}/unlock`, {}),
+  addNote:    (id: string, text: string) => post<any>(`/billing/${id}/notes`, { text }),
+  updateNote: (id: string, noteId: string, text: string) => put<any>(`/billing/${id}/notes/${noteId}`, { text }),
   // Cancel / Return
   cancel:     (id: string, reason?: string) => post<any>(`/billing/${id}/cancel`, { reason }),
   returnItems:(id: string, data: any) => post<any>(`/billing/${id}/return`, data),

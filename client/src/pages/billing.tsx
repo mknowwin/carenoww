@@ -99,6 +99,9 @@ export default function BillingPage() {
   const [returnBill,  setReturnBill]  = useState<any>(null);
   const [deletingId,  setDeletingId]  = useState<string | null>(null);
   const [unlockingId, setUnlockingId] = useState<string | null>(null);
+  const [noteDrafts,  setNoteDrafts]  = useState<Record<string, string>>({});
+  const [editingNote, setEditingNote] = useState<{ billId: string; noteId: string; text: string } | null>(null);
+  const [savingNote,  setSavingNote]  = useState(false);
   const [prefill, setPrefill] = useState<{ patientId?: string; type?: string; doctor?: string } | undefined>(undefined);
 
   // Deep-link from OPD sign-off: ?patientId=...&appointmentId=...&type=...&doctor=... auto-opens a new invoice prefilled.
@@ -263,6 +266,37 @@ export default function BillingPage() {
       toast({ variant: "destructive", title: "Unlock failed", description: err.message || "Failed to unlock bill." });
     } finally {
       setUnlockingId(null);
+    }
+  };
+
+  const submitNote = async (bill: any) => {
+    const text = (noteDrafts[bill.id] || "").trim();
+    if (!text) return;
+    setSavingNote(true);
+    try {
+      await billingApi.addNote(bill._id || bill.id, text);
+      setNoteDrafts((d) => ({ ...d, [bill.id]: "" }));
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed to add note", description: err.message || "Something went wrong." });
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const saveNoteEdit = async () => {
+    if (!editingNote) return;
+    const text = editingNote.text.trim();
+    if (!text) return;
+    setSavingNote(true);
+    try {
+      await billingApi.updateNote(editingNote.billId, editingNote.noteId, text);
+      setEditingNote(null);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed to update note", description: err.message || "Something went wrong." });
+    } finally {
+      setSavingNote(false);
     }
   };
 
@@ -877,13 +911,78 @@ export default function BillingPage() {
                             Round Off: {roundOff > 0 ? "+" : "−"}₹{Math.abs(roundOff).toFixed(2)}
                           </div>
                         )}
-                        {bill.notes && (
-                          <p className="text-xs text-muted-foreground mt-2 px-1 italic">Note: {bill.notes}</p>
-                        )}
-                        {isCreditNote && (
+                        {isCreditNote ? (
                           <p className="text-xs text-muted-foreground mt-2 px-1">
-                            Processed by {bill.createdBy}{bill.notes ? ` — ${bill.notes}` : ""}
+                            Processed by {bill.createdBy}{bill.notes?.[0]?.text ? ` — ${bill.notes[0].text}` : ""}
                           </p>
+                        ) : (
+                          <div className="mt-2 px-1 space-y-1.5">
+                            {bill.notes?.length > 0 && (
+                              <div className="space-y-1">
+                                {bill.notes.map((note: any) => {
+                                  const noteId = note._id;
+                                  const isOwn = note.authorId === user?.id;
+                                  const isEditing = editingNote?.billId === (bill._id || bill.id) && editingNote?.noteId === noteId;
+                                  return (
+                                    <div key={noteId} className="text-xs bg-muted/40 rounded px-2 py-1.5">
+                                      {isEditing ? (
+                                        <div className="flex items-center gap-1.5">
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={editingNote!.text}
+                                            onChange={(e) => setEditingNote({ ...editingNote!, text: e.target.value })}
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter") saveNoteEdit();
+                                              if (e.key === "Escape") setEditingNote(null);
+                                            }}
+                                            autoFocus
+                                          />
+                                          <Button size="sm" className="h-7 px-2 text-xs shrink-0" disabled={savingNote} onClick={saveNoteEdit}>Save</Button>
+                                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs shrink-0" onClick={() => setEditingNote(null)}>Cancel</Button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-start justify-between gap-2">
+                                          <p className="italic text-muted-foreground">
+                                            {note.text}
+                                            <span className="block not-italic text-[10px] text-muted-foreground/70 mt-0.5">
+                                              {note.authorName} · {new Date(note.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                                              {note.editedAt ? " (edited)" : ""}
+                                            </span>
+                                          </p>
+                                          {isOwn && (
+                                            <button
+                                              type="button"
+                                              className="text-muted-foreground hover:text-foreground shrink-0"
+                                              title="Edit note"
+                                              onClick={() => setEditingNote({ billId: bill._id || bill.id, noteId, text: note.text })}
+                                            >
+                                              <Pencil className="h-3 w-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <Input
+                                className="h-7 text-xs"
+                                placeholder="Add a note…"
+                                value={noteDrafts[bill.id] || ""}
+                                onChange={(e) => setNoteDrafts((d) => ({ ...d, [bill.id]: e.target.value }))}
+                                onKeyDown={(e) => { if (e.key === "Enter") submitNote(bill); }}
+                              />
+                              <Button
+                                size="sm" variant="outline" className="h-7 px-2 text-xs shrink-0"
+                                disabled={savingNote || !(noteDrafts[bill.id] || "").trim()}
+                                onClick={() => submitNote(bill)}
+                              >
+                                Add
+                              </Button>
+                            </div>
+                          </div>
                         )}
                         {bill.status === "Cancelled" && (
                           <p className="text-xs text-muted-foreground mt-2 px-1">

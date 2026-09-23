@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { billing as billingApi, users as usersApi, ratemaster as ratemasterApi, pharmacy as pharmacyApi, patients as patientsApi } from "@/lib/api";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, IndianRupee, Stethoscope, Printer, CheckCircle2, Search, Pill, Loader2, UserCheck } from "lucide-react";
+import { Plus, Trash2, IndianRupee, Stethoscope, Printer, CheckCircle2, Search, Pill, Loader2, UserCheck, Pencil } from "lucide-react";
 import { printBill } from "@/lib/print";
 import { useAuth } from "@/contexts/AuthContext";
 import { allocateFefo, allocationTotal, type BatchAllocation, type FefoBatch } from "@/lib/pharmacyFefo";
@@ -75,6 +75,11 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   const [transactionRef, setTransactionRef] = useState("");
   const [insurer, setInsurer] = useState({ tpaName: "", policyNo: "", memberNo: "" });
   const [notes, setNotes] = useState("");
+  const [billNotes, setBillNotes] = useState<any[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const [rateNameFilter, setRateNameFilter] = useState("");
   const [drugSearch, setDrugSearch] = useState("");
   const [manualPharmacy, setManualPharmacy] = useState(false);
@@ -221,7 +226,14 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setPaymentMode(existing?.paymentMode ?? "Cash");
     setTransactionRef("");
     setInsurer({ tpaName: existing?.insurance?.tpaName ?? "", policyNo: existing?.insurance?.policyNo ?? "", memberNo: existing?.insurance?.memberNo ?? "" });
-    setNotes(existing?.notes ?? "");
+    // `notes` here is free text for a NEW entry only (initial bill note on create,
+    // or a per-payment note in payOnly mode) — existing bill notes are an array of
+    // per-author entries, shown/added/edited via billNotes below.
+    setNotes("");
+    setBillNotes(existing?.notes ?? []);
+    setNoteDraft("");
+    setEditingNoteId(null);
+    setEditingNoteText("");
     setRateNameFilter("");
     setDrugSearch("");
     setManualPharmacy(false);
@@ -395,6 +407,38 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   };
 
   const handleClose = () => { setSavedBill(null); onClose(); };
+
+  const submitBillNote = async () => {
+    const text = noteDraft.trim();
+    if (!text || !existing) return;
+    setSavingNote(true);
+    try {
+      const updated = await billingApi.addNote(existing._id || existing.id, text);
+      setBillNotes(updated.notes ?? []);
+      setNoteDraft("");
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      setError(err.message || "Failed to add note");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const saveBillNoteEdit = async () => {
+    const text = editingNoteText.trim();
+    if (!text || !editingNoteId || !existing) return;
+    setSavingNote(true);
+    try {
+      const updated = await billingApi.updateNote(existing._id || existing.id, editingNoteId, text);
+      setBillNotes(updated.notes ?? []);
+      setEditingNoteId(null);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      setError(err.message || "Failed to update note");
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
@@ -776,9 +820,84 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                 )}
               </div>
 
-              <F label="Notes">
-                <Textarea className="h-14 text-sm resize-none" placeholder="Any billing notes…" value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </F>
+              {(!isEdit || payOnly) && (
+                <F label={payOnly ? "Payment Note" : "Notes"}>
+                  <Textarea
+                    className="h-14 text-sm resize-none"
+                    placeholder={payOnly ? "Note for this payment…" : "Any billing notes…"}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                </F>
+              )}
+
+              {isEdit && !payOnly && (
+                <F label="Notes">
+                  <div className="space-y-1.5">
+                    {billNotes.length > 0 && (
+                      <div className="space-y-1">
+                        {billNotes.map((note: any) => {
+                          const noteId = note._id;
+                          const isOwn = note.authorId === user?.id;
+                          const isEditingThis = editingNoteId === noteId;
+                          return (
+                            <div key={noteId} className="text-xs bg-muted/40 rounded px-2 py-1.5">
+                              {isEditingThis ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Input
+                                    className="h-7 text-xs"
+                                    value={editingNoteText}
+                                    onChange={(e) => setEditingNoteText(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveBillNoteEdit();
+                                      if (e.key === "Escape") setEditingNoteId(null);
+                                    }}
+                                    autoFocus
+                                  />
+                                  <Button type="button" size="sm" className="h-7 px-2 text-xs shrink-0" disabled={savingNote} onClick={saveBillNoteEdit}>Save</Button>
+                                  <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs shrink-0" onClick={() => setEditingNoteId(null)}>Cancel</Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="italic text-muted-foreground">
+                                    {note.text}
+                                    <span className="block not-italic text-[10px] text-muted-foreground/70 mt-0.5">
+                                      {note.authorName} · {new Date(note.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                                      {note.editedAt ? " (edited)" : ""}
+                                    </span>
+                                  </p>
+                                  {isOwn && (
+                                    <button
+                                      type="button"
+                                      className="text-muted-foreground hover:text-foreground shrink-0"
+                                      title="Edit note"
+                                      onClick={() => { setEditingNoteId(noteId); setEditingNoteText(note.text); }}
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        className="h-7 text-xs"
+                        placeholder="Add a note…"
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitBillNote(); } }}
+                      />
+                      <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs shrink-0" disabled={savingNote || !noteDraft.trim()} onClick={submitBillNote}>
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+                </F>
+              )}
 
               {error && <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{error}</p>}
 

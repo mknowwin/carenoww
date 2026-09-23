@@ -18,6 +18,7 @@
     "migrate:masters": "dotenv -- tsx server/migrate-backfill-masters.ts",
     "migrate:drugbatch-index": "dotenv -- tsx server/migrate-drugbatch-index.ts",
     "migrate:receivedby-id": "dotenv -- tsx server/migrate-receivedby-id.ts",
+    "migrate:bill-notes": "dotenv -- tsx server/migrate-bill-notes.ts",
     "rollup:refresh": "dotenv -- tsx server/refresh-rollups.ts",
     "rollup:backfill": "dotenv -- tsx server/refresh-rollups.ts",
     "backup:mongo": "bash scripts/backup-mongo.sh",

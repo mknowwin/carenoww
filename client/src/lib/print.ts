@@ -220,6 +220,14 @@ function _comboLine(item: any, opts?: { color?: string; fontSize?: string }): st
 }
 
 // ── Payment history — used across all invoice styles to show who was paid what, when ──
+// bill.notes is an array of per-author entries ({ authorName, text, createdAt }) —
+// printed receipts show them flattened to one line per note, newest last.
+function _notesText(bill: any): string {
+  const notes = bill?.notes as any[] | undefined;
+  if (!notes?.length) return "";
+  return notes.map((n) => (n.authorName ? `${n.text} — ${n.authorName}` : n.text)).join("<br/>");
+}
+
 function _paymentRows(bill: any) {
   return ((bill.payments || []) as any[])
     .slice()
@@ -319,7 +327,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
         ${balance < 0 ? `<tr><td style="color:#15803d;">Overpaid</td><td class="tr" style="color:#15803d;">₹${Math.abs(balance).toLocaleString()}</td></tr>` : ""}
       </table>
     </div>
-    ${bill.notes ? `<div class="notes"><strong>Notes</strong>${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div class="notes"><strong>Notes</strong>${_notesText(bill)}</div>` : ""}
     <div class="footer">
       <p>Thank you for choosing ${clinic.name}. We wish you a speedy recovery!</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
@@ -436,7 +444,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
       </table>
     </div>
 
-    ${bill.notes ? `<div style="margin-top:14px;padding:9px 12px;background:#fffbf0;border:1px solid #e5d68a;border-radius:5px;font-size:12px;"><strong style="display:block;margin-bottom:3px;color:#92400e;">Notes</strong>${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:14px;padding:9px 12px;background:#fffbf0;border:1px solid #e5d68a;border-radius:5px;font-size:12px;"><strong style="display:block;margin-bottom:3px;color:#92400e;">Notes</strong>${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:22px;padding-top:10px;border-top:2px solid #1a5c4a;text-align:center;font-size:11px;color:#555;">
       <p>Thank you for choosing <strong>${clinic.name}</strong>. We wish you a speedy recovery!</p>
@@ -540,7 +548,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       </div>
     </div>
 
-    ${bill.notes ? `<div style="margin-top:8px;font-size:12px;color:#555;font-style:italic;border-left:3px solid #ddd;padding-left:10px;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:8px;font-size:12px;color:#555;font-style:italic;border-left:3px solid #ddd;padding-left:10px;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:32px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center;">
       ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
@@ -625,7 +633,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${balance === 0 ? `<div style="text-align:center;margin-top:4px;font-weight:700;color:#15803d;font-size:12px;">✓ PAID IN FULL</div>` : ""}
     </div>
 
-    ${bill.notes ? `<div style="margin-top:8px;font-size:10px;color:#666;border-top:1px dashed #ccc;padding-top:6px;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:8px;font-size:10px;color:#666;border-top:1px dashed #ccc;padding-top:6px;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:12px;padding-top:8px;border-top:2px dashed #333;text-align:center;font-size:10px;color:#777;">
       <div style="font-weight:700;margin-bottom:2px;">Thank you for visiting ${clinic.name}!</div>
@@ -728,7 +736,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;color:#dc2626;font-weight:600;"><span>Balance</span><span>₹${balance.toLocaleString()}</span></div>` : ""}
     </div>
 
-    ${bill.notes ? `<div style="margin-top:10px;font-size:10px;color:#666;padding:6px 8px;border-left:3px solid #ddd;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:10px;font-size:10px;color:#666;padding:6px 8px;border-left:3px solid #ddd;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:14px;padding-top:8px;border-top:1px solid #ddd;text-align:center;font-size:9px;color:#aaa;">
       ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
@@ -794,7 +802,7 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
         ${returnAmount > refundAmount ? `<tr><td style="color:#d97706;">Credited to Balance</td><td class="tr" style="color:#d97706;">₹${(returnAmount - refundAmount).toLocaleString()}</td></tr>` : ""}
       </table>
     </div>
-    ${creditNote.notes ? `<div class="notes"><strong>Reason for Return</strong>${creditNote.notes}</div>` : ""}
+    ${creditNote.notes?.length ? `<div class="notes"><strong>Reason for Return</strong>${_notesText(creditNote)}</div>` : ""}
     <div class="footer">
       <p>This credit note reduces the value of invoice ${creditNote.originalBillNo || "—"} issued by ${clinic.name}.</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}

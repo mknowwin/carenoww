@@ -31,6 +31,15 @@ export interface IPaymentEntry {
   paidAt: Date;
 }
 
+export interface IBillNote {
+  _id?: mongoose.Types.ObjectId;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: Date;
+  editedAt?: Date;
+}
+
 export interface IAdvanceEntry {
   amount: number;
   receivedDate?: Date;
@@ -78,7 +87,7 @@ export interface IBillingRecord extends Document {
   payer: string;
   paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Adjustment";
   type: "OPD" | "IPD" | "Emergency" | "Lab" | "Pharmacy";
-  notes: string;
+  notes: IBillNote[];
   createdBy: string;
   createdById: string;
   isLocked: boolean;
@@ -155,6 +164,14 @@ const InsuranceClaimSchema = new Schema<IInsuranceClaim>({
   rejectionReason: { type: String, default: "" },
 }, { _id: false });
 
+const BillNoteSchema = new Schema<IBillNote>({
+  authorId:   { type: String, required: true },
+  authorName: { type: String, required: true },
+  text:       { type: String, required: true },
+  createdAt:  { type: Date, default: Date.now },
+  editedAt:   { type: Date },
+}, { _id: true });
+
 const BillingRecordSchema = new Schema<IBillingRecord>(
   {
     tenantId:       { type: Schema.Types.ObjectId, ref: "Tenant", required: true, index: true },
@@ -178,7 +195,7 @@ const BillingRecordSchema = new Schema<IBillingRecord>(
     payer:          { type: String, default: "Self" },
     paymentMode:    { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online", "Adjustment"], default: "Cash" },
     type:           { type: String, enum: ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"], default: "OPD" },
-    notes:          { type: String, default: "" },
+    notes:          { type: [BillNoteSchema], default: [] },
     createdBy:      { type: String, default: "" },
     createdById:    { type: String, default: "", index: true },
     isLocked:       { type: Boolean, default: false },
