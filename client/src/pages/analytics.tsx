@@ -3,9 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   BarChart3, Brain, TrendingUp, TrendingDown, Users, BedDouble,
-  CreditCard, Activity, Search, Download,
+  CreditCard, Activity, Search, Download, LineChart as LineChartIcon, Sparkles,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -14,6 +15,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { dashboard as dashApi } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import InsightsTab from "@/components/insights/InsightsTab";
 
 const PATIENT_TREND = [
   { month: "Nov", opd: 1820, ipd: 142, icu: 18 },
@@ -82,6 +84,14 @@ export default function AnalyticsPage() {
           <Download className="h-4 w-4" /> Export Report
         </Button>
       </div>
+
+      <Tabs defaultValue="overview">
+        <TabsList className="mb-1">
+          <TabsTrigger value="overview" className="gap-1.5"><LineChartIcon className="h-3.5 w-3.5" />Overview</TabsTrigger>
+          <TabsTrigger value="insights" className="gap-1.5"><Sparkles className="h-3.5 w-3.5" />Insights</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-5">
 
       {/* NLQ Engine */}
       <Card className="bg-gradient-to-r from-teal-50 to-cyan-50 border-teal-200">
@@ -276,6 +286,13 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+        </TabsContent>
+
+        <TabsContent value="insights">
+          <InsightsTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

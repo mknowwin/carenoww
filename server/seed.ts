@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
-import Tenant from "./models/Tenant.js";
+import Tenant, { MODULE_KEYS } from "./models/Tenant.js";
 import User from "./models/User.js";
 import Patient from "./models/Patient.js";
 import Appointment from "./models/Appointment.js";
@@ -131,7 +131,7 @@ if (process.argv[1]?.includes("seed")) {
         plan: "professional",
         status: "active",
         contact: { email: "admin@demo.com", phone: "9999999999", address: "123 Main St", city: "Chennai", state: "Tamil Nadu", country: "India" },
-        settings: { maxUsers: 50, maxPatients: 5000, modules: ["dashboard","patients","appointments","opd","ipd","lab","pharmacy","billing","analytics"] },
+        settings: { maxUsers: 50, maxPatients: 5000, modules: [...MODULE_KEYS] },
       });
 
       // Create admin user

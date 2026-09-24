@@ -1,24 +1,45 @@
 import mongoose from "mongoose";
 import PharmacyOrder from "../models/PharmacyOrder.js";
+import Patient from "../models/Patient.js";
 import { getNextId } from "../lib/counter.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
-import { checkPharmacyStock, deductAndExpandPharmacyItems } from "./billingService.js";
+import { checkPharmacyStock, deductAndExpandPharmacyItems, insufficientStockError } from "./billingService.js";
 import { AppError } from "../lib/AppError.js";
+
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export interface PharmacyOrderListFilters {
   status?: string;
   patientId?: string;
   rxSource?: string;
+  search?: string;
   page?: string;
   limit?: string;
 }
 
 export async function listOrders(tenantId: string, filters: PharmacyOrderListFilters) {
-  const { status, patientId, rxSource, page = "1", limit = "50" } = filters;
+  const { status, patientId, rxSource, search, page = "1", limit = "50" } = filters;
   const query: any = { tenantId };
   if (status)    query.status    = status;
   if (patientId) query.patientId = patientId;
   if (rxSource)  query.rxSource  = rxSource;
+
+  if (search && search.trim()) {
+    const regex = new RegExp(escapeRegex(search.trim()), "i");
+    // Name/RxId/drug match directly; phone/UHID resolve via the Patient record first
+    // since PharmacyOrder only stores a denormalized patientId string.
+    const matchingPatients = await Patient.find({ tenantId, $or: [{ phone: regex }, { uhid: regex }] }).select("uhid");
+    const patientIds = matchingPatients.map((p) => p.uhid);
+    query.$or = [
+      { patientName: regex },
+      { rxId: regex },
+      { drug: regex },
+      { "items.drugName": regex },
+      ...(patientIds.length ? [{ patientId: { $in: patientIds } }] : []),
+    ];
+  }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const [orders, total] = await Promise.all([
@@ -42,6 +63,7 @@ function buildBillItems(dispensedItems: any[]) {
       unitPrice:   it.mrpPerUnit ?? 0,
       total:       (it.quantity || 1) * (it.mrpPerUnit ?? 0),
       drugId:      it.drugId,
+      batchId:     it.batchId || undefined,
       batchNo:     it.batchNo || "",
     }));
 }
@@ -110,7 +132,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
       if (pharmacyItems.length) {
         const shortages = await checkPharmacyStock(tenantId, pharmacyItems, session);
         if (shortages.length) {
-          throw AppError.conflict("Insufficient stock for one or more items", { shortages });
+          throw insufficientStockError(shortages);
         }
       }
 
@@ -132,9 +154,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
     });
   } catch (err: any) {
     if (err.insufficientStock) {
-      throw AppError.conflict("Insufficient stock for one or more items", {
-        shortages: [{ drugId: err.drugId, available: err.available }],
-      });
+      throw insufficientStockError([{ drugId: err.drugId, name: err.drugName, batchNo: err.batchNo, required: err.required, available: err.available }]);
     }
     throw err;
   } finally {
@@ -182,7 +202,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
       if (pharmacyItems.length) {
         const shortages = await checkPharmacyStock(tenantId, pharmacyItems, session);
         if (shortages.length) {
-          throw AppError.conflict("Insufficient stock for one or more items", { shortages });
+          throw insufficientStockError(shortages);
         }
       }
 
@@ -207,9 +227,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
     });
   } catch (err: any) {
     if (err.insufficientStock) {
-      throw AppError.conflict("Insufficient stock for one or more items", {
-        shortages: [{ drugId: err.drugId, available: err.available }],
-      });
+      throw insufficientStockError([{ drugId: err.drugId, name: err.drugName, batchNo: err.batchNo, required: err.required, available: err.available }]);
     }
     throw err;
   } finally {

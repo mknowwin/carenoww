@@ -24,9 +24,9 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharm
   res.status(201).json({ success: true, data: bill });
 }));
 
-// ── PUT /api/billing/:id — update items / discount / notes ───────────────────
+// ── PUT /api/billing/:id — update items / discount / payer / status ──────────
 router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
-  const bill = await billingService.updateBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
+  const bill = await billingService.updateBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body, req.user!.timezone);
   res.json({ success: true, data: bill });
 }));
 
@@ -44,7 +44,19 @@ router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nu
 
 // ── POST /api/billing/:id/unlock — admin unlocks a paid/locked bill ───────────
 router.post("/:id/unlock", requireRole("admin", "finance"), asyncHandler(async (req: AuthRequest, res) => {
-  const bill = await billingService.unlockBill(req.user!.tenantId, req.user!.name, req.params.id);
+  const bill = await billingService.unlockBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id);
+  res.json({ success: true, data: bill });
+}));
+
+// ── POST /api/billing/:id/notes — add a note (any billing role; visible to all) ─
+router.post("/:id/notes", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const bill = await billingService.addBillNote(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body?.text);
+  res.status(201).json({ success: true, data: bill });
+}));
+
+// ── PUT /api/billing/:id/notes/:noteId — edit own note only ───────────────────
+router.put("/:id/notes/:noteId", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const bill = await billingService.updateBillNote(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.params.noteId, req.body?.text);
   res.json({ success: true, data: bill });
 }));
 

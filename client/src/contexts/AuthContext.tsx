@@ -14,6 +14,7 @@ export interface User {
   organization: string;
   timezone: string;
   token: string;
+  modules?: string[];
 }
 
 interface AuthContextType {

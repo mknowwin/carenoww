@@ -153,11 +153,22 @@ export interface Appointment {
   token: string;
   notes?: string;
   referringDoctor?: string;
+  referralSource?: "" | "Doctor" | "VHN" | "Medical Shop" | "Lab" | "Self" | "Other";
+  referralDetail?: string;
+  area?: string;
   vitals?: AppointmentVitals;
   soap?: AppointmentSoap;
 }
 
 // ── Lab Order ─────────────────────────────────────────────────────────────────
+export interface LabParameter {
+  testName: string;
+  name: string;
+  value: string;
+  unit: string;
+  referenceRange: string;
+}
+
 export interface LabOrder {
   _id?: string;
   labId?: string;
@@ -165,10 +176,18 @@ export interface LabOrder {
   patientName: string;
   test: string;
   ordered: string;
+  sampleDate?: string | null;
   status: "Pending" | "Collected" | "Processing" | "Completed" | "Scheduled";
   result: string | null;
+  diagnosis?: string | null;
+  category?: "Pathology" | "Radiology" | "Cardiology" | "Other";
+  parameters?: LabParameter[];
   priority: "Routine" | "Urgent" | "STAT";
   doctor: string;
+  department?: string;
+  reportedBy?: string;
+  appointmentId?: string;
+  notes?: string;
 }
 
 // ── Pharmacy ──────────────────────────────────────────────────────────────────
@@ -217,7 +236,8 @@ export interface DrugBatch {
   quantityRemaining: number;
   purchasePricePerUnit: number;
   mrpPerUnit: number;
-  status: "Active" | "Exhausted" | "Expired" | "Quarantine";
+  gstPercent?: number;
+  status: "Active" | "Exhausted" | "Expired" | "Quarantine" | "Cancelled";
 }
 
 export interface DrugInventory {
@@ -233,6 +253,7 @@ export interface DrugInventory {
   hsnCode?: string;
   mrpPerUnit?: number;
   purchasePricePerUnit?: number;
+  combination?: string;
   isBatchTracked?: boolean;
   isActive?: boolean;
 }
@@ -246,6 +267,7 @@ export interface GRNItem {
   quantityReceived: number;
   purchasePricePerUnit: number;
   mrpPerUnit: number;
+  gstPercent?: number;
   totalCost: number;
 }
 
@@ -299,7 +321,7 @@ export interface BillItem {
   _id?: string;
   itemId?: string;
   description: string;
-  category: "Consultation" | "Lab" | "Pharmacy" | "Procedure" | "Room" | "Other";
+  category: "Consultation" | "Lab" | "Pharmacy" | "Procedure" | "Diagnosis" | "Room" | "Other";
   quantity: number;
   unitPrice: number;
   total: number;
@@ -311,6 +333,7 @@ export interface BillItem {
   taxableAmount?: number;
   drugId?: string;
   batchNo?: string;
+  expiryDate?: string;
 }
 
 export interface PaymentEntry {
@@ -352,6 +375,15 @@ export interface InsuranceClaim {
   rejectionReason?: string;
 }
 
+export interface BillNote {
+  _id?: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+  editedAt?: string;
+}
+
 export interface BillingRecord {
   _id?: string;
   billId?: string;
@@ -374,7 +406,7 @@ export interface BillingRecord {
   payer: string;
   paymentMode?: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Adjustment";
   type: string;
-  notes?: string;
+  notes?: BillNote[];
   createdBy?: string;
   createdById?: string;
   isLocked?: boolean;

@@ -938,6 +938,11 @@ function HospitalSection({ user }: { user: any }) {
   const [gstNo,         setGstNo]         = useState("");
   const [invoicePrefix, setInvoicePrefix] = useState("BILL");
   const [timezone,      setTimezone]      = useState("Asia/Kolkata");
+  const [hmisFacilityCode,     setHmisFacilityCode]     = useState("");
+  const [drugLicenseNo,        setDrugLicenseNo]        = useState("");
+  const [registrationNo,       setRegistrationNo]       = useState("");
+  const [signatoryName,        setSignatoryName]        = useState("");
+  const [signatoryDesignation, setSignatoryDesignation] = useState("");
   const [cgstRate,      setCgstRate]      = useState(0);
   const [sgstRate,      setSgstRate]      = useState(0);
   const [igstRate,      setIgstRate]      = useState(0);
@@ -954,6 +959,11 @@ function HospitalSection({ user }: { user: any }) {
       if (s.gstNo         !== undefined) setGstNo(s.gstNo);
       if (s.invoicePrefix !== undefined) setInvoicePrefix(s.invoicePrefix);
       if (s.timezone      !== undefined) setTimezone(s.timezone);
+      if (s.hmisFacilityCode     !== undefined) setHmisFacilityCode(s.hmisFacilityCode);
+      if (s.drugLicenseNo        !== undefined) setDrugLicenseNo(s.drugLicenseNo);
+      if (s.registrationNo       !== undefined) setRegistrationNo(s.registrationNo);
+      if (s.signatoryName        !== undefined) setSignatoryName(s.signatoryName);
+      if (s.signatoryDesignation !== undefined) setSignatoryDesignation(s.signatoryDesignation);
       if (s.taxConfig) {
         setCgstRate(s.taxConfig.cgstRate ?? 0);
         setSgstRate(s.taxConfig.sgstRate ?? 0);
@@ -986,6 +996,11 @@ function HospitalSection({ user }: { user: any }) {
         gstNo:         gstNo,
         invoicePrefix: invoicePrefix,
         timezone:      timezone,
+        hmisFacilityCode:     hmisFacilityCode,
+        drugLicenseNo:        drugLicenseNo,
+        registrationNo:       registrationNo,
+        signatoryName:        signatoryName,
+        signatoryDesignation: signatoryDesignation,
         taxConfig: {
           cgstRate:            cgstRate,
           sgstRate:            sgstRate,
@@ -1003,6 +1018,12 @@ function HospitalSection({ user }: { user: any }) {
           u.clinicAddress   = clinicAddress;
           u.invoiceStyle    = invoiceStyle;
           u.timezone        = timezone;
+          u.gstNo                = gstNo;
+          u.hmisFacilityCode     = hmisFacilityCode;
+          u.drugLicenseNo        = drugLicenseNo;
+          u.registrationNo       = registrationNo;
+          u.signatoryName        = signatoryName;
+          u.signatoryDesignation = signatoryDesignation;
           localStorage.setItem("carenoww_user", JSON.stringify(u));
         }
       } catch {}
@@ -1221,6 +1242,74 @@ function HospitalSection({ user }: { user: any }) {
         </CardContent>
       </Card>
 
+      {/* Statutory / Regulatory Identity — appears on government report letterheads */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Building2 className="h-4 w-4" /> Statutory &amp; Regulatory Identity
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground -mt-1">
+            Shown on government/statutory report submissions (HMIS returns, pharmacy audits) — see Statutory Reports.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">HMIS Facility Code</Label>
+              <Input
+                value={hmisFacilityCode}
+                onChange={(e) => setHmisFacilityCode(e.target.value)}
+                placeholder="Health dept. facility registration code"
+                className="h-9 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Drug License Number</Label>
+              <Input
+                value={drugLicenseNo}
+                onChange={(e) => setDrugLicenseNo(e.target.value)}
+                placeholder="Drug Control license no."
+                className="h-9 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Hospital/Clinic Registration Number</Label>
+              <Input
+                value={registrationNo}
+                onChange={(e) => setRegistrationNo(e.target.value)}
+                placeholder="Registration / accreditation no."
+                className="h-9 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Authorized Signatory Name</Label>
+              <Input
+                value={signatoryName}
+                onChange={(e) => setSignatoryName(e.target.value)}
+                placeholder="Dr. Jane Doe"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Signatory Designation</Label>
+              <Input
+                value={signatoryDesignation}
+                onChange={(e) => setSignatoryDesignation(e.target.value)}
+                placeholder="Medical Superintendent"
+                className="h-9"
+              />
+            </div>
+          </div>
+
+          <Button size="sm" onClick={saveSettings} disabled={saving || user?.role !== "admin"}>
+            {saving ? "Saving..." : "Save Statutory Details"}
+          </Button>
+          {user?.role !== "admin" && (
+            <p className="text-xs text-muted-foreground">Only administrators can update statutory identity.</p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Invoice Print Style */}
       <Card>
         <CardHeader>
@@ -1290,6 +1379,75 @@ function HospitalSection({ user }: { user: any }) {
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             HIPAA Compliant · HL7 FHIR R4 Native · ABDM API-Ready
           </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── OperationalSection ────────────────────────────────────────────────────────
+function OperationalSection({ user }: { user: any }) {
+  const [notifyEmail, setNotifyEmail] = useState(true);
+  const [notifySms,   setNotifySms]   = useState(false);
+  const [saving,       setSaving]     = useState(false);
+  const [msg,          setMsg]        = useState("");
+
+  useEffect(() => {
+    authApi.getClinicSettings().then((s: any) => {
+      if (s.operational) {
+        setNotifyEmail(s.operational.notifyEmail ?? true);
+        setNotifySms(s.operational.notifySms ?? false);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const saveSettings = async () => {
+    setSaving(true); setMsg("");
+    try {
+      await authApi.updateClinicSettings({ operational: { notifyEmail, notifySms } });
+      setMsg("Reminder preferences saved successfully.");
+    } catch (err: any) {
+      setMsg(err.message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Bell className="h-4 w-4" /> Patient Reminders
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground -mt-1">
+            Default channels used to remind patients about upcoming appointments. (Doctor working hours are set per-doctor under Departments &amp; Doctors.)
+          </p>
+
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-xs font-medium">Email Reminders</p>
+              <p className="text-xs text-muted-foreground">Send appointment reminders to patients by email by default.</p>
+            </div>
+            <Switch checked={notifyEmail} onCheckedChange={setNotifyEmail} />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-xs font-medium">SMS Reminders</p>
+              <p className="text-xs text-muted-foreground">Send appointment reminders to patients by SMS by default.</p>
+            </div>
+            <Switch checked={notifySms} onCheckedChange={setNotifySms} />
+          </div>
+
+          <Button size="sm" onClick={saveSettings} disabled={saving || user?.role !== "admin"}>
+            {saving ? "Saving..." : "Save Preferences"}
+          </Button>
+          {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+          {user?.role !== "admin" && (
+            <p className="text-xs text-muted-foreground">Only administrators can update reminder preferences.</p>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -1497,6 +1655,7 @@ export default function SettingsPage() {
   const sections = [
     { id: "profile",     label: "Profile",              icon: User },
     ...(user?.role === "admin" ? [{ id: "hospital",    label: "Hospital",             icon: Building2 }] : []),
+    ...(user?.role === "admin" ? [{ id: "operational", label: "Patient Reminders",     icon: Bell }] : []),
     ...(user?.role === "admin" ? [{ id: "departments",  label: "Departments & Doctors", icon: Stethoscope  }] : []),
     ...(user?.role === "admin" ? [{ id: "staff",        label: "Staff Management",      icon: UserCheck    }] : []),
     ...(user?.role === "admin" ? [{ id: "servicerates", label: "Service Rates",         icon: IndianRupee  }] : []),
@@ -1672,6 +1831,9 @@ export default function SettingsPage() {
 
           {/* ── Hospital ─────────────────────────────────────── */}
           {active === "hospital" && user?.role === "admin" && <HospitalSection user={user} />}
+
+          {/* ── Patient Reminders ────────────────────────────── */}
+          {active === "operational" && user?.role === "admin" && <OperationalSection user={user} />}
 
           {/* ── Departments & Doctors ─────────────────────────── */}
           {active === "departments" && user?.role === "admin" && (

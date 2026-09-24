@@ -20,6 +20,7 @@ const PAGE_TITLES: Record<string, { title: string; description: string }> = {
   "/pharmacy":     { title: "Pharmacy Management",     description: "Prescription dispensing, drug inventory and MAR" },
   "/billing":      { title: "Billing & Revenue Cycle", description: "Patient billing, insurance claims and financial management" },
   "/analytics":    { title: "Clinical & Business Analytics", description: "Hospital performance metrics and AI-generated insights" },
+  "/statutory-reports": { title: "Statutory Reports", description: "Generate and track government report submissions" },
   "/settings":     { title: "Settings",                description: "Account, system and notification preferences" },
 };
 
@@ -50,7 +51,7 @@ export default function TopNav({ onToggleSidebar }: TopNavProps) {
   const handleLogout = () => { logout(); setLocation("/login"); };
 
   return (
-    <header className="h-14 bg-card border-b border-border flex items-center px-4 gap-3 shrink-0">
+    <header className="h-14 bg-card border-b border-border flex items-center px-2 sm:px-4 gap-1.5 sm:gap-3 shrink-0">
       <Button variant="ghost" size="sm" onClick={onToggleSidebar} className="h-8 w-8 p-0 shrink-0">
         <PanelLeft className="h-4 w-4" />
       </Button>
@@ -62,7 +63,7 @@ export default function TopNav({ onToggleSidebar }: TopNavProps) {
         <p className="text-xs text-muted-foreground truncate hidden sm:block">{page.description}</p>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         {/* Critical AI Alert indicator */}
         {criticalCount > 0 && (
           <Button variant="ghost" size="sm" className="h-8 px-2 gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50">

@@ -12,6 +12,11 @@ export interface ClinicInfo {
   city?: string;
   gstNo?: string;
   invoiceStyle?: InvoiceStyle;
+  hmisFacilityCode?: string;
+  drugLicenseNo?: string;
+  registrationNo?: string;
+  signatoryName?: string;
+  signatoryDesignation?: string;
 }
 
 const DEFAULT_CLINIC: ClinicInfo = {
@@ -33,6 +38,12 @@ function getStoredClinic(): ClinicInfo {
         address:      u.clinicAddress || "",
         city:         u.clinicCity    || "",
         invoiceStyle: u.invoiceStyle  || "classic",
+        gstNo:                u.gstNo                || "",
+        hmisFacilityCode:     u.hmisFacilityCode      || "",
+        drugLicenseNo:        u.drugLicenseNo         || "",
+        registrationNo:       u.registrationNo        || "",
+        signatoryName:        u.signatoryName         || "",
+        signatoryDesignation: u.signatoryDesignation  || "",
       };
     }
   } catch {}
@@ -199,7 +210,24 @@ function _roundOffLabel(roundOff: number): string {
   return `${roundOff < 0 ? "−" : "+"}₹${Math.abs(roundOff).toFixed(2)}`;
 }
 
+// ── Drug combination sub-line — shown under a Pharmacy line item's description
+// when the underlying DrugInventory record has an optional "combination" set.
+function _comboLine(item: any, opts?: { color?: string; fontSize?: string }): string {
+  if (!item.combination) return "";
+  const color = opts?.color ?? "#1a6b5e";
+  const fontSize = opts?.fontSize ?? "10px";
+  return `<div style="font-size:${fontSize};color:${color};font-style:italic;">${item.combination}</div>`;
+}
+
 // ── Payment history — used across all invoice styles to show who was paid what, when ──
+// bill.notes is an array of per-author entries ({ authorName, text, createdAt }) —
+// printed receipts show them flattened to one line per note, newest last.
+function _notesText(bill: any): string {
+  const notes = bill?.notes as any[] | undefined;
+  if (!notes?.length) return "";
+  return notes.map((n) => (n.authorName ? `${n.text} — ${n.authorName}` : n.text)).join("<br/>");
+}
+
 function _paymentRows(bill: any) {
   return ((bill.payments || []) as any[])
     .slice()
@@ -224,7 +252,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
   const itemRows = items.map((item, idx) => `
     <tr>
       <td class="tc" style="width:36px;">${idx + 1}</td>
-      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
+      <td><strong>${item.description}</strong>${_comboLine(item)}${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
       <td style="width:90px;">${item.category}</td>
       ${hasBatch ? `<td style="width:96px;font-family:monospace;font-size:11px;">${item.batchNo || "—"}</td>` : ""}
       ${hasBatch ? `<td style="width:76px;font-size:11px;text-align:center;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
@@ -299,7 +327,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
         ${balance < 0 ? `<tr><td style="color:#15803d;">Overpaid</td><td class="tr" style="color:#15803d;">₹${Math.abs(balance).toLocaleString()}</td></tr>` : ""}
       </table>
     </div>
-    ${bill.notes ? `<div class="notes"><strong>Notes</strong>${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div class="notes"><strong>Notes</strong>${_notesText(bill)}</div>` : ""}
     <div class="footer">
       <p>Thank you for choosing ${clinic.name}. We wish you a speedy recovery!</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
@@ -319,6 +347,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;width:32px;text-align:center;color:#888;">${idx + 1}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;">
         <strong>${item.description}</strong>
+        ${_comboLine(item)}
         ${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}
       </td>
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;color:#555;width:80px;">${item.category}</td>
@@ -415,7 +444,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
       </table>
     </div>
 
-    ${bill.notes ? `<div style="margin-top:14px;padding:9px 12px;background:#fffbf0;border:1px solid #e5d68a;border-radius:5px;font-size:12px;"><strong style="display:block;margin-bottom:3px;color:#92400e;">Notes</strong>${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:14px;padding:9px 12px;background:#fffbf0;border:1px solid #e5d68a;border-radius:5px;font-size:12px;"><strong style="display:block;margin-bottom:3px;color:#92400e;">Notes</strong>${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:22px;padding-top:10px;border-top:2px solid #1a5c4a;text-align:center;font-size:11px;color:#555;">
       <p>Thank you for choosing <strong>${clinic.name}</strong>. We wish you a speedy recovery!</p>
@@ -435,6 +464,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       <td style="padding:8px 4px;border-bottom:1px solid #f0f0f0;color:#aaa;width:28px;font-size:11px;">${idx + 1}</td>
       <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;">
         <span style="font-weight:600;">${item.description}</span>
+        ${_comboLine(item)}
       </td>
       <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;color:#888;font-size:11px;width:80px;">${item.category}</td>
       ${hasBatch ? `<td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;font-family:monospace;font-size:11px;width:90px;">${item.batchNo || "—"}</td>` : ""}
@@ -518,7 +548,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       </div>
     </div>
 
-    ${bill.notes ? `<div style="margin-top:8px;font-size:12px;color:#555;font-style:italic;border-left:3px solid #ddd;padding-left:10px;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:8px;font-size:12px;color:#555;font-style:italic;border-left:3px solid #ddd;padding-left:10px;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:32px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center;">
       ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
@@ -536,6 +566,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
     <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
       <span style="flex:1;margin-right:8px;">
         ${item.description}${item.quantity > 1 ? ` <span style="color:#888;">×${item.quantity}</span>` : ""}
+        ${_comboLine(item, { fontSize: "9px" })}
         ${item.batchNo ? `<div style="font-size:9px;color:#aaa;">Batch: ${item.batchNo}${item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" })}` : ""}</div>` : ""}
       </span>
       <span style="font-weight:700;white-space:nowrap;">₹${(item.total || 0).toLocaleString()}</span>
@@ -602,7 +633,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${balance === 0 ? `<div style="text-align:center;margin-top:4px;font-weight:700;color:#15803d;font-size:12px;">✓ PAID IN FULL</div>` : ""}
     </div>
 
-    ${bill.notes ? `<div style="margin-top:8px;font-size:10px;color:#666;border-top:1px dashed #ccc;padding-top:6px;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:8px;font-size:10px;color:#666;border-top:1px dashed #ccc;padding-top:6px;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:12px;padding-top:8px;border-top:2px dashed #333;text-align:center;font-size:10px;color:#777;">
       <div style="font-weight:700;margin-bottom:2px;">Thank you for visiting ${clinic.name}!</div>
@@ -621,7 +652,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
   const itemRows = items.map((item, idx) => `
     <tr>
       <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;color:#888;width:24px;text-align:center;">${idx + 1}</td>
-      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;font-weight:600;">${item.description}</td>
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;font-weight:600;">${item.description}${_comboLine(item, { fontSize: "9px" })}</td>
       ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;font-family:monospace;width:84px;">${item.batchNo || "—"}</td>` : ""}
       ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;text-align:center;width:68px;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
       <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;text-align:center;width:30px;">${item.quantity}</td>
@@ -705,7 +736,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;color:#dc2626;font-weight:600;"><span>Balance</span><span>₹${balance.toLocaleString()}</span></div>` : ""}
     </div>
 
-    ${bill.notes ? `<div style="margin-top:10px;font-size:10px;color:#666;padding:6px 8px;border-left:3px solid #ddd;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:10px;font-size:10px;color:#666;padding:6px 8px;border-left:3px solid #ddd;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:14px;padding-top:8px;border-top:1px solid #ddd;text-align:center;font-size:9px;color:#aaa;">
       ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
@@ -750,7 +781,7 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
       <div class="meta-item"><label>Patient Name</label><span>${creditNote.patientName || "—"}</span></div>
       <div class="meta-item"><label>UHID</label><span>${creditNote.patientId || "—"}</span></div>
       <div class="meta-item"><label>Payer</label><span>${creditNote.payer || "Self"}</span></div>
-      <div class="meta-item"><label>Refund Mode</label><span>${creditNote.paymentMode || "—"}</span></div>
+      <div class="meta-item"><label>Refund Mode</label><span>${Math.abs(creditNote.paid || 0) > 0 ? (creditNote.paymentMode || "—") : "No refund (credited to balance)"}</span></div>
       <div class="meta-item"><label>Processed By</label><span>${creditNote.createdBy || "—"}</span></div>
     </div>
     <table>
@@ -764,6 +795,30 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
+    ${(() => {
+      const refunds = ((creditNote.payments || []) as any[])
+        .slice()
+        .sort((a, b) => new Date(a.paidAt || 0).getTime() - new Date(b.paidAt || 0).getTime());
+      if (!refunds.length) return "";
+      return `
+    <table>
+      <thead>
+        <tr><th class="tc" style="width:36px;">#</th><th>Refund ID</th><th>Date</th><th>Mode</th><th>Ref. No</th><th>Refunded By</th><th class="tr">Amount</th></tr>
+      </thead>
+      <tbody>
+        ${refunds.map((p, idx) => `
+        <tr>
+          <td class="tc">${idx + 1}</td>
+          <td style="font-family:monospace;font-size:11px;">${p.paymentId || "—"}</td>
+          <td>${p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+          <td>${p.paymentMode || "—"}</td>
+          <td>${p.transactionRef || "—"}</td>
+          <td>${p.receivedBy || "—"}</td>
+          <td class="tr" style="color:#b91c1c;">₹${Math.abs(p.amount || 0).toLocaleString()}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+    })()}
     <div class="summary">
       <table>
         <tr class="tot-row"><td>Return Value</td><td class="tr">₹${returnAmount.toLocaleString()}</td></tr>
@@ -771,7 +826,7 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
         ${returnAmount > refundAmount ? `<tr><td style="color:#d97706;">Credited to Balance</td><td class="tr" style="color:#d97706;">₹${(returnAmount - refundAmount).toLocaleString()}</td></tr>` : ""}
       </table>
     </div>
-    ${creditNote.notes ? `<div class="notes"><strong>Reason for Return</strong>${creditNote.notes}</div>` : ""}
+    ${creditNote.notes?.length ? `<div class="notes"><strong>Reason for Return</strong>${_notesText(creditNote)}</div>` : ""}
     <div class="footer">
       <p>This credit note reduces the value of invoice ${creditNote.originalBillNo || "—"} issued by ${clinic.name}.</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
@@ -898,6 +953,7 @@ export function printPrescription(rx: any, clinicOverride?: ClinicInfo) {
   const drugs = ((rx.items || []) as any[]).map((item, i) => `
     <div class="drug">
       <div class="d-name">${i + 1}. ${item.drug}</div>
+      ${item.combination ? `<div class="d-note" style="color:#1a6b5e;font-style:normal;">Composition: ${item.combination}</div>` : ""}
       <div class="d-detail">
         Dose: <strong>${item.dose}</strong> &nbsp;·&nbsp;
         Route: <strong>${item.route}</strong> &nbsp;·&nbsp;
@@ -1279,19 +1335,20 @@ export function printSalesReport(
   const totBills    = rows.reduce((a, r) => a + (r.billsCreated  || 0), 0);
   const totBilled   = rows.reduce((a, r) => a + (r.totalBilled   || 0), 0);
   const totPaid     = rows.reduce((a, r) => a + (r.totalPaid     || 0), 0);
+  const totRefunded = rows.reduce((a, r) => a + (r.totalRefunded || 0), 0);
   const totPayments = rows.reduce((a, r) => a + (r.paymentsCount || 0), 0);
   const totReceived = rows.reduce((a, r) => a + (r.totalReceived || 0), 0);
 
-  const PRINT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
+  const PRINT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const;
 
   const rowHtml = rows.map((r, i) => {
     const breakdown: Record<string, number> = r.paymentBreakdown || {};
-    const activeModes = PRINT_MODES.filter(m => (breakdown[m] || 0) > 0);
+    const activeModes = PRINT_MODES.filter(m => (breakdown[m] || 0) !== 0);
     const breakdownHtml = activeModes.length > 0
       ? `<tr>
           <td></td>
-          <td colspan="6" style="padding:2px 8px 6px 28px;color:#555;font-size:11px;border-bottom:1px solid #e5e7eb;">
-            ${activeModes.map(m => `<span style="margin-right:14px;"><span style="color:#374151;font-weight:600;">${m}</span> <span style="color:#0d9488;">₹${(breakdown[m] || 0).toLocaleString("en-IN")}</span></span>`).join("")}
+          <td colspan="7" style="padding:2px 8px 6px 28px;color:#555;font-size:11px;border-bottom:1px solid #e5e7eb;">
+            ${activeModes.map(m => `<span style="margin-right:14px;"><span style="color:#374151;font-weight:600;">${m}</span> <span style="color:${(breakdown[m] || 0) < 0 ? "#dc2626" : "#0d9488"};">₹${(breakdown[m] || 0).toLocaleString("en-IN")}</span></span>`).join("")}
           </td>
         </tr>`
       : "";
@@ -1302,6 +1359,7 @@ export function printSalesReport(
       <td class="tr">${r.billsCreated || 0}</td>
       <td class="tr">₹${(r.totalBilled || 0).toLocaleString("en-IN")}</td>
       <td class="tr" style="color:#15803d;">₹${(r.totalPaid || 0).toLocaleString("en-IN")}</td>
+      <td class="tr" style="color:#dc2626;">₹${(r.totalRefunded || 0).toLocaleString("en-IN")}</td>
       <td class="tr">${r.paymentsCount || 0}</td>
       <td class="tr" style="color:#0d9488;">₹${(r.totalReceived || 0).toLocaleString("en-IN")}</td>
     </tr>${breakdownHtml}`;
@@ -1328,12 +1386,13 @@ export function printSalesReport(
           <th class="tr" style="width:80px;">Bills</th>
           <th class="tr" style="width:110px;">Total Billed</th>
           <th class="tr" style="width:110px;">Collected</th>
+          <th class="tr" style="width:100px;">Refunded</th>
           <th class="tr" style="width:80px;">Payments</th>
           <th class="tr" style="width:110px;">Cash Received</th>
         </tr>
       </thead>
       <tbody>
-        ${rowHtml || '<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No data found</td></tr>'}
+        ${rowHtml || '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">No data found</td></tr>'}
       </tbody>
       <tfoot>
         <tr style="background:#f0f0f0;font-weight:800;">
@@ -1342,6 +1401,7 @@ export function printSalesReport(
           <td class="tr">${totBills}</td>
           <td class="tr">₹${totBilled.toLocaleString("en-IN")}</td>
           <td class="tr" style="color:#15803d;">₹${totPaid.toLocaleString("en-IN")}</td>
+          <td class="tr" style="color:#dc2626;">₹${totRefunded.toLocaleString("en-IN")}</td>
           <td class="tr">${totPayments}</td>
           <td class="tr" style="color:#0d9488;">₹${totReceived.toLocaleString("en-IN")}</td>
         </tr>
@@ -1525,17 +1585,388 @@ export function printReferralStats(
   open("Referral Statistics", body);
 }
 
+// ── Insights / new business reports ────────────────────────────────────────────
+
+function reportDoc(opts: { title: string; periodLabel: string; theadHtml: string; rowHtml: string; colCount: number; emptyLabel: string; footerHtml?: string; footerLabel: string; clinicOverride?: ClinicInfo }) {
+  const clinic = opts.clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const body = `
+    ${clinicHeader(clinic)}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">${opts.title}</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">${opts.periodLabel}</div>
+      </div>
+      <div class="doc-id">
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>${opts.theadHtml}</thead>
+      <tbody>
+        ${opts.rowHtml || `<tr><td colspan="${opts.colCount}" style="text-align:center;color:#888;padding:20px;">${opts.emptyLabel}</td></tr>`}
+      </tbody>
+      ${opts.footerHtml ? `<tfoot>${opts.footerHtml}</tfoot>` : ""}
+    </table>
+
+    <div class="footer">
+      <p>${opts.footerLabel} — ${clinic.name} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+  open(opts.title, body);
+}
+
+function periodLabel(from?: string, to?: string): string {
+  if (!from && !to) return "All dates";
+  if (from && to && from !== to) return `Period: ${from} — ${to}`;
+  return `Date: ${from || to}`;
+}
+
+// #9 Drug-wise day sales report
+export function printDrugSalesReport(rows: { drugName: string; quantity: number; amount: number }[], date: string, clinicOverride?: ClinicInfo) {
+  const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
+  const totalAmt = rows.reduce((s, r) => s + r.amount, 0);
+  const rowHtml = rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td><strong>${r.drugName}</strong></td><td class="tr">${r.quantity}</td><td class="tr">₹${r.amount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "DRUG-WISE SALES REPORT", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Drug Name</th><th class="tr" style="width:100px;">Quantity</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+    rowHtml, colCount: 4, emptyLabel: "No dispensed items for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${totalQty}</td><td class="tr">₹${totalAmt.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Drug-wise Sales Report",
+  });
+}
+
+// #20 Non-moving drug list
+export function printNonMovingDrugs(rows: any[], sinceDays: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = rows.map((d, i) => `
+    <tr><td class="tc">${i + 1}</td><td><strong>${d.name}</strong></td><td>${d.category || "—"}</td><td class="tr">${d.stock} ${d.unit}</td>
+      <td class="tc">${d.lastDispensedAt ? new Date(d.lastDispensedAt).toLocaleDateString("en-IN") : "Never"}</td></tr>`).join("");
+  reportDoc({
+    title: "NON-MOVING DRUG LIST", periodLabel: `No dispense in the last ${sinceDays} days`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Drug Name</th><th style="width:120px;">Category</th><th class="tr" style="width:110px;">Current Stock</th><th class="tc" style="width:120px;">Last Dispensed</th></tr>`,
+    rowHtml, colCount: 5, emptyLabel: "No non-moving drugs found", footerLabel: "Non-Moving Drug List",
+  });
+}
+
+// #1 Doctor-wise visit list
+export function printDoctorWise(rows: { doctor: string; visits: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.visits, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.doctor || "—"}</td><td class="tr">${r.visits}</td></tr>`).join("");
+  reportDoc({
+    title: "DOCTOR-WISE LIST", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Doctor</th><th class="tr" style="width:110px;">Visits</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No visits found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Doctor-wise List",
+  });
+}
+
+// #2 Department-wise visit list
+export function printDepartmentWise(rows: { department: string; visits: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.visits, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.department || "—"}</td><td class="tr">${r.visits}</td></tr>`).join("");
+  reportDoc({
+    title: "DEPARTMENT-WISE LIST", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Department</th><th class="tr" style="width:110px;">Visits</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No visits found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Department-wise List",
+  });
+}
+
+// #3 Investigation-wise order list
+export function printInvestigationWise(rows: { test: string; orders: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.orders, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.test || "—"}</td><td class="tr">${r.orders}</td></tr>`).join("");
+  reportDoc({
+    title: "INVESTIGATION-WISE LIST", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Investigation</th><th class="tr" style="width:110px;">Orders</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No orders found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Investigation-wise List",
+  });
+}
+
+// #4-8 (generalized) — any investigation with a diagnosis, filterable by type/doctor/department/diagnosis
+export function printInvestigationList(rows: any[], filters: { from?: string; to?: string; investigationTypes?: string[]; doctor?: string; department?: string; diagnosis?: string }, clinicOverride?: ClinicInfo) {
+  const activeFilters = [
+    filters.investigationTypes?.length && `Types: ${filters.investigationTypes.join(", ")}`,
+    filters.doctor && `Doctor: ${filters.doctor}`,
+    filters.department && `Department: ${filters.department}`,
+    filters.diagnosis && `Diagnosis: ${filters.diagnosis}`,
+  ].filter(Boolean).join(" · ");
+  const rowHtml = rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${r.patientName}</td><td class="tc">${r.test}</td><td>${r.doctor || "—"}</td><td>${r.department || "—"}</td>
+      <td class="tc">${new Date(r.ordered).toLocaleDateString("en-IN")}</td><td>${r.diagnosis || "—"}</td></tr>`).join("");
+  reportDoc({
+    title: "INVESTIGATIONS WITH DIAGNOSIS", periodLabel: `${periodLabel(filters.from, filters.to)}${activeFilters ? " · " + activeFilters : ""}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Patient</th><th class="tc" style="width:110px;">Investigation</th><th>Doctor</th><th>Department</th><th class="tc" style="width:90px;">Date</th><th>Diagnosis</th></tr>`,
+    rowHtml, colCount: 7, emptyLabel: "No investigations found for these filters", footerLabel: "Investigations with Diagnosis",
+  });
+}
+
+// #10 Cash collected, by payment mode
+export function printCashCollected(data: { rows: { paymentMode: string; total: number }[]; grandTotal: number }, date: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = data.rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.paymentMode}</td><td class="tr">₹${r.total.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "CASH COLLECTED", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Payment Mode</th><th class="tr" style="width:130px;">Amount</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No collections for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">₹${data.grandTotal.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Cash Collected",
+  });
+}
+
+// #11 Total bills generated per day
+export function printDailyBillsCount(data: { rows: { type: string; status: string; count: number; amount: number }[]; totalBills: number; totalAmount: number }, date: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = data.rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${r.type}</td><td>${r.status}</td><td class="tr">${r.count}</td><td class="tr">₹${r.amount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "TOTAL BILLS GENERATED — DAY SUMMARY", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Type</th><th>Status</th><th class="tr" style="width:90px;">Bills</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+    rowHtml, colCount: 5, emptyLabel: "No bills generated for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td colspan="2"><strong>TOTAL</strong></td><td class="tr">${data.totalBills}</td><td class="tr">₹${data.totalAmount.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Total Bills — Day Summary",
+  });
+}
+
+// #12 Referrals by source (Doctor/VHN/Medical Shop/Lab/Self/Other)
+export function printReferralsBySource(rows: { referralSource: string; count: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.referralSource}</td><td class="tr">${r.count}</td></tr>`).join("");
+  reportDoc({
+    title: "REFERRALS BY SOURCE", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Referral Source</th><th class="tr" style="width:110px;">Count</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No referrals found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Referrals by Source",
+  });
+}
+
+// #13 Referrals by geographical area
+export function printReferralsByArea(rows: { area: string; count: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.area}</td><td class="tr">${r.count}</td></tr>`).join("");
+  reportDoc({
+    title: "REFERRALS BY AREA", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Area</th><th class="tr" style="width:110px;">Count</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No referrals found",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${total}</td></tr>`,
+    footerLabel: "Referrals by Area",
+  });
+}
+
+// #14 Return bill (Credit Note) summary
+export function printReturnBills(data: { notes: any[]; totalReturned: number }, from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = data.notes.map((n, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${n.billId}</td><td>${n.originalBillNo || "—"}</td><td>${n.patientName}</td>
+      <td class="tc">${new Date(n.date).toLocaleDateString("en-IN")}</td><td class="tr">₹${Math.abs(n.amount).toLocaleString("en-IN")}</td><td>${n.cancelReason || "—"}</td></tr>`).join("");
+  reportDoc({
+    title: "RETURN BILL SUMMARY", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Credit Note</th><th>Original Bill</th><th>Patient</th><th class="tc" style="width:90px;">Date</th><th class="tr" style="width:110px;">Amount</th><th>Reason</th></tr>`,
+    rowHtml, colCount: 7, emptyLabel: "No returns for this period",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td colspan="5"></td><td class="tr"><strong>₹${data.totalReturned.toLocaleString("en-IN")}</strong></td><td></td></tr>`,
+    footerLabel: "Return Bill Summary",
+  });
+}
+
+// #15 Timewise sales summary (hourly)
+export function printTimewiseSales(rows: { hour: number; total: number; count: number }[], date: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  const fmtHour = (h: number) => `${String(h % 12 === 0 ? 12 : h % 12).padStart(2, "0")}:00 ${h < 12 ? "AM" : "PM"}`;
+  const rowHtml = rows.filter((r) => r.count > 0).map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${fmtHour(r.hour)} – ${fmtHour((r.hour + 1) % 24)}</td><td class="tr">${r.count}</td><td class="tr">₹${r.total.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "TIMEWISE SALES SUMMARY", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Hour</th><th class="tr" style="width:100px;">Payments</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+    rowHtml, colCount: 4, emptyLabel: "No sales recorded for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td class="tr">${rows.reduce((s, r) => s + r.count, 0)}</td><td class="tr">₹${total.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Timewise Sales Summary",
+  });
+}
+
+// #16 Daywise discount summary
+export function printDiscountDaywise(rows: { day: string; totalDiscount: number; bills: number }[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.totalDiscount, 0);
+  const rowHtml = rows.map((r, i) => `<tr><td class="tc">${i + 1}</td><td>${r.day}</td><td class="tr">${r.bills}</td><td class="tr">₹${r.totalDiscount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "DAYWISE DISCOUNT SUMMARY", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Day</th><th class="tr" style="width:90px;">Bills</th><th class="tr" style="width:130px;">Total Discount</th></tr>`,
+    rowHtml, colCount: 4, emptyLabel: "No discounts given in this period",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>TOTAL</strong></td><td></td><td class="tr">₹${total.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Daywise Discount Summary",
+  });
+}
+
+// #17 Billwise discount summary
+export function printDiscountBillwise(rows: any[], from?: string, to?: string, clinicOverride?: ClinicInfo) {
+  const total = rows.reduce((s, r) => s + r.discount, 0);
+  const rowHtml = rows.map((r, i) => `
+    <tr><td class="tc">${i + 1}</td><td>${r.billId}</td><td>${r.patientName}</td><td class="tc">${new Date(r.date).toLocaleDateString("en-IN")}</td>
+      <td class="tr">₹${r.amount.toLocaleString("en-IN")}</td><td>${r.discountType}${r.discountType === "Percent" ? ` (${r.discountPercent}%)` : ""}</td><td class="tr">₹${r.discount.toLocaleString("en-IN")}</td></tr>`).join("");
+  reportDoc({
+    title: "BILLWISE DISCOUNT SUMMARY", periodLabel: periodLabel(from, to), clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Bill No</th><th>Patient</th><th class="tc" style="width:90px;">Date</th><th class="tr" style="width:100px;">Bill Amount</th><th>Discount Type</th><th class="tr" style="width:100px;">Discount</th></tr>`,
+    rowHtml, colCount: 7, emptyLabel: "No discounted bills in this period",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td colspan="6"><strong>TOTAL</strong></td><td class="tr">₹${total.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Billwise Discount Summary",
+  });
+}
+
+// #18 Day IN-OUT cash flow summary
+export function printCashFlow(data: { cashIn: number; cashOut: number; netCash: number; cancelledBills: number; cancelledAmount: number }, date: string, clinicOverride?: ClinicInfo) {
+  const rowHtml = `
+    <tr><td class="tc">1</td><td>Cash In (collections)</td><td class="tr" style="color:#15803d;">₹${data.cashIn.toLocaleString("en-IN")}</td></tr>
+    <tr><td class="tc">2</td><td>Cash Out (returns/credit notes)</td><td class="tr" style="color:#dc2626;">₹${data.cashOut.toLocaleString("en-IN")}</td></tr>
+    <tr><td class="tc">3</td><td>Cancelled Bills (informational — paid=0, no cash impact)</td><td class="tr">${data.cancelledBills} bill${data.cancelledBills !== 1 ? "s" : ""} · ₹${data.cancelledAmount.toLocaleString("en-IN")}</td></tr>`;
+  reportDoc({
+    title: "DAY IN-OUT CASH FLOW SUMMARY", periodLabel: `Date: ${date}`, clinicOverride,
+    theadHtml: `<tr><th class="tc" style="width:36px;">#</th><th>Item</th><th class="tr" style="width:220px;">Value</th></tr>`,
+    rowHtml, colCount: 3, emptyLabel: "No cash flow for this day",
+    footerHtml: `<tr style="background:#f0f0f0;font-weight:800;"><td></td><td><strong>NET CASH</strong></td><td class="tr">₹${data.netCash.toLocaleString("en-IN")}</td></tr>`,
+    footerLabel: "Day Cash Flow Summary",
+  });
+}
+
+// ── Government report submission (formal letterhead + signatory block) ────────
+
+function govSection(title: string, theadHtml: string, rowHtml: string, colCount: number, emptyLabel: string): string {
+  return `
+    <div style="margin:18px 0 10px;">
+      <div style="font-size:13px;font-weight:700;color:#111;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:8px;">${title}</div>
+      <table>
+        <thead>${theadHtml}</thead>
+        <tbody>${rowHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:#888;padding:14px;">${emptyLabel}</td></tr>`}</tbody>
+      </table>
+    </div>`;
+}
+
+function govCountTable(rows: any[], keyField: string, keyLabel: string, valueField: string, valueLabel: string, emptyLabel: string): string {
+  const rowHtml = rows.map((r) => `<tr><td>${r[keyField] ?? "—"}</td><td class="tr">${r[valueField] ?? 0}</td></tr>`).join("");
+  return govSection(`${keyLabel} — ${valueLabel}`,
+    `<tr><th>${keyLabel}</th><th class="tr" style="width:120px;">${valueLabel}</th></tr>`,
+    rowHtml, 2, emptyLabel);
+}
+
+export function printGovernmentReport(submission: any, clinicOverride?: ClinicInfo) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const generatedAt = new Date(submission.generatedAt || Date.now()).toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const s = submission.snapshotData || {};
+  const isHmis = submission.reportType === "HMIS-Monthly";
+
+  const identityLine = [
+    clinic.registrationNo && `Registration No: ${clinic.registrationNo}`,
+    clinic.hmisFacilityCode && `HMIS Facility Code: ${clinic.hmisFacilityCode}`,
+    clinic.drugLicenseNo && `Drug License No: ${clinic.drugLicenseNo}`,
+    clinic.gstNo && `GSTIN: ${clinic.gstNo}`,
+  ].filter(Boolean).join(" &nbsp;·&nbsp; ");
+
+  let sectionsHtml = "";
+  if (isHmis) {
+    sectionsHtml += govCountTable(s.investigationWise || [], "test", "Investigation", "orders", "Orders", "No investigations recorded");
+
+    // Same row-level detail as Insights → Investigations (patient/doctor/department/diagnosis)
+    const detailRows = (s.investigationDetails || []).map((r: any) => `
+      <tr><td>${r.patientName}</td><td class="tc">${r.test}</td><td>${r.doctor || "—"}</td><td>${r.department || "—"}</td>
+        <td class="tc">${new Date(r.ordered).toLocaleDateString("en-IN")}</td><td>${r.diagnosis || "—"}</td></tr>`).join("");
+    sectionsHtml += govSection("Investigation Details",
+      `<tr><th>Patient</th><th class="tc" style="width:110px;">Investigation</th><th>Doctor</th><th>Department</th><th class="tc" style="width:90px;">Date</th><th>Diagnosis</th></tr>`,
+      detailRows, 6, "No investigation records for this period");
+  } else {
+    const drugSalesRows = (s.drugSales?.rows || []).map((r: any) => `<tr><td>${r.drugName}</td><td class="tr">${r.quantity}</td><td class="tr">₹${(r.amount || 0).toLocaleString("en-IN")}</td></tr>`).join("");
+    sectionsHtml += govSection("Drug-wise Sales (Period)",
+      `<tr><th>Drug Name</th><th class="tr" style="width:100px;">Quantity</th><th class="tr" style="width:120px;">Amount</th></tr>`,
+      drugSalesRows, 3, "No dispensed items in this period");
+
+    const nonMovingRows = (s.nonMovingDrugs || []).map((d: any) => `<tr><td>${d.name}</td><td>${d.category || "—"}</td><td class="tr">${d.stock} ${d.unit}</td><td class="tc">${d.lastDispensedAt ? new Date(d.lastDispensedAt).toLocaleDateString("en-IN") : "Never"}</td></tr>`).join("");
+    sectionsHtml += govSection("Non-Moving Drugs (90 days)",
+      `<tr><th>Drug Name</th><th style="width:120px;">Category</th><th class="tr" style="width:100px;">Stock</th><th class="tc" style="width:110px;">Last Dispensed</th></tr>`,
+      nonMovingRows, 4, "No non-moving drugs");
+
+    const grnRows = (s.grns || []).map((g: any) => `<tr><td>${g.grnId}</td><td>${g.supplierName}</td><td class="tc">${new Date(g.receivedDate).toLocaleDateString("en-IN")}</td><td class="tr">₹${(g.totalValue || 0).toLocaleString("en-IN")}</td><td>${g.status}</td></tr>`).join("");
+    sectionsHtml += govSection("Goods Receipt Notes (Period)",
+      `<tr><th>GRN ID</th><th>Supplier</th><th class="tc" style="width:100px;">Received</th><th class="tr" style="width:110px;">Value</th><th style="width:90px;">Status</th></tr>`,
+      grnRows, 5, "No GRNs in this period");
+
+    const expiryRows = (s.expiryReport || []).map((b: any) => `<tr><td>${b.drugName}</td><td>${b.batchNo}</td><td class="tc">${new Date(b.expiryDate).toLocaleDateString("en-IN")}</td><td class="tr">${b.quantityRemaining}</td></tr>`).join("");
+    sectionsHtml += govSection("Batch Expiry Report (180 days)",
+      `<tr><th>Drug Name</th><th>Batch No</th><th class="tc" style="width:100px;">Expiry</th><th class="tr" style="width:90px;">Qty</th></tr>`,
+      expiryRows, 4, "No batches expiring in this window");
+  }
+
+  const signatureBlock = `
+    <div style="display:flex;justify-content:space-between;margin-top:48px;padding-top:8px;">
+      <div style="text-align:center;">
+        <div style="border-top:1px solid #333;width:200px;margin-bottom:4px;"></div>
+        <div style="font-size:11px;color:#555;">Prepared By</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="border-top:1px solid #333;width:200px;margin-bottom:4px;"></div>
+        <div style="font-size:11px;color:#555;">Authorized Signatory</div>
+        ${clinic.signatoryName ? `<div style="font-size:11px;font-weight:600;margin-top:2px;">${clinic.signatoryName}</div>` : ""}
+        ${clinic.signatoryDesignation ? `<div style="font-size:10px;color:#777;">${clinic.signatoryDesignation}</div>` : ""}
+      </div>
+    </div>`;
+
+  const body = `
+    ${clinicHeader(clinic)}
+    ${identityLine ? `<div style="font-size:11px;color:#555;margin-top:-6px;margin-bottom:10px;">${identityLine}</div>` : ""}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">${isHmis ? "HMIS MONTHLY RETURN — INVESTIGATIONS" : "PHARMACY AUDIT REPORT"}</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Period: ${submission.periodFrom} — ${submission.periodTo}</div>
+        ${isHmis && s.investigationTypes?.length ? `<div style="font-size:11px;color:#888;margin-top:2px;">Investigations: ${s.investigationTypes.join(", ")}</div>` : ""}
+      </div>
+      <div class="doc-id">
+        <div style="font-size:12px;font-weight:600;">Submission ID: ${submission.submissionId}</div>
+        <div style="font-size:11px;color:#888;margin-top:2px;">Status: ${submission.status}${submission.referenceNo ? ` &nbsp;·&nbsp; Ref: ${submission.referenceNo}` : ""}</div>
+      </div>
+    </div>
+
+    ${sectionsHtml}
+
+    <div class="footer" style="margin-top:8px;">
+      <p>System-generated report — Submission ID: ${submission.submissionId} &nbsp;·&nbsp; Generated: ${generatedAt} by ${submission.generatedBy || "—"}</p>
+    </div>
+
+    ${signatureBlock}`;
+
+  open(`${isHmis ? "HMIS Monthly Return" : "Pharmacy Audit Report"} — ${submission.submissionId}`, body);
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
+// Popup blockers vary: some return null outright (handled below), others hand back
+// a window that then throws on write/close (extensions, strict blockers). Either
+// failure degrades to the same toast instead of throwing back into the caller —
+// a print failure must never abort whatever the caller does next (e.g. closing a
+// success-screen modal).
+function popupBlockedToast() {
+  toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." });
+}
+
 function open(title: string, body: string) {
-  const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
-  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
-  win.document.write(base(title, body));
-  win.document.close();
+  try {
+    const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
+    if (!win) { popupBlockedToast(); return; }
+    win.document.write(base(title, body));
+    win.document.close();
+  } catch (err) {
+    console.error("print open() failed:", err);
+    popupBlockedToast();
+  }
 }
 
 function openA5(title: string, body: string) {
-  const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
-  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
-  win.document.write(baseA5(title, body));
-  win.document.close();
+  try {
+    const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
+    if (!win) { popupBlockedToast(); return; }
+    win.document.write(baseA5(title, body));
+    win.document.close();
+  } catch (err) {
+    console.error("print openA5() failed:", err);
+    popupBlockedToast();
+  }
 }

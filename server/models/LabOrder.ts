@@ -8,6 +8,12 @@ export interface ILabParameter {
   referenceRange: string;
 }
 
+export interface ILabResultEdit {
+  note: string;
+  editedBy: string;
+  editedAt: Date;
+}
+
 export interface ILabOrder extends Document {
   tenantId: mongoose.Types.ObjectId;
   labId: string;
@@ -18,12 +24,16 @@ export interface ILabOrder extends Document {
   sampleDate: Date | null;
   status: "Pending" | "Collected" | "Processing" | "Completed" | "Scheduled";
   result: string | null;
+  diagnosis: string | null;
+  category: "Pathology" | "Radiology" | "Cardiology" | "Other";
   parameters: ILabParameter[];
   priority: "Routine" | "Urgent" | "STAT";
   doctor: string;
+  department?: string;
   reportedBy: string;
   appointmentId?: string;
   notes?: string;
+  editHistory: ILabResultEdit[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +49,15 @@ const LabParameterSchema = new Schema<ILabParameter>(
   { _id: false }
 );
 
+const LabResultEditSchema = new Schema<ILabResultEdit>(
+  {
+    note:     { type: String, required: true },
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const LabOrderSchema = new Schema<ILabOrder>(
   {
     tenantId:    { type: Schema.Types.ObjectId, ref: "Tenant", required: true, index: true },
@@ -50,16 +69,24 @@ const LabOrderSchema = new Schema<ILabOrder>(
     sampleDate:  { type: Date, default: null },
     status:      { type: String, enum: ["Pending", "Collected", "Processing", "Completed", "Scheduled"], default: "Pending" },
     result:      { type: String, default: null },
+    diagnosis:   { type: String, default: null },
+    category:    { type: String, enum: ["Pathology", "Radiology", "Cardiology", "Other"], default: "Pathology" },
     parameters:  { type: [LabParameterSchema], default: [] },
     priority:    { type: String, enum: ["Routine", "Urgent", "STAT"], default: "Routine" },
     doctor:      { type: String, default: "" },
+    department:  { type: String, default: "" },
     reportedBy:  { type: String, default: "" },
     appointmentId: { type: String, default: "" },
     notes:       { type: String, default: "" },
+    editHistory: { type: [LabResultEditSchema], default: [] },
   },
   { timestamps: true }
 );
 
 LabOrderSchema.index({ tenantId: 1, labId: 1 }, { unique: true });
+LabOrderSchema.index({ tenantId: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, doctor: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, department: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, diagnosis: 1, ordered: 1 });
 
 export default mongoose.model<ILabOrder>("LabOrder", LabOrderSchema);

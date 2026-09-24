@@ -28,10 +28,14 @@ export default function ReturnBillModal({ open, onClose, bill }: Props) {
   const [refundMode, setRefundMode] = useState<(typeof REFUND_MODES)[number]>("Cash");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  // Snapshot of the processed return, taken from the server's response. The
+  // live returnAmount/refundAmount below are derived from `rows`, which drop
+  // the just-returned items once the credit-notes query refetches — so they'd
+  // read ₹0 on the success screen.
+  const [result, setResult] = useState<{ returned: number; refunded: number; mode: string } | null>(null);
 
   useEffect(() => {
-    if (open) { setSelected({}); setReason(""); setRefundMode("Cash"); setError(""); setSuccess(false); }
+    if (open) { setSelected({}); setReason(""); setRefundMode("Cash"); setError(""); setResult(null); }
   }, [open, bill?._id]);
 
   const { data: creditNotes = [] } = useQuery({
@@ -100,10 +104,15 @@ export default function ReturnBillModal({ open, onClose, bill }: Props) {
 
     setLoading(true); setError("");
     try {
-      await billingApi.returnItems(bill._id || bill.id, { items, reason: reason.trim(), refundMode });
+      const res = await billingApi.returnItems(bill._id || bill.id, { items, reason: reason.trim(), refundMode });
+      const cn = res?.creditNote;
+      setResult({
+        returned: Math.abs(cn?.amount ?? returnAmount),
+        refunded: Math.abs(cn?.paid ?? refundAmount),
+        mode: cn?.paymentMode || refundMode,
+      });
       qc.invalidateQueries({ queryKey: ["billing"] });
       qc.invalidateQueries({ queryKey: ["credit-notes", bill._id] });
-      setSuccess(true);
     } catch (err: any) {
       setError(err.message || "Failed to process return.");
     } finally {
@@ -120,11 +129,11 @@ export default function ReturnBillModal({ open, onClose, bill }: Props) {
           <DialogTitle className="flex items-center gap-2"><Undo2 className="h-4 w-4" /> Return Items — {bill.billId || bill.id}</DialogTitle>
         </DialogHeader>
 
-        {success ? (
+        {result ? (
           <div className="text-center py-6 space-y-3">
             <div className="text-green-600 font-semibold">Return Processed</div>
             <p className="text-sm text-muted-foreground">
-              ₹{returnAmount.toLocaleString()} returned{refundAmount > 0 ? `, ₹${refundAmount.toLocaleString()} refunded via ${refundMode}` : ""}.
+              ₹{result.returned.toLocaleString()} returned{result.refunded > 0 ? `, ₹${result.refunded.toLocaleString()} refunded via ${result.mode}` : ""}.
             </p>
             <Button onClick={handleClose}>Close</Button>
           </div>

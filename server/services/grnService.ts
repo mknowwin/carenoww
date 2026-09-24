@@ -9,15 +9,22 @@ import { AppError } from "../lib/AppError.js";
 
 export interface GRNListFilters {
   status?: string;
+  from?: string; // "YYYY-MM-DD", filters on receivedDate
+  to?: string;
   page?: string;
   limit?: string;
 }
 
 export async function listGRNs(tenantId: string, filters: GRNListFilters) {
-  const { status, page = "1", limit = "50" } = filters;
+  const { status, from, to, page = "1", limit = "50" } = filters;
   const query: any = { tenantId };
   if (status) query.status = status;
   else query.status = { $nin: ["Cancelled"] };
+  if (from || to) {
+    query.receivedDate = {};
+    if (from) query.receivedDate.$gte = new Date(from);
+    if (to)   query.receivedDate.$lte = new Date(`${to}T23:59:59.999Z`);
+  }
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const [grns, total] = await Promise.all([
     GRN.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
@@ -84,6 +91,7 @@ export async function createGRN(tenantId: string, userName: string, body: Record
               quantityRemaining: item.quantityReceived,
               purchasePricePerUnit: item.purchasePricePerUnit || 0,
               mrpPerUnit: item.mrpPerUnit || 0,
+              gstPercent: item.gstPercent || 0,
               grnId: grn._id,
               status: "Active",
             }],
@@ -153,6 +161,7 @@ export async function updateGRN(tenantId: string, userName: string, id: string, 
               quantityRemaining: item.quantityReceived,
               purchasePricePerUnit: item.purchasePricePerUnit || 0,
               mrpPerUnit: item.mrpPerUnit || 0,
+              gstPercent: item.gstPercent || 0,
               grnId: updated._id,
               status: "Active",
             }],

@@ -12,7 +12,7 @@ import { todayInTz } from "@/lib/utils";
 import { LAB_TEST_MASTER, buildParameterTemplate } from "@/lib/labTestMaster";
 
 const COMMON_TESTS = Object.keys(LAB_TEST_MASTER);
-const EXTRA_TESTS  = ["MRI Brain", "CT Scan", "2D Echo", "Bone Density", "PFT", "Sputum Culture"];
+const EXTRA_TESTS  = ["MRI Brain", "CT Scan", "Bone Density", "PFT", "Sputum Culture"];
 
 interface LabParam {
   testName: string;
@@ -134,19 +134,17 @@ export default function LabOrderModal({ open, onClose, onSaved, patientId, patie
         <div className="space-y-4">
           {/* Test selection */}
           <div>
-            <Label className="text-xs mb-2 block">Common Tests</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {[...COMMON_TESTS, ...EXTRA_TESTS].map((t) => (
-                <button key={t} onClick={() => toggle(t)}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                    selected.includes(t)
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-gray-700 border-gray-300 hover:border-blue-400"
-                  }`}>
-                  {t}
-                </button>
-              ))}
-            </div>
+            <Label className="text-xs mb-1 block">Common Tests</Label>
+            <Select value="" onValueChange={(t) => { if (!selected.includes(t)) toggle(t); }}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select a test to add..." /></SelectTrigger>
+              <SelectContent className="max-h-60">
+                {[...COMMON_TESTS, ...EXTRA_TESTS].map((t) => (
+                  <SelectItem key={t} value={t} disabled={selected.includes(t)}>
+                    {t}{selected.includes(t) ? " (added)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Custom test */}

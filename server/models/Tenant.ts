@@ -3,6 +3,11 @@ import mongoose, { Schema, Document } from "mongoose";
 export type TenantPlan = "trial" | "starter" | "professional" | "enterprise";
 export type TenantStatus = "trial" | "active" | "suspended" | "cancelled";
 
+export const MODULE_KEYS = [
+  "dashboard", "patients", "appointments", "opd", "ipd",
+  "lab", "pharmacy", "billing", "analytics",
+] as const;
+
 export interface ITenant extends Document {
   name: string;
   slug: string;
@@ -27,11 +32,20 @@ export interface ITenant extends Document {
     gstNo?: string;
     invoicePrefix?: string;
     timezone?: string;
+    hmisFacilityCode?: string;
+    drugLicenseNo?: string;
+    registrationNo?: string;
+    signatoryName?: string;
+    signatoryDesignation?: string;
     taxConfig?: {
       cgstRate: number;
       sgstRate: number;
       igstRate: number;
       taxInclusivePricing: boolean;
+    };
+    operational?: {
+      notifyEmail: boolean;
+      notifySms: boolean;
     };
   };
   subscription: {
@@ -61,18 +75,27 @@ const TenantSchema = new Schema<ITenant>(
     settings: {
       maxUsers:      { type: Number, default: 10 },
       maxPatients:   { type: Number, default: 1000 },
-      modules:       { type: [String], default: ["dashboard", "patients", "appointments", "opd", "ipd", "lab", "pharmacy", "billing", "analytics"] },
+      modules:       { type: [String], default: [...MODULE_KEYS] },
       logoUrl:       { type: String, default: "" },
       clinicPhone:   { type: String, default: "" },
       clinicAddress: { type: String, default: "" },
       gstNo:         { type: String, default: "" },
       invoicePrefix: { type: String, default: "BILL" },
       timezone:      { type: String, default: "Asia/Kolkata" },
+      hmisFacilityCode:     { type: String, default: "" },
+      drugLicenseNo:        { type: String, default: "" },
+      registrationNo:       { type: String, default: "" },
+      signatoryName:        { type: String, default: "" },
+      signatoryDesignation: { type: String, default: "" },
       taxConfig: {
         cgstRate:            { type: Number, default: 0 },
         sgstRate:            { type: Number, default: 0 },
         igstRate:            { type: Number, default: 0 },
         taxInclusivePricing: { type: Boolean, default: false },
+      },
+      operational: {
+        notifyEmail: { type: Boolean, default: true },
+        notifySms:   { type: Boolean, default: false },
       },
     },
     subscription: {

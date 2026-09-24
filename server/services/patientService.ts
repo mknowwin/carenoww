@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import Counter from "../models/Counter.js";
 import { AppError } from "../lib/AppError.js";
@@ -74,7 +75,10 @@ export async function createPatient(tenantId: string, body: Record<string, unkno
 }
 
 export async function getPatient(tenantId: string, id: string) {
-  const patient = await Patient.findOne({ _id: id, tenantId });
+  // Some callers (e.g. Appointment.patientId) reference patients by UHID rather
+  // than Mongo _id, since UHID is the canonical patient identifier elsewhere.
+  const query = mongoose.Types.ObjectId.isValid(id) ? { _id: id, tenantId } : { uhid: id, tenantId };
+  const patient = await Patient.findOne(query);
   if (!patient) throw AppError.notFound("Patient not found");
   return patient;
 }

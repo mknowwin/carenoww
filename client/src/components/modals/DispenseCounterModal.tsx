@@ -93,8 +93,8 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
   };
 
   // Manual override — pharmacist explicitly forces a single batch via the dropdown.
-  // Note: the server always performs its own FEFO deduction for batch-tracked drugs
-  // regardless of this selection, so this preview reflects intent, not a guarantee.
+  // The server honors this (deducts only from this batch, at its MRP) instead of
+  // running FEFO, and rejects the order if this one batch can't cover the quantity.
   const applyBatch = (idx: number, batch: any) => {
     setDrugs((prev) => {
       const next = [...prev];
@@ -199,7 +199,11 @@ export default function DispenseCounterModal({ open, onClose, inventory }: Props
           unit:        d.unit,
           mrpPerUnit:  d.mrpPerUnit,
           totalAmount: d.totalAmount,
-          batchId:     d.batchId || undefined,
+          // Only forward batchId when the pharmacist explicitly forced this batch —
+          // the server then draws solely from it instead of running FEFO. Omitted for
+          // the default FEFO preview, where the requested qty may legitimately span
+          // multiple batches and batchId here is just the first of those, not a pin.
+          batchId:     d.manualBatch ? (d.batchId || undefined) : undefined,
           batchNo:     d.batchNo || "",
         })),
         drug: drugs.map((d) => d.drugName).join(", "),

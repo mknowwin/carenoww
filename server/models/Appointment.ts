@@ -19,6 +19,9 @@ export interface IAppointment extends Document {
   tokenNumber: number;
   notes: string;
   referringDoctor?: string;
+  referralSource?: "" | "Doctor" | "VHN" | "Medical Shop" | "Lab" | "Self" | "Other";
+  referralDetail?: string;
+  area?: string;
   vitals?: { bp?: string; pulse?: string; temp?: string; spo2?: string; weight?: string; height?: string };
   soap?: { subjective?: string; objective?: string; assessment?: string; plan?: string };
   checkedInAt?: Date;
@@ -47,6 +50,9 @@ const AppointmentSchema = new Schema<IAppointment>(
     tokenNumber:   { type: Number, default: 0 },
     notes:            { type: String, default: "" },
     referringDoctor:  { type: String, default: "" },
+    referralSource:   { type: String, enum: ["", "Doctor", "VHN", "Medical Shop", "Lab", "Self", "Other"], default: "" },
+    referralDetail:   { type: String, default: "" },
+    area:             { type: String, default: "" },
     vitals: {
       bp:     { type: String, default: "" },
       pulse:  { type: String, default: "" },

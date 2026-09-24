@@ -72,5 +72,7 @@ const PharmacyOrderSchema = new Schema<IPharmacyOrder>(
 );
 
 PharmacyOrderSchema.index({ tenantId: 1, rxId: 1 }, { unique: true });
+PharmacyOrderSchema.index({ tenantId: 1, status: 1, dispensedAt: 1 });
+PharmacyOrderSchema.index({ tenantId: 1, "items.drugId": 1, dispensedAt: 1 });
 
 export default mongoose.model<IPharmacyOrder>("PharmacyOrder", PharmacyOrderSchema);

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Fragment } from "react";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import {
   Stethoscope, Mic, MicOff, Brain, Pill, FlaskConical, FileText,
   CheckCircle2, Clock, Activity, Thermometer, Heart, User, Upload,
-  Download, Trash2, Loader2, Eye, CalendarDays, Hash, Paperclip, X, BedDouble,
+  Download, Trash2, Loader2, Eye, CalendarDays, Hash, Paperclip, X, BedDouble, Pencil,
 } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { patients as patientsApi, appointments as apptApi, reports as reportsApi, lab as labApi, prescriptions as rxApi, auth as authApi } from "@/lib/api";
@@ -16,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import LabOrderModal from "@/components/modals/LabOrderModal";
 import PrescriptionModal from "@/components/modals/PrescriptionModal";
 import AdmitModal from "@/components/modals/AdmitModal";
+import LabResultModal from "@/components/modals/LabResultModal";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
 
@@ -511,8 +513,38 @@ function ReportsTab({ patient, activeAppt }: { patient: any; patientId: string; 
   );
 }
 
+// ── LabResult — renders "Name: value unit, Name: value unit" as an aligned grid ─
+function LabResult({ result }: { result: string }) {
+  const pairs = result.split(",").map((chunk) => {
+    const idx = chunk.indexOf(":");
+    if (idx === -1) return null;
+    const label = chunk.slice(0, idx).trim();
+    const value = chunk.slice(idx + 1).trim();
+    return label && value ? { label, value } : null;
+  });
+
+  if (pairs.some((p) => p === null) || pairs.length === 0) {
+    return <p className="text-muted-foreground mt-1 bg-muted/40 rounded px-2 py-1 leading-snug">{result}</p>;
+  }
+
+  return (
+    <dl className="mt-1 bg-muted/40 rounded px-2 py-1.5 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5">
+      {(pairs as { label: string; value: string }[]).map((p, i) => (
+        <Fragment key={i}>
+          <dt className="text-muted-foreground/70 whitespace-nowrap">{p.label}</dt>
+          <dd className="text-foreground font-medium">{p.value}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
 // ── ActiveOrdersPanel — lab orders + prescriptions for current appointment ────
 function ActiveOrdersPanel({ patientId, appointmentId }: { patientId: string; appointmentId: string }) {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [editingOrder, setEditingOrder] = useState<any | null>(null);
+
   const { data: labOrders = [] } = useQuery({
     queryKey: ["lab-orders-appt", appointmentId],
     queryFn:  () => labApi.list({ appointmentId }),
@@ -561,14 +593,20 @@ function ActiveOrdersPanel({ patientId, appointmentId }: { patientId: string; ap
               <div key={o._id} className="rounded-lg border px-3 py-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium truncate">{o.test}</span>
-                  <Badge className={`text-xs shrink-0 ${LAB_STATUS_COLOR[o.status] ?? "bg-gray-100 text-gray-600"}`}>{o.status}</Badge>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Badge className={`text-xs ${LAB_STATUS_COLOR[o.status] ?? "bg-gray-100 text-gray-600"}`}>{o.status}</Badge>
+                    {user?.role === "doctor" && (
+                      <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                        onClick={() => setEditingOrder(o)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 {o.priority !== "Routine" && (
                   <Badge className="text-xs bg-red-50 text-red-600 mt-1">{o.priority}</Badge>
                 )}
-                {o.result && (
-                  <p className="text-muted-foreground mt-1 bg-muted/40 rounded px-2 py-1 leading-snug">{o.result}</p>
-                )}
+                {o.result && <LabResult result={o.result} />}
               </div>
             ))}
           </CardContent>
@@ -597,6 +635,14 @@ function ActiveOrdersPanel({ patientId, appointmentId }: { patientId: string; ap
             ))}
           </CardContent>
         </Card>
+      )}
+      {editingOrder && (
+        <LabResultModal
+          open
+          onClose={() => setEditingOrder(null)}
+          order={editingOrder}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["lab-orders-appt", appointmentId] })}
+        />
       )}
     </div>
   );
@@ -658,12 +704,21 @@ function HistoryTab({ patientId }: { patientId: string }) {
                     {a.vitals.height && <Badge className="text-xs bg-muted text-muted-foreground">Ht {a.vitals.height} cm</Badge>}
                   </div>
                 )}
+                {/* Purpose of visit — chief complaint captured at booking */}
+                {a.notes && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    <span className="font-semibold text-foreground">Reason for visit:</span> {a.notes}
+                  </p>
+                )}
                 {/* SOAP notes */}
                 {(a.soap?.assessment || a.soap?.plan) && (
                   <div className="text-xs text-muted-foreground mt-2 space-y-0.5 bg-muted/40 rounded px-2 py-1.5">
-                    {a.soap.assessment && <p><span className="font-semibold text-foreground">A:</span> {a.soap.assessment}</p>}
-                    {a.soap.plan      && <p><span className="font-semibold text-foreground">P:</span> {a.soap.plan}</p>}
+                    {a.soap.assessment && <p><span className="font-semibold text-foreground">Diagnosis:</span> {a.soap.assessment}</p>}
+                    {a.soap.plan      && <p><span className="font-semibold text-foreground">Plan:</span> {a.soap.plan}</p>}
                   </div>
+                )}
+                {!a.notes && !a.soap?.assessment && !a.soap?.plan && (
+                  <p className="text-xs text-muted-foreground/50 italic mt-2">No visit reason or diagnosis recorded</p>
                 )}
               </div>
             </div>
@@ -678,6 +733,7 @@ function HistoryTab({ patientId }: { patientId: string }) {
 export default function OPDPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
 
   const [isRecording, setIsRecording] = useState(false);
   const [selectedApptId, setSelectedApptId] = useState<string | null>(null);
@@ -738,6 +794,9 @@ export default function OPDPage() {
         qc.invalidateQueries({ queryKey: ["opd-queue"] });
         qc.invalidateQueries({ queryKey: ["appointments"] });
         qc.invalidateQueries({ queryKey: ["queue"] });
+        setLocation(
+          `/billing?patientId=${encodeURIComponent(activeAppt.patientId)}&appointmentId=${encodeURIComponent(activeAppt._id)}&type=OPD&doctor=${encodeURIComponent(activeAppt.doctor ?? "")}`
+        );
       }
     } catch (err: any) {
       toast({ variant: "destructive", title: "Sign-off failed", description: err.message || "Failed to complete and sign consultation." });
@@ -933,7 +992,7 @@ export default function OPDPage() {
                 {queueLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1 p-2">
+            <CardContent className="space-y-1 p-2 max-h-[calc(100vh-22rem)] overflow-y-auto">
               {queue.length === 0 && !queueLoading && (
                 <p className="text-xs text-muted-foreground text-center py-4">No active patients in queue.</p>
               )}
@@ -1067,6 +1126,8 @@ export default function OPDPage() {
                 ))}
               </div>
 
+              {/* ── Tab content — scrolls independently below the tab bar ── */}
+              <div className="max-h-[calc(100vh-14rem)] overflow-y-auto pr-1 -mr-1">
               {/* ── Consultation Tab ─────────────────────────── */}
               {activeTab === "consult" && (
                 <div className="space-y-4">
@@ -1230,6 +1291,7 @@ export default function OPDPage() {
                   activeAppt={activeAppt}
                 />
               )}
+              </div>
             </>
           )}
         </div>
