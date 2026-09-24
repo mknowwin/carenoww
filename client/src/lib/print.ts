@@ -781,7 +781,7 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
       <div class="meta-item"><label>Patient Name</label><span>${creditNote.patientName || "—"}</span></div>
       <div class="meta-item"><label>UHID</label><span>${creditNote.patientId || "—"}</span></div>
       <div class="meta-item"><label>Payer</label><span>${creditNote.payer || "Self"}</span></div>
-      <div class="meta-item"><label>Refund Mode</label><span>${creditNote.paymentMode || "—"}</span></div>
+      <div class="meta-item"><label>Refund Mode</label><span>${Math.abs(creditNote.paid || 0) > 0 ? (creditNote.paymentMode || "—") : "No refund (credited to balance)"}</span></div>
       <div class="meta-item"><label>Processed By</label><span>${creditNote.createdBy || "—"}</span></div>
     </div>
     <table>
@@ -795,6 +795,30 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
+    ${(() => {
+      const refunds = ((creditNote.payments || []) as any[])
+        .slice()
+        .sort((a, b) => new Date(a.paidAt || 0).getTime() - new Date(b.paidAt || 0).getTime());
+      if (!refunds.length) return "";
+      return `
+    <table>
+      <thead>
+        <tr><th class="tc" style="width:36px;">#</th><th>Refund ID</th><th>Date</th><th>Mode</th><th>Ref. No</th><th>Refunded By</th><th class="tr">Amount</th></tr>
+      </thead>
+      <tbody>
+        ${refunds.map((p, idx) => `
+        <tr>
+          <td class="tc">${idx + 1}</td>
+          <td style="font-family:monospace;font-size:11px;">${p.paymentId || "—"}</td>
+          <td>${p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+          <td>${p.paymentMode || "—"}</td>
+          <td>${p.transactionRef || "—"}</td>
+          <td>${p.receivedBy || "—"}</td>
+          <td class="tr" style="color:#b91c1c;">₹${Math.abs(p.amount || 0).toLocaleString()}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+    })()}
     <div class="summary">
       <table>
         <tr class="tot-row"><td>Return Value</td><td class="tr">₹${returnAmount.toLocaleString()}</td></tr>
@@ -1311,19 +1335,20 @@ export function printSalesReport(
   const totBills    = rows.reduce((a, r) => a + (r.billsCreated  || 0), 0);
   const totBilled   = rows.reduce((a, r) => a + (r.totalBilled   || 0), 0);
   const totPaid     = rows.reduce((a, r) => a + (r.totalPaid     || 0), 0);
+  const totRefunded = rows.reduce((a, r) => a + (r.totalRefunded || 0), 0);
   const totPayments = rows.reduce((a, r) => a + (r.paymentsCount || 0), 0);
   const totReceived = rows.reduce((a, r) => a + (r.totalReceived || 0), 0);
 
-  const PRINT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
+  const PRINT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const;
 
   const rowHtml = rows.map((r, i) => {
     const breakdown: Record<string, number> = r.paymentBreakdown || {};
-    const activeModes = PRINT_MODES.filter(m => (breakdown[m] || 0) > 0);
+    const activeModes = PRINT_MODES.filter(m => (breakdown[m] || 0) !== 0);
     const breakdownHtml = activeModes.length > 0
       ? `<tr>
           <td></td>
-          <td colspan="6" style="padding:2px 8px 6px 28px;color:#555;font-size:11px;border-bottom:1px solid #e5e7eb;">
-            ${activeModes.map(m => `<span style="margin-right:14px;"><span style="color:#374151;font-weight:600;">${m}</span> <span style="color:#0d9488;">₹${(breakdown[m] || 0).toLocaleString("en-IN")}</span></span>`).join("")}
+          <td colspan="7" style="padding:2px 8px 6px 28px;color:#555;font-size:11px;border-bottom:1px solid #e5e7eb;">
+            ${activeModes.map(m => `<span style="margin-right:14px;"><span style="color:#374151;font-weight:600;">${m}</span> <span style="color:${(breakdown[m] || 0) < 0 ? "#dc2626" : "#0d9488"};">₹${(breakdown[m] || 0).toLocaleString("en-IN")}</span></span>`).join("")}
           </td>
         </tr>`
       : "";
@@ -1334,6 +1359,7 @@ export function printSalesReport(
       <td class="tr">${r.billsCreated || 0}</td>
       <td class="tr">₹${(r.totalBilled || 0).toLocaleString("en-IN")}</td>
       <td class="tr" style="color:#15803d;">₹${(r.totalPaid || 0).toLocaleString("en-IN")}</td>
+      <td class="tr" style="color:#dc2626;">₹${(r.totalRefunded || 0).toLocaleString("en-IN")}</td>
       <td class="tr">${r.paymentsCount || 0}</td>
       <td class="tr" style="color:#0d9488;">₹${(r.totalReceived || 0).toLocaleString("en-IN")}</td>
     </tr>${breakdownHtml}`;
@@ -1360,12 +1386,13 @@ export function printSalesReport(
           <th class="tr" style="width:80px;">Bills</th>
           <th class="tr" style="width:110px;">Total Billed</th>
           <th class="tr" style="width:110px;">Collected</th>
+          <th class="tr" style="width:100px;">Refunded</th>
           <th class="tr" style="width:80px;">Payments</th>
           <th class="tr" style="width:110px;">Cash Received</th>
         </tr>
       </thead>
       <tbody>
-        ${rowHtml || '<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No data found</td></tr>'}
+        ${rowHtml || '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">No data found</td></tr>'}
       </tbody>
       <tfoot>
         <tr style="background:#f0f0f0;font-weight:800;">
@@ -1374,6 +1401,7 @@ export function printSalesReport(
           <td class="tr">${totBills}</td>
           <td class="tr">₹${totBilled.toLocaleString("en-IN")}</td>
           <td class="tr" style="color:#15803d;">₹${totPaid.toLocaleString("en-IN")}</td>
+          <td class="tr" style="color:#dc2626;">₹${totRefunded.toLocaleString("en-IN")}</td>
           <td class="tr">${totPayments}</td>
           <td class="tr" style="color:#0d9488;">₹${totReceived.toLocaleString("en-IN")}</td>
         </tr>

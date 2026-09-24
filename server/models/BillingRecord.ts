@@ -14,6 +14,10 @@ export interface IBillItem {
   igst?: number;
   taxableAmount?: number;
   batchNo?: string;
+  // DrugBatch _id the units were actually drawn from. batchNo alone isn't
+  // unique (the same batch number can arrive on several GRNs), so returns and
+  // cancellations use this to restock the exact batch. Absent on older bills.
+  batchId?: string;
   expiryDate?: Date;
   drugId?: string;
   combination?: string;
@@ -122,6 +126,7 @@ const BillItemSchema = new Schema<IBillItem>({
   igst:         { type: Number, default: 0 },
   taxableAmount:{ type: Number, default: 0 },
   batchNo:      { type: String },
+  batchId:      { type: String },
   expiryDate:   { type: Date },
   drugId:       { type: String },
   combination:  { type: String },

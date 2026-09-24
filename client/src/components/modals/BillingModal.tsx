@@ -26,6 +26,17 @@ const BILL_RATE_CATEGORIES: Record<string, string[]> = {
   Lab: ["Lab"],
 };
 
+// Stock a line item can actually draw from: just the pinned batch when the user
+// forced one (the server deducts only from that batch — no spillover), otherwise
+// the total across all batches (FEFO).
+function stockLimit(it: BillItem): { qty: number; batchNo?: string } | null {
+  if (it.manualBatch && it.batchId) {
+    const batch = it.batches?.find((b) => b._id === it.batchId);
+    if (batch) return { qty: batch.quantityRemaining, batchNo: batch.batchNo };
+  }
+  return it.availableQty != null ? { qty: it.availableQty } : null;
+}
+
 interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; combination?: string; availableQty?: number; batches?: FefoBatch[]; allocations?: BatchAllocation[]; batchId?: string; manualBatch?: boolean; }
 const emptyItem = (): BillItem => ({ description: "", category: "Consultation", quantity: 1, unitPrice: 0, total: 0 });
 
@@ -348,8 +359,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     if (!patientName.trim()) { setError("Patient name is required"); return; }
     if (!payOnly && !hasItems) { setError("Add at least one item to the bill"); return; }
     if (!asDraft && !payOnly && items.some((it) => !it.description.trim())) { setError("All items need a description"); return; }
-    const overStock = !asDraft && !payOnly && items.find((it) => it.availableQty != null && it.quantity > it.availableQty);
-    if (overStock) { setError(`Quantity for "${overStock.description}" exceeds available stock (${overStock.availableQty})`); return; }
+    const overStock = !asDraft && !payOnly && items.find((it) => { const lim = stockLimit(it); return lim != null && it.quantity > lim.qty; });
+    if (overStock) {
+      const lim = stockLimit(overStock)!;
+      setError(`Quantity for "${overStock.description}" exceeds available stock${lim.batchNo ? ` in batch ${lim.batchNo}` : ""} (${lim.qty})`);
+      return;
+    }
 
     setLoading(true); setError("");
     try {
@@ -373,8 +388,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
             // independently re-runs FEFO deduction and expansion on submit. batchId is only
             // forwarded when the user explicitly pinned a batch; otherwise omitted so the
             // server runs its default FEFO split (mirrors DispenseCounterModal.tsx).
+            // Lines loaded from a saved bill (no client-side `batches` preview) keep the
+            // batchId the server recorded — it's the exact batch the units came from
+            // (or a draft's pinned batch), which returns/cancellations restock into.
             const { batches: _batches, allocations: _allocations, manualBatch, batchId, ...rest } = it;
-            return { ...rest, batchId: manualBatch ? batchId : undefined, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) };
+            const keepBatchId = manualBatch || !_batches;
+            return { ...rest, batchId: keepBatchId ? batchId : undefined, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) };
           }),
           amount: totalAmount,
           discount: discountAmt,
@@ -662,7 +681,8 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                         <span>Drug</span><span className="text-center">Qty</span><span className="text-right">MRP/Unit</span><span className="text-right">Total</span><span />
                       </div>
                       {items.filter((it) => it.description !== "" || it.unitPrice > 0).map((item, idx) => {
-                        const overStock = item.availableQty != null && item.quantity > item.availableQty;
+                        const limit = stockLimit(item);
+                        const overStock = limit != null && item.quantity > limit.qty;
                         return (
                           <div key={idx} className="space-y-0.5">
                             <div className="grid grid-cols-[2fr_72px_88px_70px_32px] gap-1.5 items-center">
@@ -715,7 +735,10 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                               </div>
                             )}
                             {overStock && (
-                              <p className="text-[10px] text-red-600 pl-1">Only {item.availableQty} in stock</p>
+                              <p className="text-[10px] text-red-600 pl-1">
+                                Only {limit!.qty} {limit!.batchNo ? `in batch ${limit!.batchNo}` : "in stock"}
+                                {limit!.batchNo && (item.availableQty ?? 0) >= item.quantity && " — pick another batch or switch to Auto (FEFO)"}
+                              </p>
                             )}
                           </div>
                         );

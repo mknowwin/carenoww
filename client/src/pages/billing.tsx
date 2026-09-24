@@ -137,7 +137,9 @@ export default function BillingPage() {
     });
 
   const { data: staffReport = [], isLoading: staffLoading } = useQuery({
-    queryKey: ["billing-by-staff", staffDateFrom, staffDateTo],
+    // Nested under "billing" so every mutation that invalidates ["billing"]
+    // (payments, returns/credit notes, cancellations) refreshes this report too.
+    queryKey: ["billing", "by-staff", staffDateFrom, staffDateTo],
     queryFn: () => billingApi.salesByStaff({ from: staffDateFrom || undefined, to: staffDateTo || undefined }),
     enabled: view === "staff",
     retry: false,
@@ -488,9 +490,9 @@ export default function BillingPage() {
                         <tbody>
                           {staffReport.map((row: any, idx: number) => {
                             const breakdown: Record<string, number> = row.paymentBreakdown || {};
-                            const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
+                            const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const)
                               .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
-                              .filter(p => p.amount > 0);
+                              .filter(p => p.amount !== 0);
                             const isExpanded = expandedStaff.has(row.staffName);
                             return (
                               <Fragment key={row.staffName}>
@@ -523,7 +525,7 @@ export default function BillingPage() {
                                         {activeModePairs.map(({ mode, amount }) => (
                                           <div key={mode} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                             <span className="font-medium text-foreground">{mode}</span>
-                                            <span className="text-teal-600 font-semibold">{formatCurrencyFull(amount)}</span>
+                                            <span className={`font-semibold ${amount < 0 ? "text-red-600" : "text-teal-600"}`}>{formatCurrencyFull(amount)}</span>
                                           </div>
                                         ))}
                                       </div>
@@ -565,9 +567,9 @@ export default function BillingPage() {
               ) : (() => {
                 const myRow = staffReport[0];
                 const breakdown: Record<string, number> = myRow.paymentBreakdown || {};
-                const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
+                const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const)
                   .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
-                  .filter(p => p.amount > 0);
+                  .filter(p => p.amount !== 0);
                 return (
                   <>
                     <p className="text-xs text-muted-foreground -mt-1">Your billing summary for the selected date range.</p>
@@ -595,7 +597,7 @@ export default function BillingPage() {
                             {activeModePairs.map(({ mode, amount }) => (
                               <div key={mode} className="flex items-center gap-1.5 text-sm">
                                 <span className="font-medium text-foreground">{mode}</span>
-                                <span className="text-teal-600 font-semibold">{formatCurrencyFull(amount)}</span>
+                                <span className={`font-semibold ${amount < 0 ? "text-red-600" : "text-teal-600"}`}>{formatCurrencyFull(amount)}</span>
                               </div>
                             ))}
                           </div>
