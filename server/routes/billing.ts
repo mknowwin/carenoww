@@ -26,7 +26,7 @@ router.post("/", requireRole("admin", "receptionist", "nurse", "finance", "pharm
 
 // ── PUT /api/billing/:id — update items / discount / payer / status ──────────
 router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
-  const bill = await billingService.updateBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
+  const bill = await billingService.updateBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body, req.user!.timezone);
   res.json({ success: true, data: bill });
 }));
 

@@ -443,11 +443,60 @@ export async function createBill(tenantId: string, user: { name: string; id: str
   return bill;
 }
 
+// Builds a human-readable summary of what an edit changed on a finalized bill,
+// for the automatic audit note. Returns [] when nothing material changed (e.g.
+// a pure payment, which is already recorded in payments[]).
+function describeBillEdit(
+  existing: any,
+  next: { items?: any[]; amount: number; discount: number; payer?: string; paymentMode?: string; status?: string }
+): string[] {
+  const inr = (n: number) => `₹${(Number(n) || 0).toLocaleString("en-IN")}`;
+  const changes: string[] = [];
+
+  if (next.items !== undefined) {
+    // Aggregate by description (+ batch) so a FEFO-split drug compares as one.
+    const tally = (items: any[]) => {
+      const m = new Map<string, number>();
+      for (const it of items ?? []) {
+        const key = `${it.description || "Item"}${it.batchNo ? ` [${it.batchNo}]` : ""}`;
+        m.set(key, (m.get(key) ?? 0) + Number(it.quantity ?? 1));
+      }
+      return m;
+    };
+    const before = tally(existing.items);
+    const after = tally(next.items);
+    for (const [key, qty] of after) {
+      const was = before.get(key);
+      if (was === undefined) changes.push(`added ${key} ×${qty}`);
+      else if (was !== qty) changes.push(`${key} qty ${was} → ${qty}`);
+    }
+    for (const [key, qty] of before) {
+      if (!after.has(key)) changes.push(`removed ${key} ×${qty}`);
+    }
+  }
+  if (Number(next.discount) !== Number(existing.discount)) changes.push(`discount ${inr(existing.discount)} → ${inr(next.discount)}`);
+  if (next.amount !== existing.amount) changes.push(`total ${inr(existing.amount)} → ${inr(next.amount)}`);
+  if (next.payer !== undefined && next.payer !== existing.payer) changes.push(`payer ${existing.payer || "—"} → ${next.payer}`);
+  if (next.paymentMode !== undefined && next.paymentMode !== existing.paymentMode) changes.push(`payment mode ${existing.paymentMode || "—"} → ${next.paymentMode}`);
+  if (next.status !== undefined && next.status !== existing.status) changes.push(`status ${existing.status} → ${next.status}`);
+  return changes;
+}
+
+function formatInTimezone(date: Date, timezone?: string): string {
+  const opts: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
+  try {
+    return date.toLocaleString("en-IN", { ...opts, timeZone: timezone || undefined });
+  } catch {
+    return date.toLocaleString("en-IN", opts); // unknown IANA zone — fall back to server time
+  }
+}
+
 export async function updateBill(
   tenantId: string,
   user: { id: string; name: string },
   id: string,
-  body: Record<string, any>
+  body: Record<string, any>,
+  timezone?: string
 ) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
@@ -550,11 +599,28 @@ export async function updateBill(
   }
 
   if (!becomingFinal) {
-    const mongoUpdate: any = { $set: update };
+    const mongoUpdate: any = { $set: update, $push: {} };
     if (payDelta > 0) {
       const paymentId = await getNextId(tenantId, `pay-${existing.billId}`, "PAY-");
-      mongoUpdate.$push = { payments: buildPaymentEntry(paymentId) };
+      mongoUpdate.$push.payments = buildPaymentEntry(paymentId);
     }
+    // Automatic audit note for edits to a finalized bill. Drafts are work in
+    // progress, so their saves aren't logged.
+    if (!wasDraft && !stayingDraft) {
+      const changes = describeBillEdit(existing, {
+        items, amount: update.amount, discount: update.discount, payer, paymentMode, status,
+      });
+      if (changes.length) {
+        const now = new Date();
+        mongoUpdate.$push.notes = {
+          authorId: user.id,
+          authorName: user.name,
+          text: `Bill edited by ${user.name} on ${formatInTimezone(now, timezone)}: ${changes.join("; ")}`,
+          createdAt: now,
+        };
+      }
+    }
+    if (!Object.keys(mongoUpdate.$push).length) delete mongoUpdate.$push;
     return BillingRecord.findOneAndUpdate({ _id: id, tenantId }, mongoUpdate, { new: true });
   }
 
