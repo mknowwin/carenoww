@@ -13,6 +13,7 @@ export interface IDrugInventory extends Document {
   hsnCode: string;
   mrpPerUnit: number;
   purchasePricePerUnit: number;
+  combination?: string;
   isBatchTracked: boolean;
   isActive: boolean;
   createdAt: Date;
@@ -33,6 +34,7 @@ const DrugInventorySchema = new Schema<IDrugInventory>(
     hsnCode:              { type: String, default: "" },
     mrpPerUnit:           { type: Number, default: 0 },
     purchasePricePerUnit: { type: Number, default: 0 },
+    combination:          { type: String, trim: true },
     isBatchTracked:       { type: Boolean, default: false },
     isActive:             { type: Boolean, default: true, index: true },
   },

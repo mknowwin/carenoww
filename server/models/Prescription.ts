@@ -8,6 +8,7 @@ export interface IRxItem {
   duration: string;
   instructions: string;
   quantity: number;
+  combination?: string;
 }
 
 export interface IPrescription extends Document {
@@ -36,6 +37,7 @@ const RxItemSchema = new Schema<IRxItem>({
   duration:     { type: String, default: "" },
   instructions: { type: String, default: "" },
   quantity:     { type: Number, default: 1 },
+  combination:  { type: String, default: "" },
 }, { _id: true });
 
 const PrescriptionSchema = new Schema<IPrescription>(

@@ -1,4 +1,5 @@
-import { useState, Fragment } from "react";
+import { useEffect, useState, Fragment } from "react";
+import { useSearch as useWouterSearch, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,8 @@ function rangeForFilter(dateFilter: string, dateFrom: string, dateTo: string): {
 export default function BillingPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
+  const wouterSearch = useWouterSearch();
   const isAdmin = user?.role === "admin" || user?.role === "finance";
   const canDeleteDraft = isAdmin || user?.role === "pharmacy_admin";
   const canCancelReturn = canDeleteDraft || user?.role === "pharmacist";
@@ -96,6 +99,27 @@ export default function BillingPage() {
   const [returnBill,  setReturnBill]  = useState<any>(null);
   const [deletingId,  setDeletingId]  = useState<string | null>(null);
   const [unlockingId, setUnlockingId] = useState<string | null>(null);
+  const [noteDrafts,  setNoteDrafts]  = useState<Record<string, string>>({});
+  const [editingNote, setEditingNote] = useState<{ billId: string; noteId: string; text: string } | null>(null);
+  const [savingNote,  setSavingNote]  = useState(false);
+  const [prefill, setPrefill] = useState<{ patientId?: string; type?: string; doctor?: string } | undefined>(undefined);
+
+  // Deep-link from OPD sign-off: ?patientId=...&appointmentId=...&type=...&doctor=... auto-opens a new invoice prefilled.
+  useEffect(() => {
+    const params = new URLSearchParams(wouterSearch);
+    const patientId = params.get("patientId");
+    if (!patientId) return;
+    setPrefill({
+      patientId,
+      type: params.get("type") ?? undefined,
+      doctor: params.get("doctor") ?? undefined,
+    });
+    setEditBill(null);
+    setPayOnly(false);
+    setModalOpen(true);
+    setLocation("/billing", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wouterSearch]);
 
   const [staffFilter,   setStaffFilter]   = useState<string | null>(null);
 
@@ -113,7 +137,9 @@ export default function BillingPage() {
     });
 
   const { data: staffReport = [], isLoading: staffLoading } = useQuery({
-    queryKey: ["billing-by-staff", staffDateFrom, staffDateTo],
+    // Nested under "billing" so every mutation that invalidates ["billing"]
+    // (payments, returns/credit notes, cancellations) refreshes this report too.
+    queryKey: ["billing", "by-staff", staffDateFrom, staffDateTo],
     queryFn: () => billingApi.salesByStaff({ from: staffDateFrom || undefined, to: staffDateTo || undefined }),
     enabled: view === "staff",
     retry: false,
@@ -245,9 +271,40 @@ export default function BillingPage() {
     }
   };
 
-  const openNew    = () => { setEditBill(null); setPayOnly(false); setModalOpen(true); };
-  const openEdit   = (bill: any) => { setEditBill(bill); setPayOnly(false); setModalOpen(true); };
-  const openPayment= (bill: any) => { setEditBill(bill); setPayOnly(true);  setModalOpen(true); };
+  const submitNote = async (bill: any) => {
+    const text = (noteDrafts[bill.id] || "").trim();
+    if (!text) return;
+    setSavingNote(true);
+    try {
+      await billingApi.addNote(bill._id || bill.id, text);
+      setNoteDrafts((d) => ({ ...d, [bill.id]: "" }));
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed to add note", description: err.message || "Something went wrong." });
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const saveNoteEdit = async () => {
+    if (!editingNote) return;
+    const text = editingNote.text.trim();
+    if (!text) return;
+    setSavingNote(true);
+    try {
+      await billingApi.updateNote(editingNote.billId, editingNote.noteId, text);
+      setEditingNote(null);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed to update note", description: err.message || "Something went wrong." });
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const openNew    = () => { setPrefill(undefined); setEditBill(null); setPayOnly(false); setModalOpen(true); };
+  const openEdit   = (bill: any) => { setPrefill(undefined); setEditBill(bill); setPayOnly(false); setModalOpen(true); };
+  const openPayment= (bill: any) => { setPrefill(undefined); setEditBill(bill); setPayOnly(true);  setModalOpen(true); };
 
   return (
     <div className="space-y-4 animate-fadeIn">
@@ -433,9 +490,9 @@ export default function BillingPage() {
                         <tbody>
                           {staffReport.map((row: any, idx: number) => {
                             const breakdown: Record<string, number> = row.paymentBreakdown || {};
-                            const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
+                            const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const)
                               .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
-                              .filter(p => p.amount > 0);
+                              .filter(p => p.amount !== 0);
                             const isExpanded = expandedStaff.has(row.staffName);
                             return (
                               <Fragment key={row.staffName}>
@@ -468,7 +525,7 @@ export default function BillingPage() {
                                         {activeModePairs.map(({ mode, amount }) => (
                                           <div key={mode} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                             <span className="font-medium text-foreground">{mode}</span>
-                                            <span className="text-teal-600 font-semibold">{formatCurrencyFull(amount)}</span>
+                                            <span className={`font-semibold ${amount < 0 ? "text-red-600" : "text-teal-600"}`}>{formatCurrencyFull(amount)}</span>
                                           </div>
                                         ))}
                                       </div>
@@ -510,9 +567,9 @@ export default function BillingPage() {
               ) : (() => {
                 const myRow = staffReport[0];
                 const breakdown: Record<string, number> = myRow.paymentBreakdown || {};
-                const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const)
+                const activeModePairs = (["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const)
                   .map(m => ({ mode: m, amount: breakdown[m] || 0 }))
-                  .filter(p => p.amount > 0);
+                  .filter(p => p.amount !== 0);
                 return (
                   <>
                     <p className="text-xs text-muted-foreground -mt-1">Your billing summary for the selected date range.</p>
@@ -540,7 +597,7 @@ export default function BillingPage() {
                             {activeModePairs.map(({ mode, amount }) => (
                               <div key={mode} className="flex items-center gap-1.5 text-sm">
                                 <span className="font-medium text-foreground">{mode}</span>
-                                <span className="text-teal-600 font-semibold">{formatCurrencyFull(amount)}</span>
+                                <span className={`font-semibold ${amount < 0 ? "text-red-600" : "text-teal-600"}`}>{formatCurrencyFull(amount)}</span>
                               </div>
                             ))}
                           </div>
@@ -856,13 +913,78 @@ export default function BillingPage() {
                             Round Off: {roundOff > 0 ? "+" : "−"}₹{Math.abs(roundOff).toFixed(2)}
                           </div>
                         )}
-                        {bill.notes && (
-                          <p className="text-xs text-muted-foreground mt-2 px-1 italic">Note: {bill.notes}</p>
-                        )}
-                        {isCreditNote && (
+                        {isCreditNote ? (
                           <p className="text-xs text-muted-foreground mt-2 px-1">
-                            Processed by {bill.createdBy}{bill.notes ? ` — ${bill.notes}` : ""}
+                            Processed by {bill.createdBy}{bill.notes?.[0]?.text ? ` — ${bill.notes[0].text}` : ""}
                           </p>
+                        ) : (
+                          <div className="mt-2 px-1 space-y-1.5">
+                            {bill.notes?.length > 0 && (
+                              <div className="space-y-1">
+                                {bill.notes.map((note: any) => {
+                                  const noteId = note._id;
+                                  const isOwn = note.authorId === user?.id;
+                                  const isEditing = editingNote?.billId === (bill._id || bill.id) && editingNote?.noteId === noteId;
+                                  return (
+                                    <div key={noteId} className="text-xs bg-muted/40 rounded px-2 py-1.5">
+                                      {isEditing ? (
+                                        <div className="flex items-center gap-1.5">
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={editingNote!.text}
+                                            onChange={(e) => setEditingNote({ ...editingNote!, text: e.target.value })}
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter") saveNoteEdit();
+                                              if (e.key === "Escape") setEditingNote(null);
+                                            }}
+                                            autoFocus
+                                          />
+                                          <Button size="sm" className="h-7 px-2 text-xs shrink-0" disabled={savingNote} onClick={saveNoteEdit}>Save</Button>
+                                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs shrink-0" onClick={() => setEditingNote(null)}>Cancel</Button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-start justify-between gap-2">
+                                          <p className="italic text-muted-foreground">
+                                            {note.text}
+                                            <span className="block not-italic text-[10px] text-muted-foreground/70 mt-0.5">
+                                              {note.authorName} · {new Date(note.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                                              {note.editedAt ? " (edited)" : ""}
+                                            </span>
+                                          </p>
+                                          {isOwn && (
+                                            <button
+                                              type="button"
+                                              className="text-muted-foreground hover:text-foreground shrink-0"
+                                              title="Edit note"
+                                              onClick={() => setEditingNote({ billId: bill._id || bill.id, noteId, text: note.text })}
+                                            >
+                                              <Pencil className="h-3 w-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <Input
+                                className="h-7 text-xs"
+                                placeholder="Add a note…"
+                                value={noteDrafts[bill.id] || ""}
+                                onChange={(e) => setNoteDrafts((d) => ({ ...d, [bill.id]: e.target.value }))}
+                                onKeyDown={(e) => { if (e.key === "Enter") submitNote(bill); }}
+                              />
+                              <Button
+                                size="sm" variant="outline" className="h-7 px-2 text-xs shrink-0"
+                                disabled={savingNote || !(noteDrafts[bill.id] || "").trim()}
+                                onClick={() => submitNote(bill)}
+                              >
+                                Add
+                              </Button>
+                            </div>
+                          </div>
                         )}
                         {bill.status === "Cancelled" && (
                           <p className="text-xs text-muted-foreground mt-2 px-1">
@@ -895,6 +1017,7 @@ export default function BillingPage() {
           onClose={() => setModalOpen(false)}
           existing={editBill}
           payOnly={payOnly}
+          prefill={prefill}
         />
         <ReturnBillModal
           open={!!returnBill}

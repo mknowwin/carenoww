@@ -210,7 +210,24 @@ function _roundOffLabel(roundOff: number): string {
   return `${roundOff < 0 ? "−" : "+"}₹${Math.abs(roundOff).toFixed(2)}`;
 }
 
+// ── Drug combination sub-line — shown under a Pharmacy line item's description
+// when the underlying DrugInventory record has an optional "combination" set.
+function _comboLine(item: any, opts?: { color?: string; fontSize?: string }): string {
+  if (!item.combination) return "";
+  const color = opts?.color ?? "#1a6b5e";
+  const fontSize = opts?.fontSize ?? "10px";
+  return `<div style="font-size:${fontSize};color:${color};font-style:italic;">${item.combination}</div>`;
+}
+
 // ── Payment history — used across all invoice styles to show who was paid what, when ──
+// bill.notes is an array of per-author entries ({ authorName, text, createdAt }) —
+// printed receipts show them flattened to one line per note, newest last.
+function _notesText(bill: any): string {
+  const notes = bill?.notes as any[] | undefined;
+  if (!notes?.length) return "";
+  return notes.map((n) => (n.authorName ? `${n.text} — ${n.authorName}` : n.text)).join("<br/>");
+}
+
 function _paymentRows(bill: any) {
   return ((bill.payments || []) as any[])
     .slice()
@@ -235,7 +252,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
   const itemRows = items.map((item, idx) => `
     <tr>
       <td class="tc" style="width:36px;">${idx + 1}</td>
-      <td><strong>${item.description}</strong>${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
+      <td><strong>${item.description}</strong>${_comboLine(item)}${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}</td>
       <td style="width:90px;">${item.category}</td>
       ${hasBatch ? `<td style="width:96px;font-family:monospace;font-size:11px;">${item.batchNo || "—"}</td>` : ""}
       ${hasBatch ? `<td style="width:76px;font-size:11px;text-align:center;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
@@ -310,7 +327,7 @@ function _bodyClassic(bill: any, clinic: ClinicInfo, date: string, items: any[],
         ${balance < 0 ? `<tr><td style="color:#15803d;">Overpaid</td><td class="tr" style="color:#15803d;">₹${Math.abs(balance).toLocaleString()}</td></tr>` : ""}
       </table>
     </div>
-    ${bill.notes ? `<div class="notes"><strong>Notes</strong>${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div class="notes"><strong>Notes</strong>${_notesText(bill)}</div>` : ""}
     <div class="footer">
       <p>Thank you for choosing ${clinic.name}. We wish you a speedy recovery!</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
@@ -330,6 +347,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;width:32px;text-align:center;color:#888;">${idx + 1}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;">
         <strong>${item.description}</strong>
+        ${_comboLine(item)}
         ${item.hsnCode ? `<div style="font-size:10px;color:#888;">HSN: ${item.hsnCode}</div>` : ""}
       </td>
       <td style="padding:7px 10px;border-bottom:1px solid #e8f4f2;color:#555;width:80px;">${item.category}</td>
@@ -426,7 +444,7 @@ function _bodyModern(bill: any, clinic: ClinicInfo, date: string, items: any[], 
       </table>
     </div>
 
-    ${bill.notes ? `<div style="margin-top:14px;padding:9px 12px;background:#fffbf0;border:1px solid #e5d68a;border-radius:5px;font-size:12px;"><strong style="display:block;margin-bottom:3px;color:#92400e;">Notes</strong>${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:14px;padding:9px 12px;background:#fffbf0;border:1px solid #e5d68a;border-radius:5px;font-size:12px;"><strong style="display:block;margin-bottom:3px;color:#92400e;">Notes</strong>${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:22px;padding-top:10px;border-top:2px solid #1a5c4a;text-align:center;font-size:11px;color:#555;">
       <p>Thank you for choosing <strong>${clinic.name}</strong>. We wish you a speedy recovery!</p>
@@ -446,6 +464,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       <td style="padding:8px 4px;border-bottom:1px solid #f0f0f0;color:#aaa;width:28px;font-size:11px;">${idx + 1}</td>
       <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;">
         <span style="font-weight:600;">${item.description}</span>
+        ${_comboLine(item)}
       </td>
       <td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;color:#888;font-size:11px;width:80px;">${item.category}</td>
       ${hasBatch ? `<td style="padding:8px 8px;border-bottom:1px solid #f0f0f0;font-family:monospace;font-size:11px;width:90px;">${item.batchNo || "—"}</td>` : ""}
@@ -529,7 +548,7 @@ function _bodyMinimal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       </div>
     </div>
 
-    ${bill.notes ? `<div style="margin-top:8px;font-size:12px;color:#555;font-style:italic;border-left:3px solid #ddd;padding-left:10px;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:8px;font-size:12px;color:#555;font-style:italic;border-left:3px solid #ddd;padding-left:10px;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:32px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center;">
       ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
@@ -547,6 +566,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
     <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
       <span style="flex:1;margin-right:8px;">
         ${item.description}${item.quantity > 1 ? ` <span style="color:#888;">×${item.quantity}</span>` : ""}
+        ${_comboLine(item, { fontSize: "9px" })}
         ${item.batchNo ? `<div style="font-size:9px;color:#aaa;">Batch: ${item.batchNo}${item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" })}` : ""}</div>` : ""}
       </span>
       <span style="font-weight:700;white-space:nowrap;">₹${(item.total || 0).toLocaleString()}</span>
@@ -613,7 +633,7 @@ function _bodyThermal(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${balance === 0 ? `<div style="text-align:center;margin-top:4px;font-weight:700;color:#15803d;font-size:12px;">✓ PAID IN FULL</div>` : ""}
     </div>
 
-    ${bill.notes ? `<div style="margin-top:8px;font-size:10px;color:#666;border-top:1px dashed #ccc;padding-top:6px;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:8px;font-size:10px;color:#666;border-top:1px dashed #ccc;padding-top:6px;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:12px;padding-top:8px;border-top:2px dashed #333;text-align:center;font-size:10px;color:#777;">
       <div style="font-weight:700;margin-bottom:2px;">Thank you for visiting ${clinic.name}!</div>
@@ -632,7 +652,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
   const itemRows = items.map((item, idx) => `
     <tr>
       <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;color:#888;width:24px;text-align:center;">${idx + 1}</td>
-      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;font-weight:600;">${item.description}</td>
+      <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;font-weight:600;">${item.description}${_comboLine(item, { fontSize: "9px" })}</td>
       ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;font-family:monospace;width:84px;">${item.batchNo || "—"}</td>` : ""}
       ${hasBatch ? `<td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:9px;text-align:center;width:68px;">${item.expiryDate ? new Date(item.expiryDate).toLocaleDateString("en-IN", { month:"short", year:"numeric" }) : "—"}</td>` : ""}
       <td style="padding:5px 6px;border:1px solid #e0e0e0;font-size:10px;text-align:center;width:30px;">${item.quantity}</td>
@@ -716,7 +736,7 @@ function _bodyCompact(bill: any, clinic: ClinicInfo, date: string, items: any[],
       ${balance > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0;color:#dc2626;font-weight:600;"><span>Balance</span><span>₹${balance.toLocaleString()}</span></div>` : ""}
     </div>
 
-    ${bill.notes ? `<div style="margin-top:10px;font-size:10px;color:#666;padding:6px 8px;border-left:3px solid #ddd;">${bill.notes}</div>` : ""}
+    ${bill.notes?.length ? `<div style="margin-top:10px;font-size:10px;color:#666;padding:6px 8px;border-left:3px solid #ddd;">${_notesText(bill)}</div>` : ""}
 
     <div style="margin-top:14px;padding-top:8px;border-top:1px solid #ddd;text-align:center;font-size:9px;color:#aaa;">
       ${clinic.name}${clinic.phone ? ` · ${clinic.phone}` : ""}
@@ -761,7 +781,7 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
       <div class="meta-item"><label>Patient Name</label><span>${creditNote.patientName || "—"}</span></div>
       <div class="meta-item"><label>UHID</label><span>${creditNote.patientId || "—"}</span></div>
       <div class="meta-item"><label>Payer</label><span>${creditNote.payer || "Self"}</span></div>
-      <div class="meta-item"><label>Refund Mode</label><span>${creditNote.paymentMode || "—"}</span></div>
+      <div class="meta-item"><label>Refund Mode</label><span>${Math.abs(creditNote.paid || 0) > 0 ? (creditNote.paymentMode || "—") : "No refund (credited to balance)"}</span></div>
       <div class="meta-item"><label>Processed By</label><span>${creditNote.createdBy || "—"}</span></div>
     </div>
     <table>
@@ -775,6 +795,30 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
+    ${(() => {
+      const refunds = ((creditNote.payments || []) as any[])
+        .slice()
+        .sort((a, b) => new Date(a.paidAt || 0).getTime() - new Date(b.paidAt || 0).getTime());
+      if (!refunds.length) return "";
+      return `
+    <table>
+      <thead>
+        <tr><th class="tc" style="width:36px;">#</th><th>Refund ID</th><th>Date</th><th>Mode</th><th>Ref. No</th><th>Refunded By</th><th class="tr">Amount</th></tr>
+      </thead>
+      <tbody>
+        ${refunds.map((p, idx) => `
+        <tr>
+          <td class="tc">${idx + 1}</td>
+          <td style="font-family:monospace;font-size:11px;">${p.paymentId || "—"}</td>
+          <td>${p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+          <td>${p.paymentMode || "—"}</td>
+          <td>${p.transactionRef || "—"}</td>
+          <td>${p.receivedBy || "—"}</td>
+          <td class="tr" style="color:#b91c1c;">₹${Math.abs(p.amount || 0).toLocaleString()}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+    })()}
     <div class="summary">
       <table>
         <tr class="tot-row"><td>Return Value</td><td class="tr">₹${returnAmount.toLocaleString()}</td></tr>
@@ -782,7 +826,7 @@ function _bodyCreditNote(creditNote: any, clinic: ClinicInfo, date: string): str
         ${returnAmount > refundAmount ? `<tr><td style="color:#d97706;">Credited to Balance</td><td class="tr" style="color:#d97706;">₹${(returnAmount - refundAmount).toLocaleString()}</td></tr>` : ""}
       </table>
     </div>
-    ${creditNote.notes ? `<div class="notes"><strong>Reason for Return</strong>${creditNote.notes}</div>` : ""}
+    ${creditNote.notes?.length ? `<div class="notes"><strong>Reason for Return</strong>${_notesText(creditNote)}</div>` : ""}
     <div class="footer">
       <p>This credit note reduces the value of invoice ${creditNote.originalBillNo || "—"} issued by ${clinic.name}.</p>
       ${clinic.phone ? `<p>For queries call: ${clinic.phone}</p>` : ""}
@@ -909,6 +953,7 @@ export function printPrescription(rx: any, clinicOverride?: ClinicInfo) {
   const drugs = ((rx.items || []) as any[]).map((item, i) => `
     <div class="drug">
       <div class="d-name">${i + 1}. ${item.drug}</div>
+      ${item.combination ? `<div class="d-note" style="color:#1a6b5e;font-style:normal;">Composition: ${item.combination}</div>` : ""}
       <div class="d-detail">
         Dose: <strong>${item.dose}</strong> &nbsp;·&nbsp;
         Route: <strong>${item.route}</strong> &nbsp;·&nbsp;
@@ -1290,19 +1335,20 @@ export function printSalesReport(
   const totBills    = rows.reduce((a, r) => a + (r.billsCreated  || 0), 0);
   const totBilled   = rows.reduce((a, r) => a + (r.totalBilled   || 0), 0);
   const totPaid     = rows.reduce((a, r) => a + (r.totalPaid     || 0), 0);
+  const totRefunded = rows.reduce((a, r) => a + (r.totalRefunded || 0), 0);
   const totPayments = rows.reduce((a, r) => a + (r.paymentsCount || 0), 0);
   const totReceived = rows.reduce((a, r) => a + (r.totalReceived || 0), 0);
 
-  const PRINT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment"] as const;
+  const PRINT_MODES = ["Cash", "Card", "UPI", "Insurance", "Online", "Advance-Adjustment", "Adjustment"] as const;
 
   const rowHtml = rows.map((r, i) => {
     const breakdown: Record<string, number> = r.paymentBreakdown || {};
-    const activeModes = PRINT_MODES.filter(m => (breakdown[m] || 0) > 0);
+    const activeModes = PRINT_MODES.filter(m => (breakdown[m] || 0) !== 0);
     const breakdownHtml = activeModes.length > 0
       ? `<tr>
           <td></td>
-          <td colspan="6" style="padding:2px 8px 6px 28px;color:#555;font-size:11px;border-bottom:1px solid #e5e7eb;">
-            ${activeModes.map(m => `<span style="margin-right:14px;"><span style="color:#374151;font-weight:600;">${m}</span> <span style="color:#0d9488;">₹${(breakdown[m] || 0).toLocaleString("en-IN")}</span></span>`).join("")}
+          <td colspan="7" style="padding:2px 8px 6px 28px;color:#555;font-size:11px;border-bottom:1px solid #e5e7eb;">
+            ${activeModes.map(m => `<span style="margin-right:14px;"><span style="color:#374151;font-weight:600;">${m}</span> <span style="color:${(breakdown[m] || 0) < 0 ? "#dc2626" : "#0d9488"};">₹${(breakdown[m] || 0).toLocaleString("en-IN")}</span></span>`).join("")}
           </td>
         </tr>`
       : "";
@@ -1313,6 +1359,7 @@ export function printSalesReport(
       <td class="tr">${r.billsCreated || 0}</td>
       <td class="tr">₹${(r.totalBilled || 0).toLocaleString("en-IN")}</td>
       <td class="tr" style="color:#15803d;">₹${(r.totalPaid || 0).toLocaleString("en-IN")}</td>
+      <td class="tr" style="color:#dc2626;">₹${(r.totalRefunded || 0).toLocaleString("en-IN")}</td>
       <td class="tr">${r.paymentsCount || 0}</td>
       <td class="tr" style="color:#0d9488;">₹${(r.totalReceived || 0).toLocaleString("en-IN")}</td>
     </tr>${breakdownHtml}`;
@@ -1339,12 +1386,13 @@ export function printSalesReport(
           <th class="tr" style="width:80px;">Bills</th>
           <th class="tr" style="width:110px;">Total Billed</th>
           <th class="tr" style="width:110px;">Collected</th>
+          <th class="tr" style="width:100px;">Refunded</th>
           <th class="tr" style="width:80px;">Payments</th>
           <th class="tr" style="width:110px;">Cash Received</th>
         </tr>
       </thead>
       <tbody>
-        ${rowHtml || '<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No data found</td></tr>'}
+        ${rowHtml || '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px;">No data found</td></tr>'}
       </tbody>
       <tfoot>
         <tr style="background:#f0f0f0;font-weight:800;">
@@ -1353,6 +1401,7 @@ export function printSalesReport(
           <td class="tr">${totBills}</td>
           <td class="tr">₹${totBilled.toLocaleString("en-IN")}</td>
           <td class="tr" style="color:#15803d;">₹${totPaid.toLocaleString("en-IN")}</td>
+          <td class="tr" style="color:#dc2626;">₹${totRefunded.toLocaleString("en-IN")}</td>
           <td class="tr">${totPayments}</td>
           <td class="tr" style="color:#0d9488;">₹${totReceived.toLocaleString("en-IN")}</td>
         </tr>
@@ -1889,16 +1938,35 @@ export function printGovernmentReport(submission: any, clinicOverride?: ClinicIn
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+// Popup blockers vary: some return null outright (handled below), others hand back
+// a window that then throws on write/close (extensions, strict blockers). Either
+// failure degrades to the same toast instead of throwing back into the caller —
+// a print failure must never abort whatever the caller does next (e.g. closing a
+// success-screen modal).
+function popupBlockedToast() {
+  toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." });
+}
+
 function open(title: string, body: string) {
-  const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
-  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
-  win.document.write(base(title, body));
-  win.document.close();
+  try {
+    const win = window.open("", "_blank", "width=860,height=960,scrollbars=yes");
+    if (!win) { popupBlockedToast(); return; }
+    win.document.write(base(title, body));
+    win.document.close();
+  } catch (err) {
+    console.error("print open() failed:", err);
+    popupBlockedToast();
+  }
 }
 
 function openA5(title: string, body: string) {
-  const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
-  if (!win) { toast({ variant: "destructive", title: "Pop-ups blocked", description: "Please allow pop-ups for this site to print." }); return; }
-  win.document.write(baseA5(title, body));
-  win.document.close();
+  try {
+    const win = window.open("", "_blank", "width=860,height=600,scrollbars=yes");
+    if (!win) { popupBlockedToast(); return; }
+    win.document.write(baseA5(title, body));
+    win.document.close();
+  } catch (err) {
+    console.error("print openA5() failed:", err);
+    popupBlockedToast();
+  }
 }

@@ -8,6 +8,12 @@ export interface ILabParameter {
   referenceRange: string;
 }
 
+export interface ILabResultEdit {
+  note: string;
+  editedBy: string;
+  editedAt: Date;
+}
+
 export interface ILabOrder extends Document {
   tenantId: mongoose.Types.ObjectId;
   labId: string;
@@ -27,6 +33,7 @@ export interface ILabOrder extends Document {
   reportedBy: string;
   appointmentId?: string;
   notes?: string;
+  editHistory: ILabResultEdit[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,6 +45,15 @@ const LabParameterSchema = new Schema<ILabParameter>(
     value:          { type: String, default: "" },
     unit:           { type: String, default: "" },
     referenceRange: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
+const LabResultEditSchema = new Schema<ILabResultEdit>(
+  {
+    note:     { type: String, required: true },
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
@@ -62,6 +78,7 @@ const LabOrderSchema = new Schema<ILabOrder>(
     reportedBy:  { type: String, default: "" },
     appointmentId: { type: String, default: "" },
     notes:       { type: String, default: "" },
+    editHistory: { type: [LabResultEditSchema], default: [] },
   },
   { timestamps: true }
 );

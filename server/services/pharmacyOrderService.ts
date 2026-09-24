@@ -3,7 +3,7 @@ import PharmacyOrder from "../models/PharmacyOrder.js";
 import Patient from "../models/Patient.js";
 import { getNextId } from "../lib/counter.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
-import { checkPharmacyStock, deductAndExpandPharmacyItems } from "./billingService.js";
+import { checkPharmacyStock, deductAndExpandPharmacyItems, insufficientStockError } from "./billingService.js";
 import { AppError } from "../lib/AppError.js";
 
 function escapeRegex(s: string) {
@@ -132,7 +132,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
       if (pharmacyItems.length) {
         const shortages = await checkPharmacyStock(tenantId, pharmacyItems, session);
         if (shortages.length) {
-          throw AppError.conflict("Insufficient stock for one or more items", { shortages });
+          throw insufficientStockError(shortages);
         }
       }
 
@@ -154,9 +154,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
     });
   } catch (err: any) {
     if (err.insufficientStock) {
-      throw AppError.conflict("Insufficient stock for one or more items", {
-        shortages: [{ drugId: err.drugId, available: err.available }],
-      });
+      throw insufficientStockError([{ drugId: err.drugId, name: err.drugName, batchNo: err.batchNo, required: err.required, available: err.available }]);
     }
     throw err;
   } finally {
@@ -204,7 +202,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
       if (pharmacyItems.length) {
         const shortages = await checkPharmacyStock(tenantId, pharmacyItems, session);
         if (shortages.length) {
-          throw AppError.conflict("Insufficient stock for one or more items", { shortages });
+          throw insufficientStockError(shortages);
         }
       }
 
@@ -229,9 +227,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
     });
   } catch (err: any) {
     if (err.insufficientStock) {
-      throw AppError.conflict("Insufficient stock for one or more items", {
-        shortages: [{ drugId: err.drugId, available: err.available }],
-      });
+      throw insufficientStockError([{ drugId: err.drugId, name: err.drugName, batchNo: err.batchNo, required: err.required, available: err.available }]);
     }
     throw err;
   } finally {

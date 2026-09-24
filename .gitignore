@@ -58,3 +58,6 @@ docker-compose.override.yml
 uploads/
 tmp/
 temp/
+
+# ── Database backups ──────────────────────────────────────────────────────────
+scripts/backups/

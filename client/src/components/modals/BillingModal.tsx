@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { billing as billingApi, users as usersApi, ratemaster as ratemasterApi, pharmacy as pharmacyApi, patients as patientsApi } from "@/lib/api";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, IndianRupee, Stethoscope, Printer, CheckCircle2, Search, Pill, Loader2, UserCheck } from "lucide-react";
+import { Plus, Trash2, IndianRupee, Stethoscope, Printer, CheckCircle2, Search, Pill, Loader2, UserCheck, Pencil } from "lucide-react";
 import { printBill } from "@/lib/print";
 import { useAuth } from "@/contexts/AuthContext";
 import { allocateFefo, allocationTotal, type BatchAllocation, type FefoBatch } from "@/lib/pharmacyFefo";
@@ -26,7 +26,18 @@ const BILL_RATE_CATEGORIES: Record<string, string[]> = {
   Lab: ["Lab"],
 };
 
-interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; availableQty?: number; batches?: FefoBatch[]; allocations?: BatchAllocation[]; }
+// Stock a line item can actually draw from: just the pinned batch when the user
+// forced one (the server deducts only from that batch — no spillover), otherwise
+// the total across all batches (FEFO).
+function stockLimit(it: BillItem): { qty: number; batchNo?: string } | null {
+  if (it.manualBatch && it.batchId) {
+    const batch = it.batches?.find((b) => b._id === it.batchId);
+    if (batch) return { qty: batch.quantityRemaining, batchNo: batch.batchNo };
+  }
+  return it.availableQty != null ? { qty: it.availableQty } : null;
+}
+
+interface BillItem { description: string; category: string; quantity: number; unitPrice: number; total: number; batchNo?: string; expiryDate?: string; drugId?: string; combination?: string; availableQty?: number; batches?: FefoBatch[]; allocations?: BatchAllocation[]; batchId?: string; manualBatch?: boolean; }
 const emptyItem = (): BillItem => ({ description: "", category: "Consultation", quantity: 1, unitPrice: 0, total: 0 });
 
 interface Props {
@@ -75,6 +86,11 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   const [transactionRef, setTransactionRef] = useState("");
   const [insurer, setInsurer] = useState({ tpaName: "", policyNo: "", memberNo: "" });
   const [notes, setNotes] = useState("");
+  const [billNotes, setBillNotes] = useState<any[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const [rateNameFilter, setRateNameFilter] = useState("");
   const [drugSearch, setDrugSearch] = useState("");
   const [manualPharmacy, setManualPharmacy] = useState(false);
@@ -126,6 +142,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     let unitPrice = drug.mrpPerUnit ?? 0;
     let batchNo: string | undefined;
     let expiryDate: string | undefined;
+    let batchId: string | undefined;
     let availableQty: number = drug.stock ?? 0;
     let batches: FefoBatch[] = [];
     let allocations: BatchAllocation[] = [];
@@ -141,11 +158,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
         unitPrice = blendedTotal; // qty is 1 on add, so blended total == per-unit price
         batchNo = allocations[0]?.batchNo;
         expiryDate = allocations[0]?.expiryDate;
+        batchId = allocations[0]?.batchId;
       }
     } catch {
       // fall back to inventory-level values
     }
-    const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, drugId: drug._id, availableQty, batches, allocations };
+    const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, batchId, manualBatch: false, drugId: drug._id, combination: drug.combination || undefined, availableQty, batches, allocations };
     setItems((prev) => [
       ...prev.filter((it) => it.description !== "" || it.unitPrice > 0),
       newItem,
@@ -154,9 +172,59 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setJustAddedItem(newItem);
   };
 
+  // Manual override — user explicitly forces a single batch via the dropdown,
+  // mirroring DispenseCounterModal.tsx's applyBatch. The server honors this
+  // (deducts only from this batch) instead of running FEFO.
+  const applyManualBatch = (idx: number, batch: FefoBatch) => {
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const mrp = batch.mrpPerUnit ?? it.unitPrice;
+      const total = Number((it.quantity * mrp).toFixed(2));
+      return {
+        ...it,
+        batchId: batch._id,
+        batchNo: batch.batchNo,
+        expiryDate: batch.expiryDate,
+        unitPrice: mrp,
+        total,
+        allocations: [{ batchId: batch._id, batchNo: batch.batchNo, qty: it.quantity, mrpPerUnit: mrp, expiryDate: batch.expiryDate }],
+        manualBatch: true,
+      };
+    }));
+  };
+
+  const changeBatch = (idx: number, batchId: string) => {
+    const batch = items[idx]?.batches?.find((b) => b._id === batchId);
+    if (batch) applyManualBatch(idx, batch);
+  };
+
+  // Drop the manual pin and go back to FEFO auto-allocation for this line item.
+  const resetToFefo = (idx: number) => {
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== idx || !it.batches?.length) return it;
+      const allocations = allocateFefo(it.batches, it.quantity);
+      const total = Number(allocationTotal(allocations).toFixed(2));
+      return {
+        ...it,
+        manualBatch: false,
+        allocations,
+        total,
+        unitPrice: it.quantity > 0 ? Number((total / it.quantity).toFixed(2)) : 0,
+        batchNo: allocations[0]?.batchNo,
+        expiryDate: allocations[0]?.expiryDate,
+        batchId: allocations[0]?.batchId,
+      };
+    }));
+  };
+
   // ── reset / populate on open ──────────────────────────────────────────────
   useEffect(() => {
-    if (!open) { setError(""); setSavedBill(null); return; }
+    // Do NOT touch state on close — Radix keeps the dialog's content mounted
+    // during its exit animation, so clearing `savedBill` here would swap the
+    // success screen for the empty form mid-transition (the "print receipt
+    // flashes back to Generate/Edit Bill" bug). State resets only when the
+    // dialog next opens, which is exactly when it needs to be fresh anyway.
+    if (!open) return;
     // Store only the numeric portion; strip "UHID-" prefix from existing/prefill values.
     const rawId = existing?.patientId ?? prefill?.patientId ?? "";
     setPatientId(rawId.replace(/^UHID-/, ""));
@@ -174,7 +242,14 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setPaymentMode(existing?.paymentMode ?? "Cash");
     setTransactionRef("");
     setInsurer({ tpaName: existing?.insurance?.tpaName ?? "", policyNo: existing?.insurance?.policyNo ?? "", memberNo: existing?.insurance?.memberNo ?? "" });
-    setNotes(existing?.notes ?? "");
+    // `notes` here is free text for a NEW entry only (initial bill note on create,
+    // or a per-payment note in payOnly mode) — existing bill notes are an array of
+    // per-author entries, shown/added/edited via billNotes below.
+    setNotes("");
+    setBillNotes(existing?.notes ?? []);
+    setNoteDraft("");
+    setEditingNoteId(null);
+    setEditingNoteText("");
     setRateNameFilter("");
     setDrugSearch("");
     setManualPharmacy(false);
@@ -239,13 +314,20 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
       // For batch-tracked drugs, quantity changes re-run the FEFO allocation so the
       // preview always reflects which batches (and prices) will actually be drawn from —
       // mirrors server/lib/fefo.ts fefoDeduct, which the server runs independently on submit.
-      if (field === "quantity" && next.batches?.length) {
+      // Skipped when the user manually pinned a batch — that batch stays fixed regardless of qty.
+      if (field === "quantity" && next.manualBatch) {
+        next.total = Number((next.quantity * next.unitPrice).toFixed(2));
+        if (next.allocations?.length === 1) {
+          next.allocations = [{ ...next.allocations[0], qty: next.quantity }];
+        }
+      } else if (field === "quantity" && next.batches?.length) {
         const allocations = allocateFefo(next.batches, Number(next.quantity) || 0);
         next.allocations = allocations;
         next.total = Number(allocationTotal(allocations).toFixed(2));
         next.unitPrice = next.quantity > 0 ? Number((next.total / next.quantity).toFixed(2)) : 0;
         next.batchNo = allocations[0]?.batchNo;
         next.expiryDate = allocations[0]?.expiryDate;
+        next.batchId = allocations[0]?.batchId;
       } else {
         next.total = Number((next.quantity * next.unitPrice).toFixed(2));
       }
@@ -277,8 +359,12 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     if (!patientName.trim()) { setError("Patient name is required"); return; }
     if (!payOnly && !hasItems) { setError("Add at least one item to the bill"); return; }
     if (!asDraft && !payOnly && items.some((it) => !it.description.trim())) { setError("All items need a description"); return; }
-    const overStock = !asDraft && !payOnly && items.find((it) => it.availableQty != null && it.quantity > it.availableQty);
-    if (overStock) { setError(`Quantity for "${overStock.description}" exceeds available stock (${overStock.availableQty})`); return; }
+    const overStock = !asDraft && !payOnly && items.find((it) => { const lim = stockLimit(it); return lim != null && it.quantity > lim.qty; });
+    if (overStock) {
+      const lim = stockLimit(overStock)!;
+      setError(`Quantity for "${overStock.description}" exceeds available stock${lim.batchNo ? ` in batch ${lim.batchNo}` : ""} (${lim.qty})`);
+      return;
+    }
 
     setLoading(true); setError("");
     try {
@@ -298,10 +384,16 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
           patientId: effectiveUhid, patientName, type,
           doctor: (doctorName && doctorName !== "__none__") ? doctorName : undefined,
           items: items.map((it) => {
-            // batches/allocations are client-only preview state — the server
-            // independently re-runs FEFO deduction and expansion on submit.
-            const { batches: _batches, allocations: _allocations, ...rest } = it;
-            return { ...rest, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) };
+            // batches/allocations/manualBatch are client-only preview state — the server
+            // independently re-runs FEFO deduction and expansion on submit. batchId is only
+            // forwarded when the user explicitly pinned a batch; otherwise omitted so the
+            // server runs its default FEFO split (mirrors DispenseCounterModal.tsx).
+            // Lines loaded from a saved bill (no client-side `batches` preview) keep the
+            // batchId the server recorded — it's the exact batch the units came from
+            // (or a draft's pinned batch), which returns/cancellations restock into.
+            const { batches: _batches, allocations: _allocations, manualBatch, batchId, ...rest } = it;
+            const keepBatchId = manualBatch || !_batches;
+            return { ...rest, batchId: keepBatchId ? batchId : undefined, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), total: Number(it.total) };
           }),
           amount: totalAmount,
           discount: discountAmt,
@@ -338,12 +430,52 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     }
   };
 
-  const handleClose = () => { setSavedBill(null); onClose(); };
+  // `savedBill` is intentionally left as-is here — see the [open] effect above
+  // for why clearing it on close (rather than on next open) causes a flash.
+  const handleClose = () => { onClose(); };
+
+  const submitBillNote = async () => {
+    const text = noteDraft.trim();
+    if (!text || !existing) return;
+    setSavingNote(true);
+    try {
+      const updated = await billingApi.addNote(existing._id || existing.id, text);
+      setBillNotes(updated.notes ?? []);
+      setNoteDraft("");
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      setError(err.message || "Failed to add note");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const saveBillNoteEdit = async () => {
+    const text = editingNoteText.trim();
+    if (!text || !editingNoteId || !existing) return;
+    setSavingNote(true);
+    try {
+      const updated = await billingApi.updateNote(existing._id || existing.id, editingNoteId, text);
+      setBillNotes(updated.notes ?? []);
+      setEditingNoteId(null);
+      qc.invalidateQueries({ queryKey: ["billing"] });
+    } catch (err: any) {
+      setError(err.message || "Failed to update note");
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
+      <DialogContent
+        className="max-w-3xl max-h-[92vh] overflow-y-auto"
+        // Belt-and-braces alongside the Print Receipt delay below: skip Radix's
+        // default post-close focus hand-off back to the trigger, since Print
+        // Receipt's trigger is about to be replaced by a new browsing context.
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
 
         {/* ── Success screen ── */}
         {savedBill ? (
@@ -364,7 +496,27 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
               </div>
               <div className="flex gap-2">
                 {savedBill.status !== "Draft" && (
-                  <Button className="flex-1 gap-2" onClick={() => { printBill(savedBill); handleClose(); }}>
+                  <Button
+                    className="flex-1 gap-2"
+                    onClick={() => {
+                      // Close first, then open the print tab after the close transition
+                      // has actually finished (Dialog's exit animation is duration-200 —
+                      // see ui/dialog.tsx). Opening the print tab steals window focus, and
+                      // once this tab is no longer foregrounded, the browser suspends its
+                      // paint/compositor work — so if that focus steal lands mid-animation,
+                      // the animationend event Radix's Presence waits on to unmount never
+                      // fires, and the dialog is stuck open until the user tabs back.
+                      // Waiting out the transition first avoids the race entirely.
+                      handleClose();
+                      setTimeout(() => {
+                        try {
+                          printBill(savedBill);
+                        } catch (err) {
+                          console.error("printBill failed:", err);
+                        }
+                      }, 260);
+                    }}
+                  >
                     <Printer className="h-4 w-4" /> Print Receipt
                   </Button>
                 )}
@@ -529,7 +681,8 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                         <span>Drug</span><span className="text-center">Qty</span><span className="text-right">MRP/Unit</span><span className="text-right">Total</span><span />
                       </div>
                       {items.filter((it) => it.description !== "" || it.unitPrice > 0).map((item, idx) => {
-                        const overStock = item.availableQty != null && item.quantity > item.availableQty;
+                        const limit = stockLimit(item);
+                        const overStock = limit != null && item.quantity > limit.qty;
                         return (
                           <div key={idx} className="space-y-0.5">
                             <div className="grid grid-cols-[2fr_72px_88px_70px_32px] gap-1.5 items-center">
@@ -553,9 +706,26 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
-                            {item.allocations && item.allocations.length > 1 && (
+                            {item.batches && item.batches.length > 1 && (
+                              <div className="flex items-center gap-1.5 pl-1 pt-0.5 flex-wrap">
+                                <span className="text-[10px] text-muted-foreground">Batch:</span>
+                                <select
+                                  className="h-6 text-[10px] border rounded px-1.5 bg-background"
+                                  value={item.manualBatch ? item.batchId : ""}
+                                  onChange={(e) => e.target.value ? changeBatch(items.indexOf(item), e.target.value) : resetToFefo(items.indexOf(item))}
+                                >
+                                  <option value="">Auto (FEFO — earliest expiry first)</option>
+                                  {item.batches.map((b) => (
+                                    <option key={b._id} value={b._id}>
+                                      {b.batchNo} · Exp {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" }) : "?"} · Stock {b.quantityRemaining} · ₹{b.mrpPerUnit}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                            {!item.manualBatch && item.allocations && item.allocations.length > 1 && (
                               <div className="pl-1 pt-0.5 space-y-0.5">
-                                <p className="text-[10px] text-amber-700 font-medium">Spans {item.allocations.length} batches (FEFO):</p>
+                                <p className="text-[10px] text-amber-700 font-medium">Spans {item.allocations.length} batches (FEFO) — use the selector above to force a single batch instead:</p>
                                 {item.allocations.map((a, aIdx) => (
                                   <p key={aIdx} className="text-[10px] text-muted-foreground flex justify-between max-w-xs">
                                     <span>Batch {a.batchNo}{a.expiryDate ? ` · Exp ${new Date(a.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}</span>
@@ -565,7 +735,10 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                               </div>
                             )}
                             {overStock && (
-                              <p className="text-[10px] text-red-600 pl-1">Only {item.availableQty} in stock</p>
+                              <p className="text-[10px] text-red-600 pl-1">
+                                Only {limit!.qty} {limit!.batchNo ? `in batch ${limit!.batchNo}` : "in stock"}
+                                {limit!.batchNo && (item.availableQty ?? 0) >= item.quantity && " — pick another batch or switch to Auto (FEFO)"}
+                              </p>
                             )}
                           </div>
                         );
@@ -703,9 +876,84 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                 )}
               </div>
 
-              <F label="Notes">
-                <Textarea className="h-14 text-sm resize-none" placeholder="Any billing notes…" value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </F>
+              {(!isEdit || payOnly) && (
+                <F label={payOnly ? "Payment Note" : "Notes"}>
+                  <Textarea
+                    className="h-14 text-sm resize-none"
+                    placeholder={payOnly ? "Note for this payment…" : "Any billing notes…"}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                </F>
+              )}
+
+              {isEdit && !payOnly && (
+                <F label="Notes">
+                  <div className="space-y-1.5">
+                    {billNotes.length > 0 && (
+                      <div className="space-y-1">
+                        {billNotes.map((note: any) => {
+                          const noteId = note._id;
+                          const isOwn = note.authorId === user?.id;
+                          const isEditingThis = editingNoteId === noteId;
+                          return (
+                            <div key={noteId} className="text-xs bg-muted/40 rounded px-2 py-1.5">
+                              {isEditingThis ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Input
+                                    className="h-7 text-xs"
+                                    value={editingNoteText}
+                                    onChange={(e) => setEditingNoteText(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveBillNoteEdit();
+                                      if (e.key === "Escape") setEditingNoteId(null);
+                                    }}
+                                    autoFocus
+                                  />
+                                  <Button type="button" size="sm" className="h-7 px-2 text-xs shrink-0" disabled={savingNote} onClick={saveBillNoteEdit}>Save</Button>
+                                  <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs shrink-0" onClick={() => setEditingNoteId(null)}>Cancel</Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="italic text-muted-foreground">
+                                    {note.text}
+                                    <span className="block not-italic text-[10px] text-muted-foreground/70 mt-0.5">
+                                      {note.authorName} · {new Date(note.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                                      {note.editedAt ? " (edited)" : ""}
+                                    </span>
+                                  </p>
+                                  {isOwn && (
+                                    <button
+                                      type="button"
+                                      className="text-muted-foreground hover:text-foreground shrink-0"
+                                      title="Edit note"
+                                      onClick={() => { setEditingNoteId(noteId); setEditingNoteText(note.text); }}
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        className="h-7 text-xs"
+                        placeholder="Add a note…"
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitBillNote(); } }}
+                      />
+                      <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs shrink-0" disabled={savingNote || !noteDraft.trim()} onClick={submitBillNote}>
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+                </F>
+              )}
 
               {error && <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{error}</p>}
 

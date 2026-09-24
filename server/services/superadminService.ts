@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import Tenant from "../models/Tenant.js";
+import Tenant, { MODULE_KEYS } from "../models/Tenant.js";
 import User from "../models/User.js";
 import Patient from "../models/Patient.js";
 import { AppError } from "../lib/AppError.js";
@@ -107,12 +107,26 @@ export async function getTenant(id: string) {
 }
 
 export async function updateTenant(id: string, body: Record<string, any>) {
-  const { name, plan, status, contact, settings, subscription } = body;
-  const tenant = await Tenant.findByIdAndUpdate(
-    id,
-    { $set: { name, plan, status, contact, settings, subscription } },
-    { new: true, runValidators: true }
-  );
+  const { name, plan, status, contact, subscription, settings } = body;
+  const update: Record<string, any> = {};
+  if (name !== undefined) update.name = name;
+  if (plan !== undefined) update.plan = plan;
+  if (status !== undefined) update.status = status;
+  if (contact !== undefined) update.contact = contact;
+  if (subscription !== undefined) update.subscription = subscription;
+  if (settings !== undefined) {
+    if (settings.modules !== undefined) {
+      if (!Array.isArray(settings.modules) || settings.modules.some((m: string) => !(MODULE_KEYS as readonly string[]).includes(m))) {
+        throw AppError.badRequest("Invalid module list");
+      }
+    }
+    // Field-level $set (not a wholesale replace) so this never wipes out settings
+    // the tenant admin configured separately via Settings → Hospital (branding, tax, etc.).
+    for (const [k, v] of Object.entries(settings)) {
+      if (v !== undefined) update[`settings.${k}`] = v;
+    }
+  }
+  const tenant = await Tenant.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true });
   if (!tenant) throw AppError.notFound("Tenant not found");
   return tenant;
 }

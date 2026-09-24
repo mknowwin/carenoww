@@ -31,6 +31,7 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
   const [reorderLevel, setReorderLevel]           = useState("");
   const [mrpPerUnit, setMrpPerUnit]               = useState("");
   const [purchasePricePerUnit, setPurchasePrice]  = useState("");
+  const [combination, setCombination]             = useState("");
   const [loading, setLoading]                     = useState(false);
   const [error, setError]                         = useState("");
 
@@ -45,6 +46,7 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
     setReorderLevel(drug.reorderLevel != null ? String(drug.reorderLevel) : "");
     setMrpPerUnit(drug.mrpPerUnit != null ? String(drug.mrpPerUnit) : "");
     setPurchasePrice(drug.purchasePricePerUnit != null ? String(drug.purchasePricePerUnit) : "");
+    setCombination(drug.combination ?? "");
     setError("");
   }, [open, drug]);
 
@@ -63,6 +65,7 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
         reorderLevel:         parseFloat(reorderLevel) || 0,
         mrpPerUnit:           parseFloat(mrpPerUnit) || 0,
         purchasePricePerUnit: parseFloat(purchasePricePerUnit) || 0,
+        combination:          combination.trim(),
       });
       qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
       onClose();
@@ -135,6 +138,13 @@ export default function DrugEditModal({ open, onClose, drug }: Props) {
               <F label="Purchase Price / Unit (₹)">
                 <Input type="number" min={0} step="0.01" className="h-8 text-sm" placeholder="0.00" value={purchasePricePerUnit} onChange={(e) => setPurchasePrice(e.target.value)} />
               </F>
+            </div>
+
+            <div className="col-span-2">
+              <F label="Drug Combination (optional)">
+                <Input className="h-8 text-sm" placeholder="e.g. Paracetamol 500mg + Caffeine 65mg" value={combination} onChange={(e) => setCombination(e.target.value)} />
+              </F>
+              <p className="text-[11px] text-muted-foreground mt-1">If set, this is printed on the pharmacy bill and prescription.</p>
             </div>
           </div>
 

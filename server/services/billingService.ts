@@ -28,16 +28,38 @@ const FINANCIAL_FIELDS = new Set(["items", "amount", "discount", "discountType",
 // Verify stock availability up front — a Pharmacy bill must not be created or
 // finalized if it can't actually be fulfilled from inventory. Deferred for
 // Drafts until they're finalized, since draft items may still change.
+type StockShortage = { drugId: string; name?: string; batchNo?: string; required?: number; available: number };
+
 export async function checkPharmacyStock(tenantId: string, pharmacyItems: any[], session?: mongoose.ClientSession) {
-  const shortages: Array<{ drugId: string; name?: string; required: number; available: number }> = [];
+  const shortages: StockShortage[] = [];
   for (const item of pharmacyItems) {
     const qty = item.quantity ?? 1;
     const available = await getAvailableStock(tenantId.toString(), item.drugId, session, item.batchId);
     if (available < qty) {
-      shortages.push({ drugId: item.drugId, name: item.name || item.drugName, required: qty, available });
+      shortages.push({
+        drugId: item.drugId,
+        name: item.description || item.name || item.drugName,
+        // Only a pinned batch limits availability to that batch; under FEFO the
+        // shortage is across all batches, so naming one would be misleading.
+        batchNo: item.batchId ? item.batchNo : undefined,
+        required: qty,
+        available,
+      });
     }
   }
   return shortages;
+}
+
+// Names each short drug (and pinned batch) in the message itself, so the
+// billing UI can show it as-is instead of a generic "one or more items".
+export function insufficientStockError(shortages: StockShortage[]) {
+  const parts = shortages.map((s) => {
+    const label = `${s.name || "Item"}${s.batchNo ? ` (batch ${s.batchNo})` : ""}`;
+    return s.required != null
+      ? `${label}: need ${s.required}, only ${s.available} available`
+      : `${label}: only ${s.available} available`;
+  });
+  return AppError.conflict(`Insufficient stock — ${parts.join("; ")}`, { shortages });
 }
 
 // Deducts stock for every item in allItems that's a pharmacy line item
@@ -72,7 +94,17 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
     if (drug.isBatchTracked) {
       // FEFO batch deduction — syncs DrugInventory.stock from batches, and
       // may span multiple batches; expand into one line item per batch drawn.
-      const used = await fefoDeduct(tenantId.toString(), item.drugId, qty, session, item.batchId);
+      let used: Awaited<ReturnType<typeof fefoDeduct>>;
+      try {
+        used = await fefoDeduct(tenantId.toString(), item.drugId, qty, session, item.batchId);
+      } catch (err: any) {
+        if (err.insufficientStock) {
+          err.drugName = item.description || drug.name;
+          err.batchNo = item.batchId ? item.batchNo : undefined;
+          err.required = qty;
+        }
+        throw err;
+      }
       await syncDrugStock(tenantId.toString(), item.drugId, session);
       for (const u of used) {
         result.push({
@@ -81,6 +113,7 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
           unitPrice: u.mrpPerUnit,
           total: u.deducted * u.mrpPerUnit,
           batchNo: u.batchNo,
+          batchId: u.batchId.toString(),
           expiryDate: u.expiryDate,
         });
       }
@@ -89,6 +122,8 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
         const err: any = new Error("Insufficient stock");
         err.insufficientStock = true;
         err.drugId = item.drugId;
+        err.drugName = item.description || drug.name;
+        err.required = qty;
         err.available = drug.stock;
         throw err;
       }
@@ -107,8 +142,8 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
 
 // Reverses the stock impact of Pharmacy line items being cancelled/returned —
 // the inverse of deductAndExpandPharmacyItems. For batch-tracked drugs, adds
-// the quantity back to the batch it was drawn from (looked up by drugId +
-// batchNo, since that's all a bill line item retains); for non-batch drugs,
+// the quantity back to the exact batch it was drawn from (by batchId, falling
+// back to batchNo on older bills); for non-batch drugs,
 // increments DrugInventory.stock directly. Writes an InventoryAuditLog entry
 // per affected drug, same shape as cancelGRN's reversal (grnService.ts).
 export async function restockPharmacyItems(
@@ -127,21 +162,52 @@ export async function restockPharmacyItems(
     if (!drug) continue;
     const before = drug.stock;
 
-    if (item.batchNo) {
-      const batch = await DrugBatch.findOne({ tenantId, drugId: item.drugId, batchNo: item.batchNo }).session(session);
+    if (drug.isBatchTracked) {
+      // Prefer the exact batch id recorded at sale time; fall back to batchNo
+      // for bills saved before batchId was stored (ambiguous if the same batch
+      // number arrived on several GRNs — earliest expiry first keeps it stable).
+      // Lines with no batch info at all pool into one "RETURNED" holding batch.
+      const batchNo = item.batchNo || "RETURNED";
+      let batch = item.batchId && mongoose.isValidObjectId(item.batchId)
+        ? await DrugBatch.findOne({ _id: item.batchId, tenantId, drugId: item.drugId }).session(session)
+        : null;
+      if (!batch) {
+        batch = await DrugBatch.findOne({ tenantId, drugId: item.drugId, batchNo })
+          .sort({ expiryDate: 1, createdAt: 1 })
+          .session(session);
+      }
+
       if (batch) {
         const newQty = batch.quantityRemaining + qty;
-        await DrugBatch.findByIdAndUpdate(
-          batch._id,
-          { $set: { quantityRemaining: newQty, status: newQty > 0 ? "Active" : batch.status } },
-          { session }
-        );
-        await syncDrugStock(tenantId, item.drugId.toString(), session);
+        // Only an Exhausted batch comes back into circulation. Expired,
+        // Quarantine and Cancelled are deliberate holds — returned units join
+        // the batch's count but must stay unsellable (FEFO only draws Active).
+        const status = batch.status === "Exhausted" ? "Active" : batch.status;
+        await DrugBatch.findByIdAndUpdate(batch._id, { $set: { quantityRemaining: newQty, status } }, { session });
       } else {
-        // Batch no longer exists (e.g. purged) — fall back to a direct bump.
-        const newStock = drug.stock + qty;
-        await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock } }, { session });
+        // The batch is gone (purged). Bumping DrugInventory.stock directly would
+        // be wiped by the next syncDrugStock (stock = sum of Active batches), so
+        // recreate a batch to hold the returned units instead. No batch with
+        // this batchNo exists (the lookup above would have found it), so this
+        // can't collide with the {grnId, drugId, batchNo} unique index.
+        const expiryDate = item.expiryDate ? new Date(item.expiryDate) : null;
+        const expired = !expiryDate || expiryDate.getTime() < Date.now();
+        await DrugBatch.create([{
+          tenantId,
+          drugId: item.drugId,
+          batchNo,
+          supplierName: "Customer Return",
+          // No known expiry → can't vouch for it; park it as Expired so it's
+          // counted in the batch list but never auto-dispensed.
+          expiryDate: expiryDate ?? new Date(),
+          quantityReceived: qty,
+          quantityRemaining: qty,
+          purchasePricePerUnit: drug.purchasePricePerUnit ?? 0,
+          mrpPerUnit: item.unitPrice ?? drug.mrpPerUnit ?? 0,
+          status: expired ? "Expired" : "Active",
+        }], { session });
       }
+      await syncDrugStock(tenantId, item.drugId.toString(), session);
     } else {
       const newStock = drug.stock + qty;
       const reorderLevel = drug.reorderLevel > 0 ? drug.reorderLevel : 1;
@@ -265,7 +331,7 @@ export async function createBill(tenantId: string, user: { name: string; id: str
   if (!isDraft && pharmacyItems.length) {
     const shortages = await checkPharmacyStock(tenantId, pharmacyItems);
     if (shortages.length) {
-      throw AppError.conflict("Insufficient stock for one or more items", { shortages });
+      throw insufficientStockError(shortages);
     }
   }
 
@@ -300,7 +366,7 @@ export async function createBill(tenantId: string, user: { name: string; id: str
       payer: payer || "Self",
       paymentMode: paymentMode || "Cash",
       type: type || "OPD",
-      notes: notes || "",
+      notes: notes ? [{ authorId: user.id, authorName: user.name, text: notes, createdAt: new Date() }] : [],
       createdBy: user.name,
       createdById: user.id,
       payments,
@@ -367,9 +433,7 @@ export async function createBill(tenantId: string, user: { name: string; id: str
   } catch (err: any) {
     if (err.code === 11000) throw AppError.conflict("Bill ID conflict — retry");
     if (err.insufficientStock) {
-      throw AppError.conflict("Insufficient stock for one or more items", {
-        shortages: [{ drugId: err.drugId, available: err.available }],
-      });
+      throw insufficientStockError([{ drugId: err.drugId, name: err.drugName, batchNo: err.batchNo, required: err.required, available: err.available }]);
     }
     throw err;
   } finally {
@@ -379,11 +443,60 @@ export async function createBill(tenantId: string, user: { name: string; id: str
   return bill;
 }
 
+// Builds a human-readable summary of what an edit changed on a finalized bill,
+// for the automatic audit note. Returns [] when nothing material changed (e.g.
+// a pure payment, which is already recorded in payments[]).
+function describeBillEdit(
+  existing: any,
+  next: { items?: any[]; amount: number; discount: number; payer?: string; paymentMode?: string; status?: string }
+): string[] {
+  const inr = (n: number) => `₹${(Number(n) || 0).toLocaleString("en-IN")}`;
+  const changes: string[] = [];
+
+  if (next.items !== undefined) {
+    // Aggregate by description (+ batch) so a FEFO-split drug compares as one.
+    const tally = (items: any[]) => {
+      const m = new Map<string, number>();
+      for (const it of items ?? []) {
+        const key = `${it.description || "Item"}${it.batchNo ? ` [${it.batchNo}]` : ""}`;
+        m.set(key, (m.get(key) ?? 0) + Number(it.quantity ?? 1));
+      }
+      return m;
+    };
+    const before = tally(existing.items);
+    const after = tally(next.items);
+    for (const [key, qty] of after) {
+      const was = before.get(key);
+      if (was === undefined) changes.push(`added ${key} ×${qty}`);
+      else if (was !== qty) changes.push(`${key} qty ${was} → ${qty}`);
+    }
+    for (const [key, qty] of before) {
+      if (!after.has(key)) changes.push(`removed ${key} ×${qty}`);
+    }
+  }
+  if (Number(next.discount) !== Number(existing.discount)) changes.push(`discount ${inr(existing.discount)} → ${inr(next.discount)}`);
+  if (next.amount !== existing.amount) changes.push(`total ${inr(existing.amount)} → ${inr(next.amount)}`);
+  if (next.payer !== undefined && next.payer !== existing.payer) changes.push(`payer ${existing.payer || "—"} → ${next.payer}`);
+  if (next.paymentMode !== undefined && next.paymentMode !== existing.paymentMode) changes.push(`payment mode ${existing.paymentMode || "—"} → ${next.paymentMode}`);
+  if (next.status !== undefined && next.status !== existing.status) changes.push(`status ${existing.status} → ${next.status}`);
+  return changes;
+}
+
+function formatInTimezone(date: Date, timezone?: string): string {
+  const opts: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
+  try {
+    return date.toLocaleString("en-IN", { ...opts, timeZone: timezone || undefined });
+  } catch {
+    return date.toLocaleString("en-IN", opts); // unknown IANA zone — fall back to server time
+  }
+}
+
 export async function updateBill(
   tenantId: string,
   user: { id: string; name: string },
   id: string,
-  body: Record<string, any>
+  body: Record<string, any>,
+  timezone?: string
 ) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
@@ -402,7 +515,8 @@ export async function updateBill(
 
   if (paymentMode !== undefined) update.paymentMode = paymentMode;
   if (payer !== undefined) update.payer = payer;
-  if (notes !== undefined) update.notes = notes;
+  // Bill-level notes are per-author entries now (see addBillNote/updateBillNote) —
+  // this route no longer accepts a raw overwrite of the whole notes list.
   if (status !== undefined) update.status = status;
   if (discountType !== undefined) update.discountType = discountType;
   if (discountPercent !== undefined) update.discountPercent = discountPercent;
@@ -472,7 +586,7 @@ export async function updateBill(
   if (becomingFinal && pharmacyItems.length) {
     const shortages = await checkPharmacyStock(tenantId, pharmacyItems);
     if (shortages.length) {
-      throw AppError.conflict("Insufficient stock for one or more items", { shortages });
+      throw insufficientStockError(shortages);
     }
   }
 
@@ -485,11 +599,28 @@ export async function updateBill(
   }
 
   if (!becomingFinal) {
-    const mongoUpdate: any = { $set: update };
+    const mongoUpdate: any = { $set: update, $push: {} };
     if (payDelta > 0) {
       const paymentId = await getNextId(tenantId, `pay-${existing.billId}`, "PAY-");
-      mongoUpdate.$push = { payments: buildPaymentEntry(paymentId) };
+      mongoUpdate.$push.payments = buildPaymentEntry(paymentId);
     }
+    // Automatic audit note for edits to a finalized bill. Drafts are work in
+    // progress, so their saves aren't logged.
+    if (!wasDraft && !stayingDraft) {
+      const changes = describeBillEdit(existing, {
+        items, amount: update.amount, discount: update.discount, payer, paymentMode, status,
+      });
+      if (changes.length) {
+        const now = new Date();
+        mongoUpdate.$push.notes = {
+          authorId: user.id,
+          authorName: user.name,
+          text: `Bill edited by ${user.name} on ${formatInTimezone(now, timezone)}: ${changes.join("; ")}`,
+          createdAt: now,
+        };
+      }
+    }
+    if (!Object.keys(mongoUpdate.$push).length) delete mongoUpdate.$push;
     return BillingRecord.findOneAndUpdate({ _id: id, tenantId }, mongoUpdate, { new: true });
   }
 
@@ -529,9 +660,7 @@ export async function updateBill(
     });
   } catch (err: any) {
     if (err.insufficientStock) {
-      throw AppError.conflict("Insufficient stock for one or more items", {
-        shortages: [{ drugId: err.drugId, available: err.available }],
-      });
+      throw insufficientStockError([{ drugId: err.drugId, name: err.drugName, batchNo: err.batchNo, required: err.required, available: err.available }]);
     }
     throw err;
   } finally {
@@ -585,16 +714,53 @@ export async function postPayment(tenantId: string, user: { id: string; name: st
   );
 }
 
-export async function unlockBill(tenantId: string, userName: string, id: string) {
+export async function unlockBill(tenantId: string, user: { id: string; name: string }, id: string) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
   if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
+  // Recorded as a note (not a formatted string) so it carries a real Date —
+  // author + full date/time are read off authorName/createdAt on display,
+  // rather than being baked into a date-only string.
   return BillingRecord.findOneAndUpdate(
     { _id: id, tenantId },
-    { $set: { isLocked: false }, $push: { notes: `\n[Unlocked by ${userName} on ${new Date().toLocaleDateString("en-IN")}]` } },
+    {
+      $set: { isLocked: false },
+      $push: { notes: { authorId: user.id, authorName: user.name, text: "Bill unlocked", createdAt: new Date() } },
+    },
     { new: true }
   );
+}
+
+// Adds a note to a bill. Any billing-accessible role may add one — notes are
+// visible to everyone but only editable by their own author (see updateBillNote).
+export async function addBillNote(tenantId: string, user: { id: string; name: string }, id: string, text: string) {
+  if (!text?.trim()) throw AppError.badRequest("Note text is required");
+
+  const bill = await BillingRecord.findOneAndUpdate(
+    { _id: id, tenantId },
+    { $push: { notes: { authorId: user.id, authorName: user.name, text: text.trim(), createdAt: new Date() } } },
+    { new: true }
+  );
+  if (!bill) throw AppError.notFound("Bill not found");
+  return bill;
+}
+
+// Edits an existing note — only the original author may edit their own note.
+export async function updateBillNote(tenantId: string, user: { id: string; name: string }, id: string, noteId: string, text: string) {
+  if (!text?.trim()) throw AppError.badRequest("Note text is required");
+
+  const bill = await BillingRecord.findOne({ _id: id, tenantId });
+  if (!bill) throw AppError.notFound("Bill not found");
+
+  const note = (bill.notes as any).id(noteId);
+  if (!note) throw AppError.notFound("Note not found");
+  if (note.authorId !== user.id) throw AppError.forbidden("You can only edit your own notes");
+
+  note.text = text.trim();
+  note.editedAt = new Date();
+  await bill.save();
+  return bill;
 }
 
 // Cancels a bill outright. Only allowed before any payment has been
@@ -693,6 +859,8 @@ export async function returnBillItems(
       category: billItem.category,
       drugId: billItem.drugId,
       batchNo: billItem.batchNo,
+      batchId: billItem.batchId,
+      expiryDate: billItem.expiryDate,
       quantity: qty,
       unitPrice: billItem.unitPrice,
       total: lineTotal,
@@ -745,7 +913,7 @@ export async function returnBillItems(
         payer: bill.payer,
         paymentMode: refundMode || "Cash",
         type: bill.type,
-        notes: reason.trim(),
+        notes: reason.trim() ? [{ authorId: user.id, authorName: user.name, text: reason.trim(), createdAt: new Date() }] : [],
         createdBy: user.name,
         createdById: user.id,
         isLocked: true,

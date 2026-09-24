@@ -1385,6 +1385,75 @@ function HospitalSection({ user }: { user: any }) {
   );
 }
 
+// ── OperationalSection ────────────────────────────────────────────────────────
+function OperationalSection({ user }: { user: any }) {
+  const [notifyEmail, setNotifyEmail] = useState(true);
+  const [notifySms,   setNotifySms]   = useState(false);
+  const [saving,       setSaving]     = useState(false);
+  const [msg,          setMsg]        = useState("");
+
+  useEffect(() => {
+    authApi.getClinicSettings().then((s: any) => {
+      if (s.operational) {
+        setNotifyEmail(s.operational.notifyEmail ?? true);
+        setNotifySms(s.operational.notifySms ?? false);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const saveSettings = async () => {
+    setSaving(true); setMsg("");
+    try {
+      await authApi.updateClinicSettings({ operational: { notifyEmail, notifySms } });
+      setMsg("Reminder preferences saved successfully.");
+    } catch (err: any) {
+      setMsg(err.message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Bell className="h-4 w-4" /> Patient Reminders
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground -mt-1">
+            Default channels used to remind patients about upcoming appointments. (Doctor working hours are set per-doctor under Departments &amp; Doctors.)
+          </p>
+
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-xs font-medium">Email Reminders</p>
+              <p className="text-xs text-muted-foreground">Send appointment reminders to patients by email by default.</p>
+            </div>
+            <Switch checked={notifyEmail} onCheckedChange={setNotifyEmail} />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-xs font-medium">SMS Reminders</p>
+              <p className="text-xs text-muted-foreground">Send appointment reminders to patients by SMS by default.</p>
+            </div>
+            <Switch checked={notifySms} onCheckedChange={setNotifySms} />
+          </div>
+
+          <Button size="sm" onClick={saveSettings} disabled={saving || user?.role !== "admin"}>
+            {saving ? "Saving..." : "Save Preferences"}
+          </Button>
+          {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+          {user?.role !== "admin" && (
+            <p className="text-xs text-muted-foreground">Only administrators can update reminder preferences.</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── ServiceRatesSection ───────────────────────────────────────────────────────
 const RATE_CATEGORIES = ["Lab", "Diagnosis", "Procedure", "Room", "Bed Charges", "Nursing", "Other"] as const;
 const RATE_UNITS = ["per test", "per visit", "per session", "per day", "per hour", "per procedure", "per admission", "per tablet", "per vial"] as const;
@@ -1586,6 +1655,7 @@ export default function SettingsPage() {
   const sections = [
     { id: "profile",     label: "Profile",              icon: User },
     ...(user?.role === "admin" ? [{ id: "hospital",    label: "Hospital",             icon: Building2 }] : []),
+    ...(user?.role === "admin" ? [{ id: "operational", label: "Patient Reminders",     icon: Bell }] : []),
     ...(user?.role === "admin" ? [{ id: "departments",  label: "Departments & Doctors", icon: Stethoscope  }] : []),
     ...(user?.role === "admin" ? [{ id: "staff",        label: "Staff Management",      icon: UserCheck    }] : []),
     ...(user?.role === "admin" ? [{ id: "servicerates", label: "Service Rates",         icon: IndianRupee  }] : []),
@@ -1761,6 +1831,9 @@ export default function SettingsPage() {
 
           {/* ── Hospital ─────────────────────────────────────── */}
           {active === "hospital" && user?.role === "admin" && <HospitalSection user={user} />}
+
+          {/* ── Patient Reminders ────────────────────────────── */}
+          {active === "operational" && user?.role === "admin" && <OperationalSection user={user} />}
 
           {/* ── Departments & Doctors ─────────────────────────── */}
           {active === "departments" && user?.role === "admin" && (

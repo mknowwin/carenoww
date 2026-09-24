@@ -59,6 +59,7 @@ interface DrugInventory {
   purchasePricePerUnit?: number;
   supplier?: string;
   hsnCode?: string;
+  combination?: string;
   isBatchTracked?: boolean;
   isActive?: boolean;
 }
@@ -120,7 +121,7 @@ const RX_SOURCE_COLORS: Record<string, string> = {
 
 function AddDrugForm({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ name: "", category: "", stock: "", unit: "Tab", reorderLevel: "", mrpPerUnit: "" });
+  const [form, setForm] = useState({ name: "", category: "", stock: "", unit: "Tab", reorderLevel: "", mrpPerUnit: "", combination: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -135,7 +136,7 @@ function AddDrugForm({ onDone }: { onDone: () => void }) {
     const status = stock === 0 ? "Critical" : stock <= reorderLevel ? "Low" : "OK";
     setBusy(true); setError("");
     try {
-      await pharmacyApi.inventory.create({ name: form.name.trim(), category: form.category.trim(), stock, unit: form.unit, reorderLevel, mrpPerUnit, status });
+      await pharmacyApi.inventory.create({ name: form.name.trim(), category: form.category.trim(), stock, unit: form.unit, reorderLevel, mrpPerUnit, combination: form.combination.trim(), status });
       qc.invalidateQueries({ queryKey: ["pharmacy-inventory"] });
       onDone();
     } catch (err: any) {
@@ -168,6 +169,16 @@ function AddDrugForm({ onDone }: { onDone: () => void }) {
                 <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>{DRUG_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
               </Select>
+            </div>
+            <div className="col-span-2 sm:col-span-3 space-y-1">
+              <Label className="text-xs">Drug Combination (optional)</Label>
+              <Input
+                className="h-8 text-sm"
+                placeholder="e.g. Paracetamol 500mg + Caffeine 65mg"
+                value={form.combination}
+                onChange={set("combination")}
+              />
+              <p className="text-[11px] text-muted-foreground">If set, this is printed on the pharmacy bill and prescription.</p>
             </div>
           </div>
           <div className="flex gap-2 pt-1">
@@ -626,6 +637,7 @@ export default function PharmacyPage() {
                       {drug.isActive === false && <Badge variant="outline" className="text-xs text-muted-foreground">Deactivated</Badge>}
                     </div>
                     {drug.supplier && <div className="text-xs text-muted-foreground mt-0.5">{drug.supplier}</div>}
+                    {drug.combination && <div className="text-xs text-teal-700 mt-0.5 italic">{drug.combination}</div>}
                   </div>
 
                   <div className="w-40 shrink-0">

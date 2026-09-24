@@ -1,6 +1,7 @@
 import { Switch, Route, Redirect } from "wouter";
 import { useAuth } from "./contexts/AuthContext";
 import { useSuperAdmin } from "./contexts/SuperAdminContext";
+import { MODULE_KEYS, type ModuleKey } from "./lib/modules";
 import AdminLayout from "./components/layout";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import LoginPage from "./pages/login";
@@ -36,10 +37,16 @@ function LoadingScreen() {
   );
 }
 
-function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+function ProtectedRoute({ component: Component, module }: { component: React.ComponentType; module?: ModuleKey }) {
   const { user, isLoading } = useAuth();
   if (isLoading) return <LoadingScreen />;
   if (!user) return <Redirect to="/login" />;
+  // Fall back to "all modules enabled" for sessions stored before this field existed — fail open, not closed.
+  const enabledModules = user.modules ?? [...MODULE_KEYS];
+  // Redirect to /settings (never module- or role-gated) rather than "/" — "/" is
+  // admin-only and non-admins bounce off it to their own role's default route,
+  // which could itself be a disabled module and loop.
+  if (module && !enabledModules.includes(module)) return <Redirect to="/settings" />;
   return (
     <AdminLayout>
       <AppErrorBoundary>
@@ -111,16 +118,16 @@ export default function App() {
 
       {/* ── HMS protected routes ───────────────────── */}
       <Route path="/"              component={() => <AdminRoute component={DashboardPage} />} />
-      <Route path="/patients"      component={() => <ProtectedRoute component={PatientsPage} />} />
-      <Route path="/appointments"  component={() => <ProtectedRoute component={AppointmentsPage} />} />
+      <Route path="/patients"      component={() => <ProtectedRoute component={PatientsPage} module="patients" />} />
+      <Route path="/appointments"  component={() => <ProtectedRoute component={AppointmentsPage} module="appointments" />} />
       <Route path="/reception"     component={() => <ProtectedRoute component={ReceptionPage} />} />
       <Route path="/doctor-queue"  component={() => <Redirect to="/opd" />} />
-      <Route path="/opd"           component={() => <ProtectedRoute component={OPDPage} />} />
-      <Route path="/ipd"           component={() => <ProtectedRoute component={IPDPage} />} />
-      <Route path="/pharmacy"      component={() => <ProtectedRoute component={PharmacyPage} />} />
-      <Route path="/lab"           component={() => <ProtectedRoute component={LabPage} />} />
-      <Route path="/billing"       component={() => <ProtectedRoute component={BillingPage} />} />
-      <Route path="/analytics"     component={() => <ProtectedRoute component={AnalyticsPage} />} />
+      <Route path="/opd"           component={() => <ProtectedRoute component={OPDPage} module="opd" />} />
+      <Route path="/ipd"           component={() => <ProtectedRoute component={IPDPage} module="ipd" />} />
+      <Route path="/pharmacy"      component={() => <ProtectedRoute component={PharmacyPage} module="pharmacy" />} />
+      <Route path="/lab"           component={() => <ProtectedRoute component={LabPage} module="lab" />} />
+      <Route path="/billing"       component={() => <ProtectedRoute component={BillingPage} module="billing" />} />
+      <Route path="/analytics"     component={() => <ProtectedRoute component={AnalyticsPage} module="analytics" />} />
       <Route path="/statutory-reports" component={() => <ProtectedRoute component={StatutoryReportsPage} />} />
       <Route path="/settings"      component={() => <ProtectedRoute component={SettingsPage} />} />
       <Route component={NotFound} />

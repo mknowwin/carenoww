@@ -79,9 +79,21 @@ export async function updateOrder(tenantId: string, userName: string, id: string
   const before = await LabOrder.findOne({ _id: id, tenantId });
   if (!before) throw AppError.notFound("Lab order not found");
 
+  // Correcting an already-finalized report requires a documented reason
+  const isResultCorrection = before.status === "Completed" && (update.result !== undefined || update.parameters !== undefined);
+  const editNote = typeof body.editNote === "string" ? body.editNote.trim() : "";
+  if (isResultCorrection && !editNote) {
+    throw AppError.badRequest("A note explaining the correction is required when editing a completed lab result");
+  }
+
+  const mongoUpdate: any = { $set: update };
+  if (isResultCorrection) {
+    mongoUpdate.$push = { editHistory: { note: editNote, editedBy: userName, editedAt: new Date() } };
+  }
+
   const order = await LabOrder.findOneAndUpdate(
     { _id: id, tenantId },
-    { $set: update },
+    mongoUpdate,
     { new: true }
   );
   if (!order) throw AppError.notFound("Lab order not found");

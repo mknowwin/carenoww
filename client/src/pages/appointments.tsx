@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearch as useWouterSearch, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,11 +37,25 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
 export default function AppointmentsPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
+  const wouterSearch = useWouterSearch();
   const isAdmin = user?.role === "admin";
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [modalOpen, setModalOpen] = useState(false);
   const [editAppt, setEditAppt] = useState<any>(null);
+
+  // Deep-link from Patients page: ?patientId=...&patientName=... auto-opens the booking modal prefilled.
+  const dlParams = new URLSearchParams(wouterSearch);
+  const dlPatientId = dlParams.get("patientId");
+
+  useEffect(() => {
+    if (dlPatientId) {
+      setEditAppt(null);
+      setModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dlPatientId]);
   const [updating, setUpdating] = useState<string | null>(null);
   const [vitalsApptId, setVitalsApptId] = useState<string | null>(null);
   const [vitalsApptName, setVitalsApptName] = useState("");
@@ -398,10 +413,25 @@ export default function AppointmentsPage() {
       </div>
 
       <AppointmentModal
-        key={editAppt?._id ?? "new"}
+        key={editAppt?._id ?? dlPatientId ?? "new"}
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditAppt(null); }}
+        onClose={() => {
+          setModalOpen(false);
+          setEditAppt(null);
+          if (dlPatientId) setLocation("/appointments", { replace: true });
+        }}
         existing={editAppt}
+        initialPatient={
+          !editAppt && dlPatientId
+            ? {
+                uhid: dlPatientId,
+                name: dlParams.get("patientName") ?? undefined,
+                age: dlParams.get("patientAge") ?? undefined,
+                gender: dlParams.get("patientGender") ?? undefined,
+                phone: dlParams.get("patientPhone") ?? undefined,
+              }
+            : undefined
+        }
       />
 
       {/* Vitals capture dialog */}

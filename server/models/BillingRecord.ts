@@ -14,8 +14,13 @@ export interface IBillItem {
   igst?: number;
   taxableAmount?: number;
   batchNo?: string;
+  // DrugBatch _id the units were actually drawn from. batchNo alone isn't
+  // unique (the same batch number can arrive on several GRNs), so returns and
+  // cancellations use this to restock the exact batch. Absent on older bills.
+  batchId?: string;
   expiryDate?: Date;
   drugId?: string;
+  combination?: string;
 }
 
 export interface IPaymentEntry {
@@ -28,6 +33,15 @@ export interface IPaymentEntry {
   receivedById?: string;
   notes?: string;
   paidAt: Date;
+}
+
+export interface IBillNote {
+  _id?: mongoose.Types.ObjectId;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: Date;
+  editedAt?: Date;
 }
 
 export interface IAdvanceEntry {
@@ -77,7 +91,7 @@ export interface IBillingRecord extends Document {
   payer: string;
   paymentMode: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Adjustment";
   type: "OPD" | "IPD" | "Emergency" | "Lab" | "Pharmacy";
-  notes: string;
+  notes: IBillNote[];
   createdBy: string;
   createdById: string;
   isLocked: boolean;
@@ -112,8 +126,10 @@ const BillItemSchema = new Schema<IBillItem>({
   igst:         { type: Number, default: 0 },
   taxableAmount:{ type: Number, default: 0 },
   batchNo:      { type: String },
+  batchId:      { type: String },
   expiryDate:   { type: Date },
   drugId:       { type: String },
+  combination:  { type: String },
 }, { _id: true });
 
 const PaymentEntrySchema = new Schema<IPaymentEntry>({
@@ -153,6 +169,14 @@ const InsuranceClaimSchema = new Schema<IInsuranceClaim>({
   rejectionReason: { type: String, default: "" },
 }, { _id: false });
 
+const BillNoteSchema = new Schema<IBillNote>({
+  authorId:   { type: String, required: true },
+  authorName: { type: String, required: true },
+  text:       { type: String, required: true },
+  createdAt:  { type: Date, default: Date.now },
+  editedAt:   { type: Date },
+}, { _id: true });
+
 const BillingRecordSchema = new Schema<IBillingRecord>(
   {
     tenantId:       { type: Schema.Types.ObjectId, ref: "Tenant", required: true, index: true },
@@ -176,7 +200,7 @@ const BillingRecordSchema = new Schema<IBillingRecord>(
     payer:          { type: String, default: "Self" },
     paymentMode:    { type: String, enum: ["Cash", "Card", "UPI", "Insurance", "Online", "Adjustment"], default: "Cash" },
     type:           { type: String, enum: ["OPD", "IPD", "Emergency", "Lab", "Pharmacy"], default: "OPD" },
-    notes:          { type: String, default: "" },
+    notes:          { type: [BillNoteSchema], default: [] },
     createdBy:      { type: String, default: "" },
     createdById:    { type: String, default: "", index: true },
     isLocked:       { type: Boolean, default: false },

@@ -253,6 +253,7 @@ export interface DrugInventory {
   hsnCode?: string;
   mrpPerUnit?: number;
   purchasePricePerUnit?: number;
+  combination?: string;
   isBatchTracked?: boolean;
   isActive?: boolean;
 }
@@ -374,6 +375,15 @@ export interface InsuranceClaim {
   rejectionReason?: string;
 }
 
+export interface BillNote {
+  _id?: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+  editedAt?: string;
+}
+
 export interface BillingRecord {
   _id?: string;
   billId?: string;
@@ -396,7 +406,7 @@ export interface BillingRecord {
   payer: string;
   paymentMode?: "Cash" | "Card" | "UPI" | "Insurance" | "Online" | "Adjustment";
   type: string;
-  notes?: string;
+  notes?: BillNote[];
   createdBy?: string;
   createdById?: string;
   isLocked?: boolean;
