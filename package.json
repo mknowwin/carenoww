@@ -16,6 +16,7 @@
     "migrate:uhid": "dotenv -- tsx server/migrate-uhid-counters.ts",
     "migrate:drug-isactive": "dotenv -- tsx server/migrate-drug-isactive.ts",
     "migrate:masters": "dotenv -- tsx server/migrate-backfill-masters.ts",
+    "migrate:referral-fields": "dotenv -- tsx server/migrate-referral-fields.ts",
     "migrate:drugbatch-index": "dotenv -- tsx server/migrate-drugbatch-index.ts",
     "migrate:receivedby-id": "dotenv -- tsx server/migrate-receivedby-id.ts",
     "migrate:bill-notes": "dotenv -- tsx server/migrate-bill-notes.ts",
