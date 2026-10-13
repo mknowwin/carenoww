@@ -36,10 +36,10 @@ router.get("/dept-volume", asyncHandler(async (req: AuthRequest, res) => {
   res.json({ success: true, data });
 }));
 
-// GET /api/dashboard/referral-stats?month=YYYY-MM — referrals per referring doctor for a given month
+// GET /api/dashboard/referral-stats?month=YYYY-MM&by=doctor|vhn — referrals per referring doctor / VHN for a month
 router.get("/referral-stats", asyncHandler(async (req: AuthRequest, res) => {
-  const { month } = req.query as Record<string, string>;
-  const data = await dashboardService.getReferralStats(req.user!.tenantId, req.user!.timezone, month);
+  const { month, by } = req.query as Record<string, string>;
+  const data = await dashboardService.getReferralStats(req.user!.tenantId, req.user!.timezone, month, by === "vhn" ? "vhn" : "doctor");
   res.json({ success: true, data });
 }));
 

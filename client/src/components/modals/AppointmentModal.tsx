@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { ReferralMasterPicker } from "@/components/ReferralMasterPicker";
+import type { ReferralMasterKind } from "@/lib/api";
 import { appointments as apptApi, users as usersApi, patients as patientsApi, referralDoctors as refDocApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
@@ -501,7 +503,7 @@ export default function AppointmentModal({ open, onClose, existing, initialPatie
                   const v = e.target.value;
                   set("referralSource", v);
                   if (v !== "Doctor") { set("referringDoctor", ""); clearRefDoc(); }
-                  if (v === "Doctor" || v === "Self" || v === "") set("referralDetail", "");
+                  set("referralDetail", "");
                 }}
                 className="w-full h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
@@ -511,13 +513,13 @@ export default function AppointmentModal({ open, onClose, existing, initialPatie
               </select>
             </F>
             <F label="Area / Locality (optional)">
-              <SI value={form.area} onChange={(v) => set("area", v)} placeholder="e.g. Anna Nagar" />
+              <ReferralMasterPicker kind="Area" value={form.area} onChange={(v) => set("area", v)} placeholder="Search or add area..." />
             </F>
           </div>
 
           {form.referralSource && !["Doctor", "Self", ""].includes(form.referralSource) && (
             <F label={`${form.referralSource} Name (optional)`}>
-              <SI value={form.referralDetail} onChange={(v) => set("referralDetail", v)} placeholder={`Name of the referring ${form.referralSource.toLowerCase()}`} />
+              <ReferralMasterPicker key={form.referralSource} kind={form.referralSource as ReferralMasterKind} value={form.referralDetail} onChange={(v) => set("referralDetail", v)} placeholder={`Search or add ${form.referralSource} name...`} />
             </F>
           )}
 

@@ -361,9 +361,9 @@ export default function AppointmentsPage() {
                 {(!referralStats || referralStats.length === 0) ? (
                   <p className="text-xs text-muted-foreground text-center py-2">No referrals recorded.</p>
                 ) : (
-                  referralStats.map((r: { referringDoctor: string; count: number }) => (
-                    <div key={r.referringDoctor} className="flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground truncate flex-1 mr-2">{r.referringDoctor}</span>
+                  referralStats.map((r: { name: string; count: number }) => (
+                    <div key={r.name} className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground truncate flex-1 mr-2">{r.name}</span>
                       <Badge className="text-xs bg-violet-100 text-violet-700 shrink-0">{r.count}</Badge>
                     </div>
                   ))

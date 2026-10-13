@@ -192,7 +192,8 @@ export async function getDeptVolume(tenantId: string, tz: string) {
   ]);
 }
 
-export async function getReferralStats(tenantId: string, tz: string, month?: string) {
+// by = "doctor" → per referring doctor; "vhn" → per VHN name (referralDetail).
+export async function getReferralStats(tenantId: string, tz: string, month?: string, by: "doctor" | "vhn" = "doctor") {
   // Parse ?month=YYYY-MM, default to current month
   let year: number, mon: number;
   if (month && /^\d{4}-\d{2}$/.test(month)) {
@@ -205,19 +206,20 @@ export async function getReferralStats(tenantId: string, tz: string, month?: str
   const nextMonthStr     = mon === 12 ? `${year + 1}-01-01` : `${year}-${pad(mon + 1)}-01`;
   const startOfNextMonth = startOfDayUtc(nextMonthStr, tz);
 
-  const appts = await Appointment.find({
-    tenantId,
-    referringDoctor: { $exists: true, $ne: "" },
-    createdAt: { $gte: startOfMonth, $lt: startOfNextMonth },
-  }).select("referringDoctor");
-
-  const grouped: Record<string, number> = {};
-  for (const a of appts) {
-    const dr = (a as any).referringDoctor as string;
-    grouped[dr] = (grouped[dr] || 0) + 1;
-  }
-
-  return Object.entries(grouped)
-    .map(([referringDoctor, count]) => ({ referringDoctor, count }))
-    .sort((a, b) => b.count - a.count);
+  const field = by === "vhn" ? "referralDetail" : "referringDoctor";
+  return Appointment.aggregate([
+    {
+      $match: {
+        tenantId: new mongoose.Types.ObjectId(tenantId),
+        [field]: { $nin: [null, ""] },
+        ...(by === "vhn" ? { referralSource: "VHN" } : {}),
+        createdAt: { $gte: startOfMonth, $lt: startOfNextMonth },
+      },
+    },
+    { $project: { name: { $trim: { input: `$${field}` } } } },
+    { $match: { name: { $ne: "" } } },
+    { $group: { _id: { $toLower: "$name" }, name: { $first: "$name" }, count: { $sum: 1 } } },
+    { $project: { _id: 0, name: 1, count: 1 } },
+    { $sort: { count: -1, name: 1 } },
+  ]);
 }

@@ -60,6 +60,20 @@ function sumByKey<T extends Record<string, any>>(rows: T[], keyField: keyof T, s
   return Array.from(map.values());
 }
 
+// Like sumByKey for a single count, but treats names differing only in case or
+// surrounding spaces ("Anna Nagar" / " anna nagar") as the same row.
+function sumCountByName<K extends string>(rows: ({ [k in K]: string } & { count: number })[], keyField: K) {
+  const map = new Map<string, { [k in K]: string } & { count: number }>();
+  for (const row of rows) {
+    const name = (row[keyField] ?? "").trim();
+    const k = name.toLowerCase();
+    const existing = map.get(k);
+    if (existing) existing.count += row.count;
+    else map.set(k, { ...row, [keyField]: name });
+  }
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
+}
+
 // ── settled/live split ──────────────────────────────────────────────────────
 // Splits a requested [fromStr,toStr] range into a "settled" portion (strictly
 // before today, safe to read from `status:"final"` rollups) and whether the
@@ -345,8 +359,10 @@ export async function getReferralsBySource(tenantId: string, tz: string, from?: 
 async function liveReferralsByArea(tenantId: string, fromStr: string, toStr: string) {
   return Appointment.aggregate([
     { $match: { tenantId: oid(tenantId), date: { $gte: fromStr, $lte: toStr }, area: { $nin: [null, ""] } } },
-    { $group: { _id: "$area", count: { $sum: 1 } } },
-    { $project: { _id: 0, area: "$_id", count: 1 } },
+    { $project: { area: { $trim: { input: "$area" } } } },
+    { $match: { area: { $ne: "" } } },
+    { $group: { _id: { $toLower: "$area" }, area: { $first: "$area" }, count: { $sum: 1 } } },
+    { $project: { _id: 0, area: 1, count: 1 } },
     { $sort: { count: -1 } },
   ]);
 }
@@ -361,7 +377,7 @@ export async function getReferralsByArea(tenantId: string, tz: string, from?: st
 
   const settledRows = rollups.flatMap((r) => r.appointments.byReferralArea.map((x) => ({ area: x.area, count: x.count })));
   const tail = split.hasLiveTail ? await liveReferralsByArea(tenantId, split.today, split.today) : [];
-  return sumByKey([...settledRows, ...tail], "area", ["count"]).sort((a, b) => b.count - a.count);
+  return sumCountByName([...settledRows, ...tail], "area");
 }
 
 // ══ #14 Return bill (Credit Note) summary — row-level, always live ═══════════

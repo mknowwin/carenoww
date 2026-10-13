@@ -154,7 +154,8 @@ export const dashboard = {
   aiAlerts:     () => get<any>("/dashboard/ai-alerts"),
   revenueTrend: () => get<any>("/dashboard/revenue-trend"),
   deptVolume:   () => get<any>("/dashboard/dept-volume"),
-  referralStats:(month?: string) => get<any[]>(`/dashboard/referral-stats${month ? `?month=${month}` : ""}`),
+  referralStats:(month?: string, by: "doctor" | "vhn" = "doctor") =>
+    get<any[]>(`/dashboard/referral-stats?${new URLSearchParams({ ...(month ? { month } : {}), by }).toString()}`),
 };
 
 // ── Insights ──────────────────────────────────────────────────────────────────
@@ -404,6 +405,14 @@ export const referralDoctors = {
     post<any>("/referral-doctors", data),
 };
 
+// ── Referral Masters (Area, VHN, Medical Shop, Lab, Other) ────────────────────
+export type ReferralMasterKind = "Area" | "VHN" | "Medical Shop" | "Lab" | "Other";
+export const referralMasters = {
+  search: (kind: ReferralMasterKind, q: string) =>
+    get<any[]>(`/referral-masters?${new URLSearchParams({ kind, search: q }).toString()}`),
+  create: (kind: ReferralMasterKind, name: string) => post<any>("/referral-masters", { kind, name }),
+};
+
 // ── Suppliers ─────────────────────────────────────────────────────────────────
 export const suppliers = {
   search: (q: string) => get<any[]>(`/suppliers?search=${encodeURIComponent(q)}`),
@@ -416,4 +425,4 @@ export const publicApi = {
   display: (tenantId: string) => get<any>(`/public/display?tenantId=${encodeURIComponent(tenantId)}`),
 };
 
-export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, prescriptions, publicApi, referralDoctors, suppliers };
+export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, prescriptions, publicApi, referralDoctors, referralMasters, suppliers };

@@ -1530,10 +1530,12 @@ export function printExpiryReport(batches: any[], params: { expiryWithin: string
 
 // ── printReferralStats ────────────────────────────────────────────────────────
 export function printReferralStats(
-  rows: { referringDoctor: string; count: number }[],
+  rows: { name: string; count: number }[],
   month: string,
+  by: "doctor" | "vhn" = "doctor",
   clinicOverride?: ClinicInfo
 ) {
+  const heading = by === "vhn" ? "VHN" : "Referring Doctor";
   const clinic = clinicOverride ?? getStoredClinic();
   const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
   const total = rows.reduce((s, r) => s + r.count, 0);
@@ -1541,7 +1543,7 @@ export function printReferralStats(
   const rowHtml = rows.map((r, i) => `
     <tr>
       <td class="tc">${i + 1}</td>
-      <td>${r.referringDoctor || "Walk-in / Direct"}</td>
+      <td>${r.name}</td>
       <td class="tr">${r.count}</td>
     </tr>`).join("");
 
@@ -1550,7 +1552,7 @@ export function printReferralStats(
 
     <div class="doc-row">
       <div>
-        <div class="doc-title">REFERRAL STATISTICS</div>
+        <div class="doc-title">${by === "vhn" ? "VHN" : "DOCTOR"} REFERRAL STATISTICS</div>
         <div style="font-size:12px;color:#555;margin-top:4px;">Month: ${month}</div>
       </div>
       <div class="doc-id">
@@ -1562,7 +1564,7 @@ export function printReferralStats(
       <thead>
         <tr>
           <th class="tc" style="width:36px;">#</th>
-          <th>Referring Doctor</th>
+          <th>${heading}</th>
           <th class="tr" style="width:110px;">Appointments</th>
         </tr>
       </thead>
