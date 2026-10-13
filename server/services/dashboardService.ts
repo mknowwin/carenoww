@@ -6,6 +6,7 @@ import IPDAdmission from "../models/IPDAdmission.js";
 import DrugInventory from "../models/DrugInventory.js";
 import LabOrder from "../models/LabOrder.js";
 import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
+import { canonicalNames } from "./referralMasterService.js";
 
 const WARD_CAPACITY: Record<string, number> = {
   "General Ward": 80,
@@ -192,7 +193,25 @@ export async function getDeptVolume(tenantId: string, tz: string) {
   ]);
 }
 
-export async function getReferralStats(tenantId: string, tz: string, month?: string) {
+// Name-wise referral report per type. Each type maps to the appointment field
+// holding the name, the referralSource it belongs to, and its master list.
+const REFERRAL_STATS_TYPES = {
+  "doctor":       { field: "referringDoctor", source: "Doctor",       master: "Doctor" },
+  "vhn":          { field: "referralDetail",  source: "VHN",          master: "VHN" },
+  "area":         { field: "area",            source: null,           master: "Area" },
+  "medical-shop": { field: "referralDetail",  source: "Medical Shop", master: "Medical Shop" },
+  "lab":          { field: "referralDetail",  source: "Lab",          master: "Lab" },
+  "other":        { field: "referralDetail",  source: "Other",        master: "Other" },
+} as const;
+export type ReferralStatsBy = keyof typeof REFERRAL_STATS_TYPES;
+export const REFERRAL_STATS_BY = Object.keys(REFERRAL_STATS_TYPES) as ReferralStatsBy[];
+
+export const UNSPECIFIED_REFERRER = "(Unspecified)";
+
+// Counts by visit `date` (not booking time) and skips cancelled appointments, so
+// totals line up with the Insights referral reports. Names differing only in case
+// or spacing merge into one row, labelled with the master spelling when there is one.
+export async function getReferralStats(tenantId: string, tz: string, month?: string, by: ReferralStatsBy = "doctor") {
   // Parse ?month=YYYY-MM, default to current month
   let year: number, mon: number;
   if (month && /^\d{4}-\d{2}$/.test(month)) {
@@ -201,23 +220,48 @@ export async function getReferralStats(tenantId: string, tz: string, month?: str
     [year, mon] = todayInTz(tz).split("-").map(Number);
   }
   const pad = (n: number) => String(n).padStart(2, "0");
-  const startOfMonth     = startOfDayUtc(`${year}-${pad(mon)}-01`, tz);
-  const nextMonthStr     = mon === 12 ? `${year + 1}-01-01` : `${year}-${pad(mon + 1)}-01`;
-  const startOfNextMonth = startOfDayUtc(nextMonthStr, tz);
+  const monthStart = `${year}-${pad(mon)}-01`;
+  const nextMonth  = mon === 12 ? `${year + 1}-01-01` : `${year}-${pad(mon + 1)}-01`;
 
-  const appts = await Appointment.find({
-    tenantId,
-    referringDoctor: { $exists: true, $ne: "" },
-    createdAt: { $gte: startOfMonth, $lt: startOfNextMonth },
-  }).select("referringDoctor");
+  const { field, source, master } = REFERRAL_STATS_TYPES[by];
+  // Doctor referrals booked before the Referral Source dropdown have no source set.
+  const sourceMatch = by === "doctor"
+    ? { $or: [{ referralSource: "Doctor" }, { referringDoctor: { $nin: [null, ""] } }] }
+    : source ? { referralSource: source } : { [field]: { $nin: [null, ""] } };
 
-  const grouped: Record<string, number> = {};
-  for (const a of appts) {
-    const dr = (a as any).referringDoctor as string;
-    grouped[dr] = (grouped[dr] || 0) + 1;
+  const groups: { names: string[]; count: number }[] = await Appointment.aggregate([
+    {
+      $match: {
+        tenantId: new mongoose.Types.ObjectId(tenantId),
+        date: { $gte: monthStart, $lt: nextMonth },
+        status: { $ne: "Cancelled" },
+        ...sourceMatch,
+      },
+    },
+    { $project: { name: { $trim: { input: { $ifNull: [`$${field}`, ""] } } } } },
+    // Area has no "unnamed" bucket — no area means it isn't an area referral.
+    ...(source ? [] : [{ $match: { name: { $ne: "" } } }]),
+    { $group: { _id: { $toLower: "$name" }, names: { $push: "$name" }, count: { $sum: 1 } } },
+    { $project: { _id: 0, names: 1, count: 1 } },
+  ]);
+
+  const canonical = await canonicalNames(tenantId, master);
+  return groups
+    .map(({ names, count }) => {
+      const typed = mostCommon(names);
+      const name = typed === "" ? UNSPECIFIED_REFERRER : canonical.get(typed.toLowerCase()) ?? typed;
+      return { name, count };
+    })
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+function mostCommon(values: string[]): string {
+  const tally = new Map<string, number>();
+  let best = values[0] ?? "", bestN = 0;
+  for (const v of values) {
+    const n = (tally.get(v) ?? 0) + 1;
+    tally.set(v, n);
+    if (n > bestN) { best = v; bestN = n; }
   }
-
-  return Object.entries(grouped)
-    .map(([referringDoctor, count]) => ({ referringDoctor, count }))
-    .sort((a, b) => b.count - a.count);
+  return best;
 }

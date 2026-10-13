@@ -5,6 +5,7 @@ import BillingRecord from "../models/BillingRecord.js";
 import TenantDailyRollup, { ITenantDailyRollup } from "../models/TenantDailyRollup.js";
 import TenantFilterCache from "../models/TenantFilterCache.js";
 import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
+import { canonicalNames } from "./referralMasterService.js";
 
 const oid = (tenantId: string) => new mongoose.Types.ObjectId(tenantId);
 
@@ -58,6 +59,20 @@ function sumByKey<T extends Record<string, any>>(rows: T[], keyField: keyof T, s
     }
   }
   return Array.from(map.values());
+}
+
+// Like sumByKey for a single count, but treats names differing only in case or
+// surrounding spaces ("Anna Nagar" / " anna nagar") as the same row.
+function sumCountByName<K extends string>(rows: ({ [k in K]: string } & { count: number })[], keyField: K) {
+  const map = new Map<string, { [k in K]: string } & { count: number }>();
+  for (const row of rows) {
+    const name = (row[keyField] ?? "").trim();
+    const k = name.toLowerCase();
+    const existing = map.get(k);
+    if (existing) existing.count += row.count;
+    else map.set(k, { ...row, [keyField]: name });
+  }
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
 }
 
 // ── settled/live split ──────────────────────────────────────────────────────
@@ -320,7 +335,7 @@ export async function getDailyBillsCount(tenantId: string, tz: string, date?: st
 
 async function liveReferralsBySource(tenantId: string, fromStr: string, toStr: string) {
   return Appointment.aggregate([
-    { $match: { tenantId: oid(tenantId), date: { $gte: fromStr, $lte: toStr }, referralSource: { $nin: [null, ""] } } },
+    { $match: { tenantId: oid(tenantId), date: { $gte: fromStr, $lte: toStr }, status: { $ne: "Cancelled" }, referralSource: { $nin: [null, ""] } } },
     { $group: { _id: "$referralSource", count: { $sum: 1 } } },
     { $project: { _id: 0, referralSource: "$_id", count: 1 } },
     { $sort: { count: -1 } },
@@ -344,15 +359,26 @@ export async function getReferralsBySource(tenantId: string, tz: string, from?: 
 
 async function liveReferralsByArea(tenantId: string, fromStr: string, toStr: string) {
   return Appointment.aggregate([
-    { $match: { tenantId: oid(tenantId), date: { $gte: fromStr, $lte: toStr }, area: { $nin: [null, ""] } } },
-    { $group: { _id: "$area", count: { $sum: 1 } } },
-    { $project: { _id: 0, area: "$_id", count: 1 } },
+    { $match: { tenantId: oid(tenantId), date: { $gte: fromStr, $lte: toStr }, status: { $ne: "Cancelled" }, area: { $nin: [null, ""] } } },
+    { $project: { area: { $trim: { input: "$area" } } } },
+    { $match: { area: { $ne: "" } } },
+    { $group: { _id: { $toLower: "$area" }, area: { $first: "$area" }, count: { $sum: 1 } } },
+    { $project: { _id: 0, area: 1, count: 1 } },
     { $sort: { count: -1 } },
   ]);
 }
 
 export async function getReferralsByArea(tenantId: string, tz: string, from?: string, to?: string) {
   const { fromStr, toStr } = resolveDateStrRange(tz, from, to);
+  const [rows, canonical] = await Promise.all([
+    referralsByAreaRaw(tenantId, tz, fromStr, toStr),
+    canonicalNames(tenantId, "Area"),
+  ]);
+  // Rollups keep the spelling as typed; label each row with the Area master's spelling.
+  return sumCountByName(rows, "area").map((r) => ({ ...r, area: canonical.get(r.area.toLowerCase()) ?? r.area }));
+}
+
+async function referralsByAreaRaw(tenantId: string, tz: string, fromStr: string, toStr: string) {
   const split = splitSettledRange(tz, fromStr, toStr);
   if (!split.hasSettled) return liveReferralsByArea(tenantId, fromStr, toStr);
 
@@ -361,7 +387,7 @@ export async function getReferralsByArea(tenantId: string, tz: string, from?: st
 
   const settledRows = rollups.flatMap((r) => r.appointments.byReferralArea.map((x) => ({ area: x.area, count: x.count })));
   const tail = split.hasLiveTail ? await liveReferralsByArea(tenantId, split.today, split.today) : [];
-  return sumByKey([...settledRows, ...tail], "area", ["count"]).sort((a, b) => b.count - a.count);
+  return [...settledRows, ...tail];
 }
 
 // ══ #14 Return bill (Credit Note) summary — row-level, always live ═══════════
