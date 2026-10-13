@@ -147,6 +147,15 @@ export const superadmin = {
     post<{ restoredCollections: number; restoredDocuments: number }>("/superadmin/backup/restore", { fileData }),
 };
 
+// Name-wise referral report types for /dashboard/referral-stats, with display labels.
+export const REFERRAL_STATS_TYPES = [
+  ["doctor", "Doctor"], ["vhn", "VHN"], ["area", "Area"],
+  ["medical-shop", "Medical Shop"], ["lab", "Lab"], ["other", "Other"],
+] as const;
+export type ReferralStatsBy = typeof REFERRAL_STATS_TYPES[number][0];
+export const referralStatsLabel = (by: ReferralStatsBy) =>
+  REFERRAL_STATS_TYPES.find(([id]) => id === by)?.[1] ?? "Doctor";
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export const dashboard = {
   metrics:      () => get<any>("/dashboard/metrics"),
@@ -154,7 +163,7 @@ export const dashboard = {
   aiAlerts:     () => get<any>("/dashboard/ai-alerts"),
   revenueTrend: () => get<any>("/dashboard/revenue-trend"),
   deptVolume:   () => get<any>("/dashboard/dept-volume"),
-  referralStats:(month?: string, by: "doctor" | "vhn" = "doctor") =>
+  referralStats:(month?: string, by: ReferralStatsBy = "doctor") =>
     get<any[]>(`/dashboard/referral-stats?${new URLSearchParams({ ...(month ? { month } : {}), by }).toString()}`),
 };
 

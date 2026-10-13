@@ -1,6 +1,7 @@
 // ── Print utilities — opens a formatted page in a new window and auto-prints ──
 import { LAB_TEST_MASTER } from "./labTestMaster";
 import { toast } from "@/hooks/use-toast";
+import { referralStatsLabel, type ReferralStatsBy } from "@/lib/api";
 
 export type InvoiceStyle = "classic" | "modern" | "minimal" | "thermal" | "compact";
 
@@ -1532,10 +1533,11 @@ export function printExpiryReport(batches: any[], params: { expiryWithin: string
 export function printReferralStats(
   rows: { name: string; count: number }[],
   month: string,
-  by: "doctor" | "vhn" = "doctor",
+  by: ReferralStatsBy = "doctor",
   clinicOverride?: ClinicInfo
 ) {
-  const heading = by === "vhn" ? "VHN" : "Referring Doctor";
+  const label = referralStatsLabel(by);
+  const heading = by === "doctor" ? "Referring Doctor" : label;
   const clinic = clinicOverride ?? getStoredClinic();
   const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
   const total = rows.reduce((s, r) => s + r.count, 0);
@@ -1552,8 +1554,8 @@ export function printReferralStats(
 
     <div class="doc-row">
       <div>
-        <div class="doc-title">${by === "vhn" ? "VHN" : "DOCTOR"} REFERRAL STATISTICS</div>
-        <div style="font-size:12px;color:#555;margin-top:4px;">Month: ${month}</div>
+        <div class="doc-title">${label.toUpperCase()} REFERRAL STATISTICS</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Month: ${month} (by visit date, cancelled excluded)</div>
       </div>
       <div class="doc-id">
         <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>

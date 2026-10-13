@@ -13,7 +13,7 @@ import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
-import { dashboard as dashApi, appointments as apptApi, patients as patientsApi } from "@/lib/api";
+import { dashboard as dashApi, appointments as apptApi, patients as patientsApi, REFERRAL_STATS_TYPES, referralStatsLabel, type ReferralStatsBy } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatCurrency, todayInTz, currentMonthInTz } from "@/lib/utils";
 import { printReferralStats } from "@/lib/print";
@@ -40,7 +40,7 @@ export default function DashboardPage() {
   const { data: apptData,     isLoading: apptLoading     } = useQuery({ queryKey: ["appointments"],        queryFn: () => apptApi.list({ date: todayInTz(tz) }), retry: false });
   const { data: highRiskData, isLoading: highRiskLoading } = useQuery({ queryKey: ["patients-highrisk"],   queryFn: () => patientsApi.list({ riskLevel: "Critical", limit: "10" }), retry: false });
   const [referralMonth, setReferralMonth] = useState(() => currentMonthInTz(tz));
-  const [referralBy, setReferralBy] = useState<"doctor" | "vhn">("doctor");
+  const [referralBy, setReferralBy] = useState<ReferralStatsBy>("doctor");
   const { data: referralStats = [], isLoading: referralLoading } = useQuery({ queryKey: ["referral-stats", referralMonth, referralBy], queryFn: () => dashApi.referralStats(referralMonth, referralBy), retry: false });
   const { data: revenueTrendData, isLoading: revenueTrendLoading } = useQuery({ queryKey: ["dashboard-revenue-trend"], queryFn: dashApi.revenueTrend, retry: false });
 
@@ -349,10 +349,10 @@ export default function DashboardPage() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <CardTitle className="text-base">Referral Stats</CardTitle>
-              <div className="flex gap-1">
-                {([["doctor", "Doctor"], ["vhn", "VHN"]] as const).map(([id, label]) => (
+              <div className="flex gap-1 flex-wrap">
+                {REFERRAL_STATS_TYPES.map(([id, label]) => (
                   <button
                     key={id}
                     onClick={() => setReferralBy(id)}
@@ -396,7 +396,7 @@ export default function DashboardPage() {
               <thead>
                 <tr className="text-left text-slate-500 border-b">
                   <th className="pb-2 w-8">#</th>
-                  <th className="pb-2">{referralBy === "vhn" ? "VHN" : "Referring Doctor"}</th>
+                  <th className="pb-2">{referralBy === "doctor" ? "Referring Doctor" : referralStatsLabel(referralBy)}</th>
                   <th className="pb-2 text-right">Appointments</th>
                 </tr>
               </thead>

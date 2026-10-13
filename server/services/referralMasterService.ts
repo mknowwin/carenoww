@@ -1,4 +1,5 @@
 import ReferralMaster, { REFERRAL_MASTER_KINDS, ReferralMasterKind } from "../models/ReferralMaster.js";
+import ReferralDoctor from "../models/ReferralDoctor.js";
 import { AppError } from "../lib/AppError.js";
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -30,4 +31,13 @@ export async function createReferralMaster(tenantId: string, body: Record<string
 
   const master = await ReferralMaster.create({ tenantId, kind, name });
   return { master, created: true };
+}
+
+// Lower-cased name → master spelling, so reports show "Anna Nagar" however the
+// visit was typed. kind "Doctor" reads the ReferralDoctor master instead.
+export async function canonicalNames(tenantId: string, kind: ReferralMasterKind | "Doctor") {
+  const docs: { name: string }[] = kind === "Doctor"
+    ? await ReferralDoctor.find({ tenantId }).select("name").lean()
+    : await ReferralMaster.find({ tenantId, kind }).select("name").lean();
+  return new Map(docs.map((d) => [d.name.trim().toLowerCase(), d.name.trim()]));
 }
