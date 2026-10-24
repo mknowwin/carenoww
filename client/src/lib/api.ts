@@ -412,6 +412,10 @@ export const referralDoctors = {
   search: (q: string) => get<any[]>(`/referral-doctors?search=${encodeURIComponent(q)}`),
   create: (data: { name: string; specialization?: string; phone?: string; hospital?: string }) =>
     post<any>("/referral-doctors", data),
+  list:   () => get<any[]>("/referral-doctors?all=1"),
+  update: (id: string, data: { name: string; specialization?: string; phone?: string; hospital?: string }) =>
+    put<any>(`/referral-doctors/${id}`, data),
+  remove: (id: string) => del<any>(`/referral-doctors/${id}`),
 };
 
 // ── Referral Masters (Area, VHN, Medical Shop, Lab, Other) ────────────────────
@@ -420,6 +424,10 @@ export const referralMasters = {
   search: (kind: ReferralMasterKind, q: string) =>
     get<any[]>(`/referral-masters?${new URLSearchParams({ kind, search: q }).toString()}`),
   create: (kind: ReferralMasterKind, name: string) => post<any>("/referral-masters", { kind, name }),
+  list:   (kind: ReferralMasterKind) =>
+    get<any[]>(`/referral-masters?${new URLSearchParams({ kind, all: "1" }).toString()}`),
+  update: (id: string, name: string) => put<any>(`/referral-masters/${id}`, { name }),
+  remove: (id: string) => del<any>(`/referral-masters/${id}`),
 };
 
 // ── Suppliers ─────────────────────────────────────────────────────────────────

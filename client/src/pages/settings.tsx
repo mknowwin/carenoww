@@ -11,11 +11,14 @@ import {
   Monitor, Globe, Key, KeyRound, Database, CheckCircle2, Users, Plus, Trash2,
   Stethoscope, ChevronDown, ChevronRight, Clock, CalendarDays, Pencil,
   X, Loader2, UserPlus, Mic, FlaskConical, Pill, CreditCard, UserCheck, HeartPulse,
-  Upload, ImageIcon, IndianRupee, Printer,
+  Upload, ImageIcon, IndianRupee, Printer, Share2,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
-import { auth as authApi, users as usersApi, ratemaster as ratemasterApi } from "@/lib/api";
+import {
+  auth as authApi, users as usersApi, ratemaster as ratemasterApi,
+  referralDoctors as referralDoctorsApi, referralMasters as referralMastersApi, type ReferralMasterKind,
+} from "@/lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
@@ -1603,6 +1606,172 @@ function ServiceRatesSection() {
   );
 }
 
+// ── Referrals — master lists for referral doctors and Area/VHN/… names ───────
+const REFERRAL_TABS = ["Doctor", "Area", "VHN", "Medical Shop", "Lab", "Other"] as const;
+type ReferralTab = typeof REFERRAL_TABS[number];
+const EMPTY_REFERRAL_FORM = { name: "", specialization: "", phone: "", hospital: "" };
+
+function ReferralsSection() {
+  const qc = useQueryClient();
+  const [tab, setTab]       = useState<ReferralTab>("Doctor");
+  const [form, setForm]     = useState(EMPTY_REFERRAL_FORM);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [error, setError]   = useState("");
+  const [busy, setBusy]     = useState(false);
+  const [filter, setFilter] = useState("");
+
+  const isDoctor = tab === "Doctor";
+  const queryKey = isDoctor ? ["referral-doctors"] : ["referral-masters", tab];
+  const { data: rows = [], isLoading } = useQuery<any[]>({
+    queryKey,
+    queryFn: () => isDoctor ? referralDoctorsApi.list() : referralMastersApi.list(tab as ReferralMasterKind),
+  });
+
+  const resetForm = () => { setForm(EMPTY_REFERRAL_FORM); setEditId(null); setError(""); };
+  const switchTab = (t: ReferralTab) => { setTab(t); setFilter(""); resetForm(); };
+
+  const startEdit = (r: any) => {
+    setEditId(r._id);
+    setForm({ name: r.name, specialization: r.specialization ?? "", phone: r.phone ?? "", hospital: r.hospital ?? "" });
+    setError("");
+  };
+
+  const save = async () => {
+    const name = form.name.trim();
+    if (!name) { setError("Name is required."); return; }
+    setBusy(true); setError("");
+    try {
+      const data = { ...form, name };
+      let saved: any;
+      if (editId) {
+        saved = isDoctor ? await referralDoctorsApi.update(editId, data) : await referralMastersApi.update(editId, name);
+      } else {
+        saved = isDoctor ? await referralDoctorsApi.create(data) : await referralMastersApi.create(tab as ReferralMasterKind, name);
+      }
+      // create returns the existing entry when the name is already on the list
+      if (!editId && rows.some((r) => r._id === saved?._id)) {
+        toast({ title: "Already exists", description: `"${saved.name}" is already on the ${tab} list.` });
+      }
+      qc.invalidateQueries({ queryKey });
+      resetForm();
+    } catch (e: any) {
+      setError(e.message || "Failed to save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (r: any) => {
+    const ok = await confirm({ title: `Delete ${r.name}?`, confirmText: "Delete", variant: "destructive" });
+    if (!ok) return;
+    try {
+      if (isDoctor) await referralDoctorsApi.remove(r._id);
+      else await referralMastersApi.remove(r._id);
+      if (editId === r._id) resetForm();
+      qc.invalidateQueries({ queryKey });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Delete failed", description: e.message || "Failed to delete." });
+    }
+  };
+
+  const q = filter.trim().toLowerCase();
+  const visible = q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold">Referrals</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Manage the pick lists used for referrals on appointments. Renaming changes the list and report labels only — past visits keep the name as typed. Names used on any appointment cannot be deleted.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {REFERRAL_TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => switchTab(t)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              tab === t ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Add / Edit form */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {editId ? `Edit ${tab}` : `Add ${tab}`}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className={`grid gap-2 ${isDoctor ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1 sm:grid-cols-2"}`}>
+            <div className="space-y-1">
+              <Label className="text-xs">Name *</Label>
+              <Input
+                className="h-8 text-sm"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+              />
+            </div>
+            {isDoctor && (["specialization", "phone", "hospital"] as const).map((f) => (
+              <div key={f} className="space-y-1">
+                <Label className="text-xs capitalize">{f}</Label>
+                <Input className="h-8 text-sm" value={form[f]} onChange={(e) => setForm((s) => ({ ...s, [f]: e.target.value }))} />
+              </div>
+            ))}
+          </div>
+          {error && <p className="text-xs text-destructive mt-2">{error}</p>}
+          <div className="flex gap-2 mt-3">
+            <Button size="sm" onClick={save} disabled={busy}>{busy ? "Saving…" : editId ? "Update" : "Add"}</Button>
+            {editId && <Button size="sm" variant="ghost" onClick={resetForm}>Cancel</Button>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* List */}
+      <div className="flex items-center gap-2">
+        <Share2 className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{tab}</span>
+        <Badge variant="outline" className="text-xs py-0 h-4">{rows.length}</Badge>
+        <Input className="h-7 text-xs ml-auto max-w-[200px]" placeholder="Search…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      </div>
+      {isLoading ? (
+        <div className="text-xs text-muted-foreground py-4 text-center">Loading…</div>
+      ) : visible.length === 0 ? (
+        <p className="text-xs text-muted-foreground pl-5">{q ? "No matches." : "No entries yet."}</p>
+      ) : (
+        <div className="border rounded-md divide-y">
+          {visible.map((r) => (
+            <div key={r._id} className="flex items-center justify-between px-3 py-2 gap-2">
+              <div className="min-w-0">
+                <span className="text-sm font-medium">{r.name}</span>
+                {isDoctor && (
+                  <span className="text-xs text-muted-foreground ml-2">
+                    {[r.specialization, r.hospital, r.phone].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => startEdit(r)}>
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => remove(r)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main SettingsPage ─────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -1659,6 +1828,7 @@ export default function SettingsPage() {
     ...(user?.role === "admin" ? [{ id: "departments",  label: "Departments & Doctors", icon: Stethoscope  }] : []),
     ...(user?.role === "admin" ? [{ id: "staff",        label: "Staff Management",      icon: UserCheck    }] : []),
     ...(user?.role === "admin" ? [{ id: "servicerates", label: "Service Rates",         icon: IndianRupee  }] : []),
+    ...(user?.role === "admin" ? [{ id: "referrals",    label: "Referrals",             icon: Share2       }] : []),
     { id: "notif",       label: "Notifications",        icon: Bell },
     { id: "ai",          label: "AI Features",          icon: Brain },
     { id: "security",    label: "Security",             icon: Shield },
@@ -1865,6 +2035,9 @@ export default function SettingsPage() {
 
           {/* ── Service Rates ─────────────────────────────────── */}
           {active === "servicerates" && user?.role === "admin" && <ServiceRatesSection />}
+
+          {/* ── Referrals ─────────────────────────────────────── */}
+          {active === "referrals" && user?.role === "admin" && <ReferralsSection />}
 
           {/* ── Notifications ─────────────────────────────────── */}
           {active === "notif" && (
