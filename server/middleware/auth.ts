@@ -33,6 +33,20 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
   }
 }
 
+// Rate-limit key: the verified user id, so each user gets their own budget instead of
+// a whole hospital (or every hospital behind a proxy) sharing one IP's. Falls back to
+// the IP for unauthenticated or invalid tokens — a forged token can't pick a key.
+export function rateLimitKey(req: Request): string {
+  const authHeader = req.headers["authorization"];
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as any;
+      if (payload?.id) return `user:${payload.id}`;
+    } catch { /* fall through to IP */ }
+  }
+  return `ip:${req.ip}`;
+}
+
 export function requireRole(...roles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) return next(AppError.unauthorized("Unauthorized"));

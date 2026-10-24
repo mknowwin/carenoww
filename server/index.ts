@@ -28,6 +28,7 @@ import icdCodesRouter from "./routes/icdCodes.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { notFoundHandler } from "./middleware/notFoundHandler.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { rateLimitKey } from "./middleware/auth.js";
 import { asyncHandler } from "./lib/asyncHandler.js";
 import * as publicDisplayService from "./services/publicDisplayService.js";
 
@@ -60,7 +61,8 @@ const loginLimiter = rateLimit({
   max: 20,
   handler: rateLimitHandler("RATE_LIMITED", "Too many login attempts. Please try again later."),
 });
-const apiLimiter   = rateLimit({ windowMs: 60 * 1000, max: 300, handler: rateLimitHandler("RATE_LIMITED", "Too many requests. Please try again later.") });
+// Per signed-in user (see rateLimitKey); login stays per IP since there is no user yet.
+const apiLimiter   = rateLimit({ windowMs: 60 * 1000, max: 300, keyGenerator: rateLimitKey, handler: rateLimitHandler("RATE_LIMITED", "Too many requests. Please try again later.") });
 const publicLimiter = rateLimit({ windowMs: 60 * 1000, max: 600, handler: rateLimitHandler("RATE_LIMITED", "Too many requests. Please try again later.") });
 
 // 50mb accommodates base64-encoded MongoDB backup archives uploaded for restore (server/routes/superadmin.ts).

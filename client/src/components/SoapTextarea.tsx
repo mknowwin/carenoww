@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 const MIN_HEIGHT = 96;   // ≈ 4 rows of text-xs
 const MAX_HEIGHT = 400;  // scroll beyond this
 const MAX_ITEMS  = 8;
+const ICD_SERVER_LIMIT = 10;  // GET /api/icd-codes?search= returns at most this many
+const ICD_DEBOUNCE_MS  = 300;
 
 interface Suggestion { label: string; insert: string; code?: string; favourite?: boolean; start: number; matched: string }
 
@@ -112,12 +114,7 @@ export default function SoapTextarea({ field, value, onChange, placeholder, clas
   });
 
   const [icdTerm, setIcdTerm] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setIcdTerm(field === "assessment" && searching ? icdQuery : ""), 150);
-    return () => clearTimeout(t);
-  }, [field, searching, icdQuery]);
-
-  const { data: icdRows = [] } = useQuery({
+  const { data: icdRows = [], isSuccess: icdLoaded, isPlaceholderData: icdStale } = useQuery({
     queryKey: ["icd-search", icdTerm],
     queryFn:  () => icdApi.search(icdTerm),
     enabled:  icdTerm.length >= 2,
@@ -125,6 +122,19 @@ export default function SoapTextarea({ field, value, onChange, placeholder, clas
     placeholderData: keepPreviousData,
     retry: false,
   });
+
+  // Requests count against the per-user API rate limit, so keep them few:
+  // wait for a typing pause, and when the last answer was complete (fewer rows than
+  // the server's limit) and the user only typed more, filter it locally instead —
+  // matches for "hyper" are always a subset of those for "hype". Empty answers aren't
+  // reused: "known case of" returns nothing until a real word is typed.
+  const icdComplete = icdLoaded && !icdStale && icdRows.length > 0 && icdRows.length < ICD_SERVER_LIMIT;
+  useEffect(() => {
+    const next = field === "assessment" && searching ? icdQuery : "";
+    if (next && icdComplete && next.startsWith(icdTerm)) return;
+    const t = setTimeout(() => setIcdTerm(next), ICD_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [field, searching, icdQuery, icdTerm, icdComplete]);
 
   const phrases = useMemo(() => {
     const seen = new Set<string>();
