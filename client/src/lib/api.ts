@@ -238,6 +238,8 @@ export const appointments = {
   },
   slots:  (doctor: string, date: string) =>
     get<any>(`/appointments/slots?${new URLSearchParams({ doctor, date }).toString()}`),
+  soapPhrases: (field: string) =>
+    get<string[]>(`/appointments/soap-phrases?field=${encodeURIComponent(field)}`),
 };
 
 // ── Users ─────────────────────────────────────────────────────────────────────
@@ -428,6 +430,24 @@ export const referralMasters = {
     get<any[]>(`/referral-masters?${new URLSearchParams({ kind, all: "1" }).toString()}`),
   update: (id: string, name: string) => put<any>(`/referral-masters/${id}`, { name }),
   remove: (id: string) => del<any>(`/referral-masters/${id}`),
+};
+
+// ── ICD codes (per-tenant master) ─────────────────────────────────────────────
+export interface IcdCode { _id: string; code: string; description: string; active: boolean }
+export interface IcdSuggestion { code: string; description: string; source: "hospital" | "catalog" }
+export const icdCodes = {
+  // Hospital's own codes first, then the global ICD-10-CM catalogue
+  search:     (q: string) => get<IcdSuggestion[]>(`/icd-codes?search=${encodeURIComponent(q)}`),
+  catalogInfo: () => get<{ count: number; version: string | null }>("/icd-codes/catalog"),
+  catalogLookup: (code: string) =>
+    get<{ code: string; description: string } | null>(`/icd-codes/catalog?code=${encodeURIComponent(code)}`),
+  list:       () => get<IcdCode[]>("/icd-codes?all=1"),
+  create:     (data: { code: string; description: string }) => post<IcdCode>("/icd-codes", data),
+  update:     (id: string, data: Partial<Pick<IcdCode, "code" | "description" | "active">>) => put<IcdCode>(`/icd-codes/${id}`, data),
+  remove:     (id: string) => del<any>(`/icd-codes/${id}`),
+  import:     (rows: { code: string; description: string }[]) =>
+    post<{ added: number; updated: number }>("/icd-codes/import", { rows }),
+  seedCommon: () => post<{ added: number; updated: number }>("/icd-codes/seed-common", {}),
 };
 
 // ── Suppliers ─────────────────────────────────────────────────────────────────

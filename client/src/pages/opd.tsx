@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import {
   Stethoscope, Mic, MicOff, Brain, Pill, FlaskConical, FileText,
   CheckCircle2, Clock, Activity, Thermometer, Heart, User, Upload,
-  Download, Trash2, Loader2, Eye, CalendarDays, Hash, Paperclip, X, BedDouble, Pencil,
+  Download, Trash2, Loader2, Eye, Hash, Paperclip, X, BedDouble, Pencil,
 } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { patients as patientsApi, appointments as apptApi, reports as reportsApi, lab as labApi, prescriptions as rxApi, auth as authApi } from "@/lib/api";
@@ -18,6 +18,8 @@ import LabOrderModal from "@/components/modals/LabOrderModal";
 import PrescriptionModal from "@/components/modals/PrescriptionModal";
 import AdmitModal from "@/components/modals/AdmitModal";
 import LabResultModal from "@/components/modals/LabResultModal";
+import PatientHistory from "@/components/PatientHistory";
+import SoapTextarea from "@/components/SoapTextarea";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
 
@@ -648,87 +650,6 @@ function ActiveOrdersPanel({ patientId, appointmentId }: { patientId: string; ap
   );
 }
 
-// ── HistoryTab ────────────────────────────────────────────────────────────────
-function HistoryTab({ patientId }: { patientId: string }) {
-  const { data: histData, isLoading } = useQuery({
-    queryKey: ["appt-history", patientId],
-    queryFn:  () => apptApi.list({ patientId, limit: "50" }),
-    enabled:  !!patientId,
-    retry: false,
-  });
-
-  const history = (histData?.appointments ?? [])
-    .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-  if (isLoading) {
-    return <div className="text-center py-12 text-muted-foreground text-sm">Loading visit history...</div>;
-  }
-  if (history.length === 0) {
-    return (
-      <div className="text-center py-12 text-muted-foreground text-sm">
-        <CalendarDays className="h-10 w-10 mx-auto mb-3 opacity-30" />
-        No past visit records found.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      {history.map((a: any) => (
-        <div key={a._id || a.id} className="border rounded-xl p-3 hover:shadow-sm transition-shadow">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-200 flex flex-col items-center justify-center shrink-0">
-                <Hash className="h-3 w-3 text-teal-500" />
-                <span className="text-xs font-bold text-teal-700 font-mono leading-tight">{a.token || "—"}</span>
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium">{a.date}</span>
-                  <Badge className={`text-xs ${
-                    a.status === "Completed" ? "bg-teal-100 text-teal-700" :
-                    a.status === "Cancelled" ? "bg-red-100 text-red-700" :
-                    "bg-gray-100 text-gray-600"
-                  }`}>{a.status}</Badge>
-                  <Badge className="text-xs bg-gray-100 text-gray-600">{a.type}</Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{a.doctor} · {a.department} · {a.time}</p>
-                {/* Vitals recorded at check-in or during consultation */}
-                {a.vitals && Object.values(a.vitals).some(Boolean) && (
-                  <div className="flex gap-1.5 flex-wrap mt-2">
-                    {a.vitals.bp     && <Badge className="text-xs bg-blue-50 text-blue-700 border border-blue-200">BP {a.vitals.bp}</Badge>}
-                    {a.vitals.pulse  && <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">P {a.vitals.pulse} bpm</Badge>}
-                    {a.vitals.temp   && <Badge className="text-xs bg-orange-50 text-orange-700 border border-orange-200">T {a.vitals.temp}°F</Badge>}
-                    {a.vitals.spo2   && <Badge className="text-xs bg-purple-50 text-purple-700 border border-purple-200">SpO2 {a.vitals.spo2}%</Badge>}
-                    {a.vitals.weight && <Badge className="text-xs bg-muted text-muted-foreground">Wt {a.vitals.weight} kg</Badge>}
-                    {a.vitals.height && <Badge className="text-xs bg-muted text-muted-foreground">Ht {a.vitals.height} cm</Badge>}
-                  </div>
-                )}
-                {/* Purpose of visit — chief complaint captured at booking */}
-                {a.notes && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    <span className="font-semibold text-foreground">Reason for visit:</span> {a.notes}
-                  </p>
-                )}
-                {/* SOAP notes */}
-                {(a.soap?.assessment || a.soap?.plan) && (
-                  <div className="text-xs text-muted-foreground mt-2 space-y-0.5 bg-muted/40 rounded px-2 py-1.5">
-                    {a.soap.assessment && <p><span className="font-semibold text-foreground">Diagnosis:</span> {a.soap.assessment}</p>}
-                    {a.soap.plan      && <p><span className="font-semibold text-foreground">Plan:</span> {a.soap.plan}</p>}
-                  </div>
-                )}
-                {!a.notes && !a.soap?.assessment && !a.soap?.plan && (
-                  <p className="text-xs text-muted-foreground/50 italic mt-2">No visit reason or diagnosis recorded</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ── Main OPD Page ─────────────────────────────────────────────────────────────
 export default function OPDPage() {
   const qc = useQueryClient();
@@ -1204,15 +1125,14 @@ export default function OPDPage() {
                                key === "objective"  ? "O — Objective"  :
                                key === "assessment" ? "A — Assessment" : "P — Plan"}
                             </label>
-                            <Textarea
+                            <SoapTextarea
+                              field={key}
                               value={soapNote[key]}
-                              onChange={(e) => setSoapNote((p) => ({ ...p, [key]: e.target.value }))}
-                              rows={4}
-                              className="text-xs resize-none"
+                              onChange={(v) => setSoapNote((p) => ({ ...p, [key]: v }))}
                               placeholder={
                                 key === "subjective" ? "Chief complaint, history of present illness..." :
                                 key === "objective"  ? "Vitals, physical exam findings..." :
-                                key === "assessment" ? "Diagnoses (ICD codes)..." :
+                                key === "assessment" ? "Diagnosis — type to search ICD codes..." :
                                 "Treatment plan, orders, follow-up..."
                               }
                             />
@@ -1280,7 +1200,7 @@ export default function OPDPage() {
 
               {/* ── History Tab ──────────────────────────────── */}
               {activeTab === "history" && (
-                <HistoryTab patientId={patientId} />
+                <PatientHistory patientId={patientId} />
               )}
 
               {/* ── Reports Tab ──────────────────────────────── */}

@@ -89,6 +89,41 @@ export async function listAppointments(tenantId: string, filters: AppointmentLis
   return { appointments, total };
 }
 
+const SOAP_FIELDS = ["subjective", "objective", "assessment", "plan"] as const;
+
+// Phrases doctors in this tenant have written in a SOAP field, most used first.
+// Feeds OPD auto-suggestions; the client fetches once and filters locally.
+export async function getSoapPhrases(tenantId: string, field?: string) {
+  if (!SOAP_FIELDS.includes(field as any)) throw AppError.badRequest("Invalid field");
+  const path = `soap.${field}`;
+
+  const docs = await Appointment.find({ tenantId, [path]: { $nin: [null, ""] } })
+    .select(path)
+    .sort({ date: -1 })
+    .limit(2000)
+    .lean();
+
+  // key (lowercase) → spelling counts + total uses
+  const stats = new Map<string, { total: number; spellings: Map<string, number> }>();
+  for (const d of docs as any[]) {
+    const text: string = d.soap?.[field!] ?? "";
+    for (const raw of text.split(/\n|;|\.(?=\s|$)/)) {
+      const phrase = raw.replace(/^\s*(?:[-•*]|\d+[.)])\s+/, "").trim();
+      if (phrase.length < 3 || phrase.length > 120) continue;
+      const key = phrase.toLowerCase();
+      const st = stats.get(key) ?? { total: 0, spellings: new Map() };
+      st.total++;
+      st.spellings.set(phrase, (st.spellings.get(phrase) ?? 0) + 1);
+      stats.set(key, st);
+    }
+  }
+
+  return [...stats.values()]
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 300)
+    .map((st) => [...st.spellings].sort((a, b) => b[1] - a[1])[0][0]);
+}
+
 // Returns In Consult first, then Waiting, then Confirmed — sorted by tokenNumber
 export async function getQueue(tenantId: string, filters: { doctor?: string; date?: string }) {
   const { doctor, date } = filters;

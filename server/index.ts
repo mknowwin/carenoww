@@ -24,6 +24,7 @@ import referralMastersRouter from "./routes/referralMasters.js";
 import suppliersRouter from "./routes/suppliers.js";
 import insightsRouter from "./routes/insights.js";
 import govReportsRouter from "./routes/govReports.js";
+import icdCodesRouter from "./routes/icdCodes.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { notFoundHandler } from "./middleware/notFoundHandler.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -105,6 +106,7 @@ app.use("/api/referral-masters",  referralMastersRouter);
 app.use("/api/suppliers",         suppliersRouter);
 app.use("/api/insights",          insightsRouter);
 app.use("/api/gov-reports",       govReportsRouter);
+app.use("/api/icd-codes",         icdCodesRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {

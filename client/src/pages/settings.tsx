@@ -11,13 +11,14 @@ import {
   Monitor, Globe, Key, KeyRound, Database, CheckCircle2, Users, Plus, Trash2,
   Stethoscope, ChevronDown, ChevronRight, Clock, CalendarDays, Pencil,
   X, Loader2, UserPlus, Mic, FlaskConical, Pill, CreditCard, UserCheck, HeartPulse,
-  Upload, ImageIcon, IndianRupee, Printer, Share2,
+  Upload, ImageIcon, IndianRupee, Printer, Share2, ClipboardList,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   auth as authApi, users as usersApi, ratemaster as ratemasterApi,
   referralDoctors as referralDoctorsApi, referralMasters as referralMastersApi, type ReferralMasterKind,
+  icdCodes as icdCodesApi, type IcdCode,
 } from "@/lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
@@ -1772,6 +1773,242 @@ function ReferralsSection() {
   );
 }
 
+// ── ICD Codes — per-hospital ICD-10 master used for SOAP Assessment suggestions ─
+const EMPTY_ICD_FORM = { code: "", description: "" };
+
+// "CODE, Description" or tab-separated (pasted from Excel), one per line
+function parseIcdLines(text: string) {
+  return text.split("\n").map((line) => {
+    const m = line.match(/^\s*([^,\t]+)[,\t]\s*(.+?)\s*$/);
+    return m ? { code: m[1].trim(), description: m[2].replace(/^"|"$/g, "").trim() } : null;
+  }).filter((r): r is { code: string; description: string } => !!r && !!r.description && r.code.toUpperCase() !== "CODE");
+}
+
+function IcdCodesSection() {
+  const qc = useQueryClient();
+  const [form, setForm]       = useState(EMPTY_ICD_FORM);
+  const [editId, setEditId]   = useState<string | null>(null);
+  const [error, setError]     = useState("");
+  const [busy, setBusy]       = useState(false);
+  const [filter, setFilter]   = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+
+  const queryKey = ["icd-codes"];
+  const { data: rows = [], isLoading } = useQuery<IcdCode[]>({ queryKey, queryFn: () => icdCodesApi.list() });
+  const { data: catalog } = useQuery({ queryKey: ["icd-catalog-info"], queryFn: () => icdCodesApi.catalogInfo(), staleTime: Infinity });
+
+  // Typing a known code fills in the official description from the global catalogue.
+  const fillFromCatalog = async () => {
+    const code = form.code.trim();
+    if (!code || form.description.trim()) return;
+    try {
+      const hit = await icdCodesApi.catalogLookup(code);
+      if (hit) setForm((f) => (f.description.trim() ? f : { code: hit.code, description: hit.description }));
+    } catch { /* lookup is a convenience only */ }
+  };
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey });
+    qc.invalidateQueries({ queryKey: ["icd-search"] });
+  };
+
+  const resetForm = () => { setForm(EMPTY_ICD_FORM); setEditId(null); setError(""); };
+
+  const startEdit = (r: IcdCode) => {
+    setEditId(r._id);
+    setForm({ code: r.code, description: r.description });
+    setError("");
+  };
+
+  const save = async () => {
+    const code = form.code.trim(), description = form.description.trim();
+    if (!code || !description) { setError("Code and description are required."); return; }
+    setBusy(true); setError("");
+    try {
+      if (editId) await icdCodesApi.update(editId, { code, description });
+      else await icdCodesApi.create({ code, description });
+      refresh();
+      resetForm();
+    } catch (e: any) {
+      setError(e.message || "Failed to save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleActive = async (r: IcdCode) => {
+    try {
+      await icdCodesApi.update(r._id, { active: !r.active });
+      refresh();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Update failed", description: e.message || "Failed to update." });
+    }
+  };
+
+  const remove = async (r: IcdCode) => {
+    const ok = await confirm({ title: `Delete ${r.code}?`, description: r.description, confirmText: "Delete", variant: "destructive" });
+    if (!ok) return;
+    try {
+      await icdCodesApi.remove(r._id);
+      if (editId === r._id) resetForm();
+      refresh();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Delete failed", description: e.message || "Failed to delete." });
+    }
+  };
+
+  const loadCommon = async () => {
+    setBusy(true);
+    try {
+      const { added } = await icdCodesApi.seedCommon();
+      toast({ title: "Common ICD-10 codes loaded", description: added ? `${added} codes added.` : "All common codes are already on the list." });
+      refresh();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Load failed", description: e.message || "Failed to load codes." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkRows = parseIcdLines(bulkText);
+  const importBulk = async () => {
+    if (bulkRows.length === 0) return;
+    setBusy(true);
+    try {
+      const { added, updated } = await icdCodesApi.import(bulkRows);
+      toast({ title: "ICD codes imported", description: `${added} added, ${updated} updated.` });
+      setBulkText(""); setBulkOpen(false);
+      refresh();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Import failed", description: e.message || "Failed to import." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const q = filter.trim().toLowerCase();
+  const visible = q
+    ? rows.filter((r) => r.code.toLowerCase().startsWith(q) || r.description.toLowerCase().includes(q))
+    : rows;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold">ICD Codes</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Doctors get ICD suggestions while typing the Assessment in OPD: codes on this hospital's list first (★), then the full ICD-10-CM catalogue.
+            Add a code here to make it a favourite or use your own wording; switch a code off to hide it from suggestions, including its catalogue entry.
+          </p>
+          <p className="text-xs mt-1">
+            {catalog?.count
+              ? <span className="text-muted-foreground">Global catalogue: <b>{catalog.count.toLocaleString("en-IN")}</b> codes (ICD-10-CM {catalog.version})</span>
+              : <span className="text-amber-700">Global ICD catalogue not loaded — run <code className="font-mono">npm run icd:import</code> on the server.</span>}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={loadCommon} disabled={busy}>Load common ICD-10 codes</Button>
+          <Button size="sm" variant="outline" onClick={() => setBulkOpen((o) => !o)}>
+            <Upload className="h-3 w-3 mr-1" /> Bulk add
+          </Button>
+        </div>
+      </div>
+
+      {bulkOpen && (
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <Label className="text-xs">One code per line: <span className="font-mono">CODE, Description</span> (or paste two columns from Excel)</Label>
+            <textarea
+              className="w-full min-h-[120px] rounded-md border bg-background px-3 py-2 text-xs font-mono"
+              placeholder={"E11.9, Type 2 diabetes mellitus without complications\nI10, Essential (primary) hypertension"}
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+            />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={importBulk} disabled={busy || bulkRows.length === 0}>
+                Import {bulkRows.length > 0 ? `${bulkRows.length} codes` : ""}
+              </Button>
+              <span className="text-xs text-muted-foreground">Existing codes get their description updated.</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add / Edit form */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {editId ? "Edit ICD code" : "Add ICD code"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-[140px_1fr]">
+            <div className="space-y-1">
+              <Label className="text-xs">Code *</Label>
+              <Input
+                className="h-8 text-sm font-mono uppercase"
+                value={form.code}
+                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+                onBlur={fillFromCatalog}
+                onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Description *</Label>
+              <Input
+                className="h-8 text-sm"
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+              />
+            </div>
+          </div>
+          {error && <p className="text-xs text-destructive mt-2">{error}</p>}
+          <div className="flex gap-2 mt-3">
+            <Button size="sm" onClick={save} disabled={busy}>{busy ? "Saving…" : editId ? "Update" : "Add"}</Button>
+            {editId && <Button size="sm" variant="ghost" onClick={resetForm}>Cancel</Button>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* List */}
+      <div className="flex items-center gap-2">
+        <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Codes</span>
+        <Badge variant="outline" className="text-xs py-0 h-4">{rows.length}</Badge>
+        <Input className="h-7 text-xs ml-auto max-w-[200px]" placeholder="Search code or name…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      </div>
+      {isLoading ? (
+        <div className="text-xs text-muted-foreground py-4 text-center">Loading…</div>
+      ) : visible.length === 0 ? (
+        <p className="text-xs text-muted-foreground pl-5">
+          {q ? "No matches." : "No ICD codes yet — click \"Load common ICD-10 codes\" to start with a standard list."}
+        </p>
+      ) : (
+        <div className="border rounded-md divide-y max-h-[480px] overflow-y-auto">
+          {visible.map((r) => (
+            <div key={r._id} className={`flex items-center justify-between px-3 py-2 gap-2 ${r.active ? "" : "opacity-50"}`}>
+              <div className="min-w-0 flex items-center gap-2">
+                <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 shrink-0">{r.code}</span>
+                <span className="text-sm truncate">{r.description}</span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Switch checked={r.active} onCheckedChange={() => toggleActive(r)} aria-label="Active" />
+                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => startEdit(r)}>
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => remove(r)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main SettingsPage ─────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -1829,6 +2066,7 @@ export default function SettingsPage() {
     ...(user?.role === "admin" ? [{ id: "staff",        label: "Staff Management",      icon: UserCheck    }] : []),
     ...(user?.role === "admin" ? [{ id: "servicerates", label: "Service Rates",         icon: IndianRupee  }] : []),
     ...(user?.role === "admin" ? [{ id: "referrals",    label: "Referrals",             icon: Share2       }] : []),
+    ...(user?.role === "admin" ? [{ id: "icdcodes",     label: "ICD Codes",             icon: ClipboardList }] : []),
     { id: "notif",       label: "Notifications",        icon: Bell },
     { id: "ai",          label: "AI Features",          icon: Brain },
     { id: "security",    label: "Security",             icon: Shield },
@@ -2038,6 +2276,9 @@ export default function SettingsPage() {
 
           {/* ── Referrals ─────────────────────────────────────── */}
           {active === "referrals" && user?.role === "admin" && <ReferralsSection />}
+
+          {/* ── ICD Codes ─────────────────────────────────────── */}
+          {active === "icdcodes" && user?.role === "admin" && <IcdCodesSection />}
 
           {/* ── Notifications ─────────────────────────────────── */}
           {active === "notif" && (

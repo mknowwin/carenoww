@@ -10,6 +10,7 @@ import DrugInventory from "./models/DrugInventory.js";
 import BillingRecord from "./models/BillingRecord.js";
 import BedOccupancy from "./models/BedOccupancy.js";
 import { connectDB } from "./db.js";
+import { seedCommonIcdCodes } from "./services/icdCodeService.js";
 
 export async function seedTenant(tenantId: string) {
   const tid = new mongoose.Types.ObjectId(tenantId);
@@ -150,6 +151,7 @@ if (process.argv[1]?.includes("seed")) {
 
     await seedTenant(tenant._id.toString());
     await seedUsers(tenant._id.toString());
+    await seedCommonIcdCodes(tenant._id.toString());
     console.log("✅ Seed complete!");
     process.exit(0);
   })();

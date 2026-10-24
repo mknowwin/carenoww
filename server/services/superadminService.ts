@@ -4,6 +4,7 @@ import Tenant, { MODULE_KEYS } from "../models/Tenant.js";
 import User from "../models/User.js";
 import Patient from "../models/Patient.js";
 import { AppError } from "../lib/AppError.js";
+import { seedCommonIcdCodes } from "./icdCodeService.js";
 
 const SUPERADMIN_JWT_SECRET = process.env.SUPERADMIN_JWT_SECRET || "carenoww_superadmin_secret_change_in_prod";
 const SUPERADMIN_EMAIL = process.env.SUPERADMIN_EMAIL || "superadmin@carenoww.io";
@@ -94,6 +95,8 @@ export async function createTenant(body: Record<string, any>) {
     if (err.code === 11000) throw AppError.conflict("Duplicate tenant or user");
     throw err;
   }
+
+  await seedCommonIcdCodes(tenant._id.toString());
 
   return { tenant, message: "Tenant created successfully" };
 }

@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { patients as patientsApi } from "@/lib/api";
 import { getInitials } from "@/lib/utils";
 import PatientModal from "@/components/modals/PatientModal";
+import PatientHistoryModal from "@/components/modals/PatientHistoryModal";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
 
@@ -44,6 +45,7 @@ export default function PatientsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editPatient, setEditPatient] = useState<any>(null);
   const [discharging, setDischarging] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const discharge = async (p: any) => {
     const ok = await confirm({ title: `Discharge ${p.name}?`, confirmText: "Discharge" });
@@ -261,8 +263,8 @@ export default function PatientsPage() {
                   <Badge className={STATUS_COLORS[selectedPatient.status] ?? ""}>{selectedPatient.status}</Badge>
                 </div>
                 <div className="flex gap-2 pt-2 flex-wrap">
-                  <Button size="sm" className="flex-1 gap-1" onClick={() => setLocation("/opd")}>
-                    <Stethoscope className="h-3 w-3" /> View EMR
+                  <Button size="sm" className="flex-1 gap-1" onClick={() => setHistoryOpen(true)}>
+                    <Stethoscope className="h-3 w-3" /> View History
                   </Button>
                   <Button size="sm" variant="outline" className="flex-1 gap-1" onClick={() => { setEditPatient(selectedPatient); setModalOpen(true); }}>
                     <Pencil className="h-3 w-3" /> Edit
@@ -304,6 +306,12 @@ export default function PatientsPage() {
           )}
         </div>
       </div>
+      <PatientHistoryModal
+        open={historyOpen && !!selectedPatient}
+        onClose={() => setHistoryOpen(false)}
+        patientId={selectedPatient?.id ?? ""}
+        patientName={selectedPatient?.name}
+      />
       <PatientModal
         open={modalOpen}
         onClose={() => { setModalOpen(false); setEditPatient(null); }}

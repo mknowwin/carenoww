@@ -7,6 +7,8 @@ import { appointments as apptApi, patients as patientsApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
+import PatientHistoryModal from "@/components/modals/PatientHistoryModal";
+import { VitalsBadges } from "@/components/PatientHistory";
 import {
   User, Clock, CheckCircle2, Phone, Hash, ChevronRight,
   Stethoscope, AlertCircle, RefreshCw, Loader2, CalendarDays,
@@ -22,6 +24,8 @@ function WaitMinutes(checkedInAt: string | undefined): string {
 }
 
 function PatientDetailPanel({ patientId }: { patientId: string }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+
   const { data: patient } = useQuery({
     queryKey: ["patient", patientId],
     queryFn:  () => patientsApi.get(patientId),
@@ -102,6 +106,12 @@ function PatientDetailPanel({ patientId }: { patientId: string }) {
       {pastVisits.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Recent Visits</p>
+          {pastVisits[0].vitals && (
+            <div className="mb-1.5">
+              <p className="text-xs text-muted-foreground mb-1">Last vitals ({pastVisits[0].date})</p>
+              <VitalsBadges vitals={pastVisits[0].vitals} />
+            </div>
+          )}
           <div className="space-y-1">
             {pastVisits.map((v: any) => (
               <div key={v._id || v.id} className="flex items-center justify-between text-xs text-muted-foreground bg-muted/30 rounded px-2 py-1.5">
@@ -113,6 +123,20 @@ function PatientDetailPanel({ patientId }: { patientId: string }) {
           </div>
         </div>
       )}
+
+      <button
+        type="button"
+        className="text-xs text-primary hover:underline flex items-center gap-1"
+        onClick={() => setHistoryOpen(true)}
+      >
+        <CalendarDays className="h-3.5 w-3.5" /> View full history
+      </button>
+      <PatientHistoryModal
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        patientId={patient.uhid}
+        patientName={patient.name}
+      />
     </div>
   );
 }

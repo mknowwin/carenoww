@@ -19,6 +19,12 @@ router.get("/queue", asyncHandler(async (req: AuthRequest, res) => {
   res.json({ success: true, data: queue });
 }));
 
+// ── GET /api/appointments/soap-phrases?field= — learned phrases for SOAP suggestions ─
+router.get("/soap-phrases", asyncHandler(async (req: AuthRequest, res) => {
+  const data = await appointmentService.getSoapPhrases(req.user!.tenantId, req.query.field as string);
+  res.json({ success: true, data });
+}));
+
 // ── GET /api/appointments/slots — available time slots for a doctor on a date ─
 router.get("/slots", asyncHandler(async (req: AuthRequest, res) => {
   const { doctor, date } = req.query as Record<string, string>;

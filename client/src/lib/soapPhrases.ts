@@ -1,0 +1,60 @@
+// Built-in starter phrases for SOAP auto-suggestions. Merged with phrases this
+// tenant's doctors have written before (GET /appointments/soap-phrases).
+// Diagnoses come from the per-tenant ICD master instead (GET /icd-codes).
+export type SoapField = "subjective" | "objective" | "assessment" | "plan";
+
+export const SOAP_PHRASES: Record<SoapField, string[]> = {
+  subjective: [
+    "Fever for 2 days", "Fever for 3 days", "Fever with chills and rigors", "Intermittent fever",
+    "Cough for 1 week", "Dry cough", "Cough with expectoration", "Sore throat", "Running nose",
+    "Nasal blockage", "Sneezing", "Breathlessness on exertion", "Wheezing", "Chest pain",
+    "Palpitations", "Headache", "Giddiness", "Body ache", "Generalised weakness", "Fatigue",
+    "Loss of appetite", "Weight loss", "Nausea", "Vomiting", "Loose stools", "Abdominal pain",
+    "Burning sensation in epigastrium", "Acidity", "Bloating", "Constipation",
+    "Burning micturition", "Increased frequency of urination", "Low back pain", "Neck pain",
+    "Knee pain", "Joint pain", "Swelling of feet", "Itching", "Skin rash", "Ear pain",
+    "Ear discharge", "Redness of eyes", "Watering of eyes", "Blurring of vision",
+    "Irregular periods", "Painful periods", "White discharge per vaginum", "Missed period",
+    "Difficulty sleeping", "Anxiety", "Numbness of hands and feet",
+    "Known case of hypertension on regular medication", "Known case of diabetes on regular medication",
+    "Known case of hypothyroidism", "Known case of bronchial asthma", "No known drug allergies",
+    "History of similar complaints in the past", "Came for routine follow-up", "Came for review with reports",
+    "Symptoms improved with previous medication", "No relief with previous medication",
+  ],
+  objective: [
+    "Patient conscious, oriented", "Afebrile", "Febrile", "No pallor, icterus, cyanosis, clubbing, lymphadenopathy, oedema",
+    "Pallor present", "Icterus present", "Pedal oedema present", "Dehydration present",
+    "Hydration adequate", "Throat congested", "Tonsils enlarged", "Tonsils congested",
+    "Chest clear, NVBS heard", "Bilateral air entry equal", "Crepitations present",
+    "Rhonchi present", "Bilateral wheeze", "S1 S2 heard, no murmur", "Tachycardia",
+    "Abdomen soft, non-tender", "Epigastric tenderness", "Right iliac fossa tenderness",
+    "Renal angle tenderness", "Bowel sounds present", "No organomegaly", "Hepatomegaly",
+    "Splenomegaly", "CNS: No focal neurological deficit", "Neck stiffness absent",
+    "Straight leg raise test positive", "Tenderness over lumbar spine", "Knee crepitus present",
+    "Restricted range of movement", "Local tenderness present", "Swelling present", "Wound healthy",
+    "Ear: TM intact", "Ear: wax present", "Conjunctival congestion", "Erythematous rash",
+    "Scaly lesions", "Pustules present", "Per abdomen: uterus not palpable",
+    "Fundal height corresponds to gestational age", "Fetal heart sounds present",
+    "Random blood sugar", "ECG: normal sinus rhythm",
+  ],
+  assessment: [
+    "Provisional diagnosis", "Differential diagnosis", "Viral fever", "Acute febrile illness",
+    "Under evaluation", "Stable, improving", "Uncontrolled", "Well controlled",
+  ],
+  plan: [
+    "Review after 3 days", "Review after 1 week", "Review after 2 weeks", "Review after 1 month",
+    "Review with reports", "Review if symptoms persist", "Review SOS",
+    "CBC, ESR advised", "CBC, CRP advised", "Blood sugar fasting and post prandial", "HbA1c advised",
+    "Lipid profile advised", "Thyroid profile advised", "LFT, RFT advised", "Urine routine advised",
+    "Urine culture advised", "Dengue NS1, IgM advised", "Malaria antigen test advised",
+    "Widal test advised", "Chest X-ray advised", "ECG advised", "USG abdomen advised",
+    "X-ray of affected part advised", "Plenty of oral fluids", "Adequate rest",
+    "Soft bland diet", "Low salt diet", "Diabetic diet", "Avoid spicy and oily food",
+    "Regular exercise and walking", "Weight reduction advised", "Steam inhalation",
+    "Warm saline gargles", "Hot fomentation", "Ice pack application",
+    "Continue same medication", "Medication adjusted as prescribed", "Wound dressing on alternate days",
+    "Suture removal after 7 days", "Physiotherapy advised", "Referred to specialist",
+    "Admission advised", "Explained warning signs", "Monitor blood pressure at home",
+    "Monitor blood sugar at home", "Iron and folic acid supplements", "Calcium supplements",
+  ],
+};
