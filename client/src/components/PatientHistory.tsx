@@ -108,14 +108,14 @@ export default function PatientHistory({ patientId }: { patientId: string }) {
     retry: false,
   });
 
-  const { data: labData } = useQuery({
+  const { data: labData, error: labError } = useQuery({
     queryKey: ["lab-history", patientId],
     queryFn:  () => labApi.list({ patientId, limit: "100" }),
     enabled:  !!patientId,
     retry: false,
   });
 
-  const { data: rxData } = useQuery({
+  const { data: rxData, error: rxError } = useQuery({
     queryKey: ["rx-history", patientId],
     queryFn:  () => rxApi.list({ patientId }),
     enabled:  !!patientId,
@@ -129,6 +129,9 @@ export default function PatientHistory({ patientId }: { patientId: string }) {
 
   const labOrders: any[] = Array.isArray(labData) ? labData : (labData as any)?.orders ?? [];
   const scripts: any[]   = Array.isArray(rxData)  ? rxData  : [];
+  // 403 = the server doesn't show this role lab orders / prescriptions (e.g. receptionist)
+  const labsRestricted = (labError as any)?.statusCode === 403;
+  const rxRestricted   = (rxError as any)?.statusCode === 403;
   const labsByAppt = groupByAppt(labOrders);
   const rxByAppt   = groupByAppt(scripts);
 
@@ -244,6 +247,8 @@ export default function PatientHistory({ patientId }: { patientId: string }) {
         visit={allVisits.find((a) => String(a._id || a.id) === detailId)}
         labs={detailId ? labsByAppt.get(detailId) ?? [] : []}
         scripts={detailId ? rxByAppt.get(detailId) ?? [] : []}
+        labsRestricted={labsRestricted}
+        rxRestricted={rxRestricted}
       />
     </div>
   );

@@ -64,10 +64,13 @@ interface Props {
   visit: any;
   labs: any[];
   scripts: any[];
+  // The server hides lab orders / prescriptions from some roles (e.g. receptionist)
+  labsRestricted?: boolean;
+  rxRestricted?: boolean;
 }
 
 // Full record of one OPD visit, opened from the patient history list.
-export default function VisitDetailModal({ open, onClose, visit, labs, scripts }: Props) {
+export default function VisitDetailModal({ open, onClose, visit, labs, scripts, labsRestricted, rxRestricted }: Props) {
   const { user } = useAuth();
   const visitId = String(visit?._id || visit?.id || "");
   const canSeeBills = BILLING_ROLES.includes(user?.role ?? "");
@@ -107,7 +110,7 @@ export default function VisitDetailModal({ open, onClose, visit, labs, scripts }
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
+        <DialogHeader className="min-w-0">
           <DialogTitle className="flex items-center gap-2 flex-wrap">
             Visit — {visit.date}
             <Badge className={`text-xs ${
@@ -124,7 +127,7 @@ export default function VisitDetailModal({ open, onClose, visit, labs, scripts }
           </p>
         </DialogHeader>
 
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           {/* Vitals */}
           <Section icon={Activity} title="Vitals">
             {vitals.length === 0 ? (
@@ -162,7 +165,9 @@ export default function VisitDetailModal({ open, onClose, visit, labs, scripts }
 
           {/* Prescriptions */}
           <Section icon={Pill} title="Prescriptions">
-            {scripts.length === 0 ? (
+            {rxRestricted ? (
+              <p className="text-xs text-muted-foreground italic">Prescriptions are not available for your role.</p>
+            ) : scripts.length === 0 ? (
               <p className="text-xs text-muted-foreground italic">No prescriptions for this visit.</p>
             ) : scripts.map((rx) => (
               <div key={rx._id} className="border rounded-lg">
@@ -207,7 +212,9 @@ export default function VisitDetailModal({ open, onClose, visit, labs, scripts }
 
           {/* Lab results */}
           <Section icon={FlaskConical} title="Lab Tests">
-            {labs.length === 0 ? (
+            {labsRestricted ? (
+              <p className="text-xs text-muted-foreground italic">Lab results are not available for your role.</p>
+            ) : labs.length === 0 ? (
               <p className="text-xs text-muted-foreground italic">No lab tests for this visit.</p>
             ) : labs.map((o) => (
               <div key={o._id} className="border rounded-lg">
@@ -239,7 +246,7 @@ export default function VisitDetailModal({ open, onClose, visit, labs, scripts }
                         return (
                           <tr key={i}>
                             <td className="px-3 py-1.5">{p.name}</td>
-                            <td className={`px-3 py-1.5 font-semibold ${abnormal ? "text-red-600" : ""}`}>
+                            <td className={`px-3 py-1.5 font-semibold ${abnormal ? "text-red-600 dark:text-red-400" : ""}`}>
                               {p.value} {p.unit && <span className="font-normal text-muted-foreground">{p.unit}</span>}
                               {abnormal && <span className="ml-1">⚠</span>}
                             </td>
@@ -291,7 +298,7 @@ export default function VisitDetailModal({ open, onClose, visit, labs, scripts }
                       <Badge className="text-[10px] bg-gray-100 text-gray-600">{b.status}</Badge>
                       <span>Amount {inr(b.amount)}</span>
                       <span className="text-muted-foreground">Paid {inr(b.paid)}</span>
-                      {b.balance > 0 && <span className="text-red-600">Balance {inr(b.balance)}</span>}
+                      {b.balance > 0 && <span className="text-red-600 dark:text-red-400">Balance {inr(b.balance)}</span>}
                     </div>
                     <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => printBill(b)}>
                       <Printer className="h-3 w-3" /> Print
