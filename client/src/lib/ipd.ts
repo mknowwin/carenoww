@@ -79,6 +79,7 @@ export const IPD_ROLES = {
   bedStatus: ["admin", "doctor", "nurse"],
   note:      ["admin", "doctor"],          // progress notes
   orders:    ["admin", "doctor"],          // IPD prescriptions / lab orders from the chart
+  bill:      ["admin", "finance"],         // Bill tab (billing API shows other roles only their own bills)
 } as const;
 
 export const canDo = (role: string | undefined, action: keyof typeof IPD_ROLES) =>

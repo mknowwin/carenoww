@@ -38,7 +38,7 @@ export async function createOrAppendBill(params: AutoBillParams, session?: mongo
   const subtotal = items.reduce((s, it) => s + it.total, 0);
 
   // Try to find an unlocked, non-paid bill for this encounter
-  let lookupQuery: any = { tenantId, status: { $ne: "Paid" }, isLocked: false };
+  let lookupQuery: any = { tenantId, status: { $nin: ["Paid", "Cancelled"] }, isLocked: false };
   if (appointmentId) lookupQuery.appointmentId = appointmentId;
   else if (admissionId) lookupQuery.admissionId = admissionId;
   else lookupQuery = null; // no encounter link — always create new

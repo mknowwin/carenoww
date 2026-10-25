@@ -403,7 +403,21 @@ export const ipd = {
     post<any>(`/ipd/${id}/notes`, data),
   discharge: (id: string, data: any) => post<any>(`/ipd/${id}/discharge`, data),
   transfer:  (id: string, data: any) => post<any>(`/ipd/${id}/transfer`, data),
+  // Bed-charge segments + IPD bills for an admission (admin/finance); sync posts bed charges owed so far
+  billing:     (id: string) => get<IpdBilling>(`/ipd/${id}/billing`),
+  syncBilling: (id: string) => post<IpdBilling>(`/ipd/${id}/billing/sync`, {}),
 };
+
+export interface IpdBedSegment {
+  key: string; wardId: string; ward: string; bed: string; from: string; to: string;
+  ongoing: boolean; days: number; rateName: string; rate: number; amount: number;
+}
+export interface IpdBilling {
+  segments: IpdBedSegment[];
+  bills: any[];
+  totals: { amount: number; paid: number; balance: number };
+  missingRates: string[];
+}
 
 // ── Wards & beds ──────────────────────────────────────────────────────────────
 export type BedStatus = "Available" | "Cleaning" | "Maintenance";

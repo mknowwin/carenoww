@@ -76,8 +76,20 @@ export async function getMetrics(tenantId: string, tz: string) {
     revenueToday,
     revenueMonth,
     surgeriesThisWeek: 0,
-    avgLOS: 4.2,
+    avgLOS: await averageLengthOfStay(tenantId, tz),
   };
+}
+
+// Average length of stay (calendar days, same count as the IPD chart) for
+// admissions discharged in the last 30 days; 0 when there were none
+async function averageLengthOfStay(tenantId: string, tz: string) {
+  const since = new Date(Date.now() - 30 * 86400000);
+  const rows = await IPDAdmission.find({ tenantId, status: "Discharged", dischargeDate: { $gte: since } })
+    .select("admissionDate dischargeDate").lean();
+  if (rows.length === 0) return 0;
+  const day = (d: Date) => Date.parse(new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(d));
+  const total = rows.reduce((s, r) => s + Math.round((day(r.dischargeDate!) - day(r.admissionDate)) / 86400000) + 1, 0);
+  return Math.round((total / rows.length) * 10) / 10;
 }
 
 export async function getBedOccupancy(tenantId: string) {

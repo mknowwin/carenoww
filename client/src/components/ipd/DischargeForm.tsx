@@ -19,11 +19,13 @@ export const toLocalInput = (d: Date) => {
 
 interface Props {
   admission: any;
+  role?: string;
   suggestedMedications?: string;   // e.g. the stay's active prescriptions, offered as a starting point
+  onOpenBill?: () => void;         // admin/finance: jump to the Bill tab to settle a balance
   onDischarged: (admission: any) => void;
 }
 
-export default function DischargeForm({ admission, suggestedMedications, onDischarged }: Props) {
+export default function DischargeForm({ admission, role, suggestedMedications, onOpenBill, onDischarged }: Props) {
   const now = new Date();
   const earliest = new Date(Math.max(new Date(admission.admissionDate).getTime(), now.getTime() - BACKDATE_DAYS * 86400000));
 
@@ -38,6 +40,8 @@ export default function DischargeForm({ admission, suggestedMedications, onDisch
   const [notes,          setNotes]          = useState("");
   const [saving,         setSaving]         = useState(false);
   const [error,          setError]          = useState("");
+  const [unpaid,         setUnpaid]         = useState<number | null>(null);   // server held discharge for this balance
+  const [balanceNote,    setBalanceNote]    = useState("");
 
   const handleDischarge = async () => {
     if (!finalDiagnosis.trim()) { setError("Final diagnosis is required"); return; }
@@ -56,6 +60,10 @@ export default function DischargeForm({ admission, suggestedMedications, onDisch
       if (!ok) return;
     }
 
+    await submit();
+  };
+
+  const submit = async (withBalance = false) => {
     setSaving(true); setError("");
     try {
       const result = await ipdApi.discharge(admission._id, {
@@ -63,10 +71,12 @@ export default function DischargeForm({ admission, suggestedMedications, onDisch
         dischargeDate: new Date(dischargeAt).toISOString(),
         ...(condition === "Expired" ? { deathAt: new Date(deathAt).toISOString() } : {}),
         ...(condition === "LAMA" ? { lamaReason } : {}),
+        ...(withBalance ? { allowBalance: true, balanceNote } : {}),
       });
       onDischarged(result);
     } catch (e: any) {
-      setError(e.message || "Failed to discharge");
+      if (e.details?.reason === "UNPAID_BALANCE") setUnpaid(e.details.balance);
+      else setError(e.message || "Failed to discharge");
       setSaving(false);
     }
   };
@@ -141,6 +151,29 @@ export default function DischargeForm({ admission, suggestedMedications, onDisch
         <Textarea className="mt-1 h-16" placeholder="Any special instructions..."
           value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
+
+      {unpaid !== null && (
+        <div className="rounded-lg border border-red-200 bg-red-50/60 p-3 space-y-2">
+          <p className="text-sm font-medium text-red-800">
+            Unpaid IPD balance of ₹{unpaid.toLocaleString("en-IN")} (bed charges included up to the discharge time).
+          </p>
+          {onOpenBill && (
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onOpenBill}>Open Bill to collect payment</Button>
+          )}
+          {role === "admin" ? (
+            <div className="space-y-2">
+              <Label className="text-xs">Discharge anyway — reason</Label>
+              <Textarea className="h-14" placeholder="e.g. Insurance claim pending, approved by MD, will pay at follow-up"
+                value={balanceNote} onChange={(e) => setBalanceNote(e.target.value)} />
+              <Button size="sm" variant="destructive" disabled={saving || !balanceNote.trim()} onClick={() => submit(true)}>
+                Discharge with balance
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Ask the billing desk to settle it, or an admin to discharge with a balance note.</p>
+          )}
+        </div>
+      )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

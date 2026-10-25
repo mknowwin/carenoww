@@ -49,6 +49,8 @@ export interface IDischarge {
   dischargedBy: string;
   deathAt?: Date;        // required when condition is Expired
   lamaReason?: string;   // required when condition is LAMA (left against medical advice)
+  balanceAtDischarge?: number;   // unpaid IPD bill balance when discharged
+  balanceNote?: string;          // admin's reason for discharging with a balance
 }
 
 export interface IIPDAdmission extends Document {
@@ -130,6 +132,8 @@ const DischargeSchema = new Schema<IDischarge>({
   dischargedBy:   { type: String, default: "" },
   deathAt:        { type: Date },
   lamaReason:     { type: String },
+  balanceAtDischarge: { type: Number },
+  balanceNote:    { type: String },
 }, { _id: false });
 
 const IPDAdmissionSchema = new Schema<IIPDAdmission>(

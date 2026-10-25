@@ -112,11 +112,14 @@ export async function updateOrder(tenantId: string, userName: string, id: string
       });
       const rate = rateMaster?.defaultRate ?? 0;
 
+      // Inpatient orders go on the admission's IPD bill; others on a Lab / visit bill
+      const ipd = !!order.admissionId;
       const bill = await createOrAppendBill({
         tenantId,
         patientId:     order.patientId,
         patientName:   order.patientName,
-        appointmentId: order.appointmentId || undefined,
+        appointmentId: ipd ? undefined : order.appointmentId || undefined,
+        admissionId:   ipd ? order.admissionId : undefined,
         items: [{
           description: order.test,
           category:    "Lab",
@@ -124,7 +127,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
           unitPrice:   rate,
           total:       rate,
         }],
-        type:      "Lab",
+        type:      ipd ? "IPD" : "Lab",
         createdBy: userName,
       });
       autoBill = { billId: (bill as any).billId };

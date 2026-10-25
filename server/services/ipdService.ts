@@ -6,6 +6,16 @@ import { AppError } from "../lib/AppError.js";
 import { logger } from "../lib/logger.js";
 import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { normalizeBed, bedKeyForId, resolveBedForAdmission, markVacated, icuWardIds } from "./wardService.js";
+import { syncBedCharges, outstandingBalance } from "./ipdBillingService.js";
+
+// Bed charges must never block a clinical action; failures are logged for finance
+async function syncBedChargesSafe(tenantId: string, id: string, tz: string, userName: string, until?: Date) {
+  try {
+    await syncBedCharges(tenantId, id, tz, userName, until);
+  } catch (err: any) {
+    logger.error({ module: "ipd", message: "Bed charge sync failed", tenantId, admission: id, error: err?.message });
+  }
+}
 
 export { normalizeBed };
 
@@ -266,7 +276,7 @@ export async function addProgressNote(tenantId: string, user: { name: string; id
   return admission.progressNotes[admission.progressNotes.length - 1];
 }
 
-export async function transferPatient(tenantId: string, userName: string, id: string, body: Record<string, any>) {
+export async function transferPatient(tenantId: string, userName: string, id: string, body: Record<string, any>, tz = "Asia/Kolkata") {
   const { bedId, reason } = body;
   if (!bedId) throw AppError.badRequest("bedId is required");
 
@@ -308,6 +318,7 @@ export async function transferPatient(tenantId: string, userName: string, id: st
   if (!admission) throw AppError.notFound("Active admission not found");
 
   await markVacated(tenantId, current.bedId);
+  await syncBedChargesSafe(tenantId, id, tz, userName);
   if ((ward.type === "ICU") !== fromIcu) {
     await setPatientStatus(tenantId, admission.patientId, { status: statusForWardType(ward.type) });
   }
@@ -333,8 +344,12 @@ export async function updateAdmission(tenantId: string, id: string, body: Record
   return admission;
 }
 
-export async function dischargePatient(tenantId: string, dischargedBy: string, id: string, body: Record<string, any>) {
-  const { finalDiagnosis, treatment, medications, followUp, condition, notes, dischargeDate: rawDischargeDate, deathAt: rawDeathAt, lamaReason } = body;
+export async function dischargePatient(
+  tenantId: string, dischargedBy: string, id: string, body: Record<string, any>,
+  opts: { role?: string; tz?: string } = {},
+) {
+  const { finalDiagnosis, treatment, medications, followUp, condition, notes, dischargeDate: rawDischargeDate, deathAt: rawDeathAt, lamaReason, allowBalance, balanceNote } = body;
+  const tz = opts.tz ?? "Asia/Kolkata";
   if (!finalDiagnosis || !condition) {
     throw AppError.badRequest("finalDiagnosis and condition are required");
   }
@@ -351,6 +366,23 @@ export async function dischargePatient(tenantId: string, dischargedBy: string, i
   if (condition === "LAMA") {
     if (!String(lamaReason ?? "").trim()) throw AppError.badRequest("Reason / consent note is required for LAMA");
     extra.lamaReason = String(lamaReason).trim();
+  }
+
+  // Bed charges through the discharge time, then the unpaid-balance check.
+  // Expired / LAMA are never held for payment; otherwise an admin may discharge
+  // with a balance by giving a reason.
+  await syncBedChargesSafe(tenantId, id, tz, dischargedBy, dischargeDate);
+  const balance = await outstandingBalance(tenantId, id);
+  if (balance > 0) {
+    extra.balanceAtDischarge = balance;
+    if (condition !== "Expired" && condition !== "LAMA") {
+      if (!allowBalance) {
+        throw AppError.conflict(`Unpaid IPD balance of ₹${balance.toLocaleString("en-IN")}`, { reason: "UNPAID_BALANCE", balance });
+      }
+      if (opts.role !== "admin") throw AppError.forbidden("Only an admin can discharge with an unpaid balance");
+      if (!String(balanceNote ?? "").trim()) throw AppError.badRequest("Give a reason for discharging with a balance");
+      extra.balanceNote = String(balanceNote).trim();
+    }
   }
 
   const admission = await IPDAdmission.findOneAndUpdate(

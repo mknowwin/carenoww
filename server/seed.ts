@@ -13,6 +13,7 @@ import IPDAdmission from "./models/IPDAdmission.js";
 import Counter from "./models/Counter.js";
 import Ward from "./models/Ward.js";
 import Bed from "./models/Bed.js";
+import ServiceRateMaster from "./models/ServiceRateMaster.js";
 import { connectDB } from "./db.js";
 import { seedCommonIcdCodes } from "./services/icdCodeService.js";
 
@@ -96,14 +97,17 @@ export async function seedTenant(tenantId: string) {
 
   // Seed wards & beds (Settings → Wards & Beds)
   const wardDefs = [
-    { name: "General Ward", code: "GW",  type: "General",  beds: 20 },
-    { name: "ICU",          code: "ICU", type: "ICU",      beds: 6  },
-    { name: "Private Ward", code: "PW",  type: "Private",  beds: 8  },
-    { name: "Obs/Gyn",      code: "OB",  type: "Obs/Gyn",  beds: 6  },
+    { name: "General Ward", code: "GW",  type: "General",  beds: 20, rate: 1500 },
+    { name: "ICU",          code: "ICU", type: "ICU",      beds: 6,  rate: 6000 },
+    { name: "Private Ward", code: "PW",  type: "Private",  beds: 8,  rate: 3500 },
+    { name: "Obs/Gyn",      code: "OB",  type: "Obs/Gyn",  beds: 6,  rate: 2000 },
   ];
   const bedIdOf: Record<string, { wardId: string; bedId: string }> = {};
   for (const [i, w] of wardDefs.entries()) {
-    const ward = await Ward.create({ tenantId: tid, name: w.name, code: w.code, type: w.type, sortOrder: i });
+    // Daily bed charge (Service Rates → Bed Charges) linked to the ward for IPD billing
+    await ServiceRateMaster.deleteMany({ tenantId: tid, category: "Bed Charges", name: `${w.name} bed` });
+    const rate = await ServiceRateMaster.create({ tenantId: tid, category: "Bed Charges", name: `${w.name} bed`, defaultRate: w.rate, unit: "per day" });
+    const ward = await Ward.create({ tenantId: tid, name: w.name, code: w.code, type: w.type, sortOrder: i, bedRateId: String(rate._id) });
     const beds = await Bed.insertMany(Array.from({ length: w.beds }, (_, n) => ({
       tenantId: tid, wardId: ward._id, number: `${w.code}-${String(n + 1).padStart(2, "0")}`,
     })));

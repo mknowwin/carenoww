@@ -18,6 +18,7 @@ import SoapTextarea from "@/components/SoapTextarea";
 import VitalFlags from "@/components/ipd/VitalFlags";
 import VitalsCharts from "@/components/ipd/VitalsCharts";
 import DischargeForm from "@/components/ipd/DischargeForm";
+import BillTab from "@/components/ipd/BillTab";
 import { TransferModal, EditAdmissionModal } from "@/components/ipd/AdmissionDialogs";
 import NursingRoundModal from "@/components/modals/NursingRoundModal";
 import PrescriptionModal from "@/components/modals/PrescriptionModal";
@@ -31,6 +32,7 @@ const TABS = [
   { id: "orders",    label: "Orders" },
   { id: "transfers", label: "Transfers" },
   { id: "discharge", label: "Discharge" },
+  { id: "bill",      label: "Bill" },
 ] as const;
 type TabId = typeof TABS[number]["id"];
 
@@ -56,9 +58,10 @@ export default function IPDChartPage() {
   const role = user?.role;
   const tz = user?.timezone ?? "Asia/Kolkata";
 
+  const tabs = TABS.filter((t) => t.id !== "bill" || canDo(role, "bill"));
   const [tab, setTab] = useState<TabId>(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    return (TABS.some((x) => x.id === t) ? t : "overview") as TabId;
+    return (tabs.some((x) => x.id === t) ? t : "overview") as TabId;
   });
   const [roundOpen, setRoundOpen]       = useState(false);
   const [rxOpen, setRxOpen]             = useState(false);
@@ -200,7 +203,7 @@ export default function IPDChartPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b overflow-x-auto">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`text-sm px-3 py-2 -mb-px border-b-2 whitespace-nowrap transition-colors ${
               tab === t.id ? "border-primary text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"
@@ -223,9 +226,11 @@ export default function IPDChartPage() {
           canOrder={active && canDo(role, "orders")} onRx={() => setRxOpen(true)} onLab={() => setLabOpen(true)} />
       )}
       {tab === "transfers" && <TransfersTab adm={adm} />}
+      {tab === "bill" && <BillTab admission={adm} isAdmin={role === "admin"} />}
       {tab === "discharge" && (
         <DischargeTab adm={adm} role={role} tz={tz} suggestedMedications={medsText(scripts)}
-          onDischarged={() => { refresh(); qc.invalidateQueries({ queryKey: ["ipd-discharged"] }); }}
+          onOpenBill={canDo(role, "bill") ? () => setTab("bill") : undefined}
+          onDischarged={() => { refresh(); qc.invalidateQueries({ queryKey: ["ipd-discharged"] }); qc.invalidateQueries({ queryKey: ["ipd-billing", id] }); }}
           onFollowUp={() => setFollowUpOpen(true)} />
       )}
 
@@ -521,8 +526,8 @@ function TransfersTab({ adm }: { adm: any }) {
 }
 
 // ── Discharge: form while admitted, summary afterwards ───────────────────────
-function DischargeTab({ adm, role, tz, suggestedMedications, onDischarged, onFollowUp }: {
-  adm: any; role?: string; tz: string; suggestedMedications: string;
+function DischargeTab({ adm, role, tz, suggestedMedications, onOpenBill, onDischarged, onFollowUp }: {
+  adm: any; role?: string; tz: string; suggestedMedications: string; onOpenBill?: () => void;
   onDischarged: () => void; onFollowUp: () => void;
 }) {
   if (adm.status === "Active") {
@@ -533,7 +538,7 @@ function DischargeTab({ adm, role, tz, suggestedMedications, onDischarged, onFol
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Discharge Summary</CardTitle></CardHeader>
         <CardContent>
-          <DischargeForm admission={adm} suggestedMedications={suggestedMedications} onDischarged={onDischarged} />
+          <DischargeForm admission={adm} role={role} suggestedMedications={suggestedMedications} onOpenBill={onOpenBill} onDischarged={onDischarged} />
         </CardContent>
       </Card>
     );
@@ -543,6 +548,7 @@ function DischargeTab({ adm, role, tz, suggestedMedications, onDischarged, onFol
   const rows: [string, string | undefined][] = [
     ["Final Diagnosis", d.finalDiagnosis], ["Treatment Summary", d.treatment], ["Discharge Medications", d.medications],
     ["Follow-up", d.followUp], ["LAMA Reason / Consent", d.lamaReason], ["Notes", d.notes],
+    ["Discharged With Unpaid Balance", d.balanceAtDischarge ? `₹${d.balanceAtDischarge.toLocaleString("en-IN")}${d.balanceNote ? ` — ${d.balanceNote}` : ""}` : undefined],
   ];
   return (
     <Card>

@@ -26,7 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "/appointments", label: "Appointments", icon: CalendarDays,    description: "Scheduling & queue management", roles: ["admin","doctor","receptionist"], module: "appointments" },
   { id: "/reception",    label: "Reception",    icon: UserCheck,       description: "Check-in & token management",   roles: ["admin","receptionist","nurse"] },
   { id: "/opd",          label: "OPD / Queue",  icon: Stethoscope,     description: "Consultation, queue & clinical notes", roles: ["admin","doctor","nurse"], module: "opd" },
-  { id: "/ipd",          label: "IPD & Wards",  icon: BedDouble,       description: "Inpatient ward management",     roles: ["admin","doctor","nurse","receptionist"], module: "ipd" },
+  { id: "/ipd",          label: "IPD & Wards",  icon: BedDouble,       description: "Inpatient ward management",     roles: ["admin","doctor","nurse","receptionist","finance"], module: "ipd" },
   { id: "/lab",          label: "Laboratory",   icon: FlaskConical,    description: "Tests, samples & reports",      roles: ["admin","doctor","nurse","lab_tech"], module: "lab" },
   { id: "/pharmacy",     label: "Pharmacy",     icon: Pill,            description: "Dispensing & drug inventory",   roles: ["admin","pharmacist","pharmacy_admin","nurse"], module: "pharmacy" },
   { id: "/billing",      label: "Billing & RCM",icon: CreditCard,      description: "Revenue cycle & insurance",     roles: ["admin","finance","receptionist","pharmacist","pharmacy_admin"], module: "billing" },

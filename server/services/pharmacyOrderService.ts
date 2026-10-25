@@ -144,12 +144,14 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
 
       if (billItems.length) {
         const expandedItems = await deductAndExpandPharmacyItems(tenantId, billItems, session);
+        // Inpatient orders go on the admission's IPD bill
         const bill = await createOrAppendBill({
           tenantId,
           patientId,
           patientName,
+          admissionId: admissionId || undefined,
           items:     expandedItems,
-          type:      "Pharmacy",
+          type:      admissionId ? "IPD" : "Pharmacy",
           createdBy: userName,
         }, session);
         autoBill = { billId: (bill as any).billId };
@@ -217,12 +219,14 @@ export async function updateOrder(tenantId: string, userName: string, id: string
 
       if (billItems.length) {
         const expandedItems = await deductAndExpandPharmacyItems(tenantId, billItems, session);
+        // Inpatient orders go on the admission's IPD bill
         const bill = await createOrAppendBill({
           tenantId,
           patientId:   order.patientId,
           patientName: order.patientName,
+          admissionId: order.admissionId || undefined,
           items:       expandedItems,
-          type:        "Pharmacy",
+          type:        order.admissionId ? "IPD" : "Pharmacy",
           createdBy:   userName,
         }, session);
         autoBill = { billId: (bill as any).billId };
