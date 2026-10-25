@@ -248,8 +248,10 @@ export default function DashboardPage() {
           <CardContent className="space-y-3">
             {bedLoading
               ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)
+              : BED_OCCUPANCY.length === 0
+              ? <p className="text-xs text-muted-foreground py-4 text-center">No wards set up — add them in Settings → Wards & Beds.</p>
               : BED_OCCUPANCY.map((ward: any) => {
-                const pct = Math.round((ward.occupied / ward.total) * 100);
+                const pct = ward.total > 0 ? Math.round((ward.occupied / ward.total) * 100) : 0;
                 const color = pct >= 90 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-teal-500";
                 return (
                   <div key={ward.ward}>

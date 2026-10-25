@@ -17,6 +17,10 @@ export interface ITransfer {
   fromBed: string;
   toWard: string;
   toBed: string;
+  fromWardId?: string;
+  fromBedId?: string;
+  toWardId?: string;
+  toBedId?: string;
   reason: string;
   by: string;
 }
@@ -44,7 +48,9 @@ export interface IIPDAdmission extends Document {
   admittingDoctorId?: string;
   department: string;
   ward: string;
+  wardId?: string;
   bedNumber: string;
+  bedId?: string;
   bedKey: string;
   admissionDate: Date;
   provisionalDiagnosis: string;
@@ -74,6 +80,11 @@ const TransferSchema = new Schema<ITransfer>({
   fromBed:  { type: String, default: "" },
   toWard:   { type: String, required: true },
   toBed:    { type: String, required: true },
+  // Master ids, so a ward/bed that was only passed through still counts as used
+  fromWardId: { type: String, default: "" },
+  fromBedId:  { type: String, default: "" },
+  toWardId:   { type: String, default: "" },
+  toBedId:    { type: String, default: "" },
   reason:   { type: String, default: "" },
   by:       { type: String, default: "" },
 }, { _id: true });
@@ -101,9 +112,13 @@ const IPDAdmissionSchema = new Schema<IIPDAdmission>(
     admittingDoctor:   { type: String, required: true },
     admittingDoctorId: { type: String },
     department:        { type: String, required: true },
-    ward:              { type: String, required: true },
+    ward:              { type: String, required: true },   // ward name at the time (display/history)
+    wardId:            { type: String, default: "" },
     bedNumber:         { type: String, required: true },
-    bedKey:            { type: String, required: true },   // normalised "WARD|BED", see ipdService.bedKeyFor
+    bedId:             { type: String, default: "" },
+    // Occupancy key with a partial unique index: "BED:<bedId>" for master beds,
+    // legacy "WARD|BED" (normalised) for admissions made before the bed master
+    bedKey:            { type: String, required: true },
     admissionDate:     { type: Date, default: Date.now },
     provisionalDiagnosis: { type: String, required: true },
     status:            { type: String, enum: ["Active","Discharged","Transferred"], default: "Active" },

@@ -1246,7 +1246,7 @@ export default function OPDPage() {
         onAdmitted={() => {
           setAdmitModalOpen(false);
           qc.invalidateQueries({ queryKey: ["ipd"] });
-          qc.invalidateQueries({ queryKey: ["ipd-beds"] });
+          qc.invalidateQueries({ queryKey: ["wards"] });
           qc.invalidateQueries({ queryKey: ["ipd-stats"] });
           qc.invalidateQueries({ queryKey: ["ipd-active-by-patient"] });
         }}

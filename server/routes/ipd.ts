@@ -26,12 +26,6 @@ router.get("/active-by-patient", asyncHandler(async (req: AuthRequest, res) => {
   res.json({ success: true, data });
 }));
 
-// ── GET /api/ipd/beds — bed occupancy map ─────────────────────────────────────
-router.get("/beds", asyncHandler(async (req: AuthRequest, res) => {
-  const data = await ipdService.getBedMap(req.user!.tenantId);
-  res.json({ success: true, data });
-}));
-
 // ── GET /api/ipd/:id — full admission with rounds ─────────────────────────────
 router.get("/:id", asyncHandler(async (req: AuthRequest, res) => {
   const admission = await ipdService.getAdmission(req.user!.tenantId, req.params.id);

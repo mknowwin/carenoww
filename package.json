@@ -22,6 +22,7 @@
     "migrate:receivedby-id": "node scripts/run-script.mjs migrate-receivedby-id",
     "migrate:bill-notes": "node scripts/run-script.mjs migrate-bill-notes",
     "migrate:ipd-phase1": "node scripts/run-script.mjs migrate-ipd-phase1",
+    "migrate:ipd-wards": "node scripts/run-script.mjs migrate-ipd-wards",
     "icd:import": "node scripts/run-script.mjs import-icd-catalog",
     "rollup:refresh": "node scripts/run-script.mjs refresh-rollups",
     "rollup:backfill": "node scripts/run-script.mjs refresh-rollups",

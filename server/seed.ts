@@ -11,6 +11,8 @@ import BillingRecord from "./models/BillingRecord.js";
 import BedOccupancy from "./models/BedOccupancy.js";
 import IPDAdmission from "./models/IPDAdmission.js";
 import Counter from "./models/Counter.js";
+import Ward from "./models/Ward.js";
+import Bed from "./models/Bed.js";
 import { connectDB } from "./db.js";
 import { seedCommonIcdCodes } from "./services/icdCodeService.js";
 
@@ -27,6 +29,8 @@ export async function seedTenant(tenantId: string) {
     BillingRecord.deleteMany({ tenantId: tid }),
     BedOccupancy.deleteMany({ tenantId: tid }),   // legacy — no longer seeded or read
     IPDAdmission.deleteMany({ tenantId: tid }),
+    Ward.deleteMany({ tenantId: tid }),
+    Bed.deleteMany({ tenantId: tid }),
   ]);
 
   // Seed Patients
@@ -90,13 +94,32 @@ export async function seedTenant(tenantId: string) {
     { tenantId: tid, billId: "BILL-005", patientId: "UHID-007", patientName: "Ramesh Babu",     date: new Date("2026-05-04"), amount: 95000, paid: 95000, balance: 0,     status: "Claimed", payer: "New India",   type: "IPD"  },
   ]);
 
+  // Seed wards & beds (Settings → Wards & Beds)
+  const wardDefs = [
+    { name: "General Ward", code: "GW",  type: "General",  beds: 20 },
+    { name: "ICU",          code: "ICU", type: "ICU",      beds: 6  },
+    { name: "Private Ward", code: "PW",  type: "Private",  beds: 8  },
+    { name: "Obs/Gyn",      code: "OB",  type: "Obs/Gyn",  beds: 6  },
+  ];
+  const bedIdOf: Record<string, { wardId: string; bedId: string }> = {};
+  for (const [i, w] of wardDefs.entries()) {
+    const ward = await Ward.create({ tenantId: tid, name: w.name, code: w.code, type: w.type, sortOrder: i });
+    const beds = await Bed.insertMany(Array.from({ length: w.beds }, (_, n) => ({
+      tenantId: tid, wardId: ward._id, number: `${w.code}-${String(n + 1).padStart(2, "0")}`,
+    })));
+    for (const b of beds) bedIdOf[b.number] = { wardId: String(ward._id), bedId: String(b._id) };
+  }
+  const bedRef = (number: string) => ({ ...bedIdOf[number], bedNumber: number, bedKey: `BED:${bedIdOf[number].bedId}` });
+  // A just-vacated bed waiting for housekeeping
+  await Bed.updateOne({ tenantId: tid, number: "GW-03" }, { $set: { status: "Cleaning" } });
+
   // Seed IPD admissions for the patients marked IPD above, so the IPD page,
   // bed map and dashboard agree with the Patients list
   const daysAgo = (d: number, h = 10) => { const t = new Date(); t.setDate(t.getDate() - d); t.setHours(h, 0, 0, 0); return t; };
   await IPDAdmission.insertMany([
     {
       tenantId: tid, admissionId: "ADM-0001", patientId: "UHID-002", patientName: "Lakshmi Devi", patientAge: 62, patientGender: "F", patientPhone: "9876543211",
-      admittingDoctor: "Dr. Karthik Nair", department: "Orthopedics", ward: "General Ward", bedNumber: "GW-05", bedKey: "GENERAL WARD|GW-05",
+      admittingDoctor: "Dr. Karthik Nair", department: "Orthopedics", ward: "General Ward", ...bedRef("GW-05"),
       admissionDate: daysAgo(4), provisionalDiagnosis: "Hip Fracture — ORIF planned",
       rounds: [
         { roundedAt: daysAgo(3, 8),  nurse: "Sr. Meena Thomas", bp: "138/86", pulse: 88, temp: 99.1, spo2: 96, notes: "Pain 6/10, analgesia given" },
@@ -105,7 +128,7 @@ export async function seedTenant(tenantId: string) {
     },
     {
       tenantId: tid, admissionId: "ADM-0002", patientId: "UHID-004", patientName: "Preethi Raj", patientAge: 28, patientGender: "F", patientPhone: "9876543213",
-      admittingDoctor: "Dr. Meena Suresh", department: "Obstetrics", ward: "Obs/Gyn", bedNumber: "OB-02", bedKey: "OBS/GYN|OB-02",
+      admittingDoctor: "Dr. Meena Suresh", department: "Obstetrics", ward: "Obs/Gyn", ...bedRef("OB-02"),
       admissionDate: daysAgo(2), provisionalDiagnosis: "Pregnancy 36 weeks — observation",
       rounds: [
         { roundedAt: daysAgo(1, 9), nurse: "Sr. Meena Thomas", bp: "118/76", pulse: 84, temp: 98.4, spo2: 99, notes: "FHR 142, no contractions" },
@@ -113,14 +136,18 @@ export async function seedTenant(tenantId: string) {
     },
     {
       tenantId: tid, admissionId: "ADM-0003", patientId: "UHID-007", patientName: "Ramesh Babu", patientAge: 67, patientGender: "M", patientPhone: "9876543216",
-      admittingDoctor: "Dr. Priya Rajan", department: "Cardiology", ward: "General Ward", bedNumber: "GW-11", bedKey: "GENERAL WARD|GW-11",
+      admittingDoctor: "Dr. Priya Rajan", department: "Cardiology", ward: "General Ward", ...bedRef("GW-11"),
       admissionDate: daysAgo(6), provisionalDiagnosis: "STEMI — post angioplasty",
       rounds: [
         { roundedAt: daysAgo(5, 8),  nurse: "Sr. Meena Thomas", bp: "146/92", pulse: 96, temp: 98.8, spo2: 94, notes: "In ICU, on monitor" },
         { roundedAt: daysAgo(2, 9),  nurse: "Sr. Meena Thomas", bp: "130/84", pulse: 78, temp: 98.4, spo2: 97, notes: "Stable, ambulating" },
       ],
       transfers: [
-        { at: daysAgo(3, 12), fromWard: "ICU", fromBed: "ICU-03", toWard: "General Ward", toBed: "GW-11", reason: "Stable, stepped down from ICU", by: "Dr. Priya Rajan" },
+        {
+          at: daysAgo(3, 12), fromWard: "ICU", fromBed: "ICU-03", toWard: "General Ward", toBed: "GW-11",
+          fromWardId: bedIdOf["ICU-03"].wardId, fromBedId: bedIdOf["ICU-03"].bedId, toWardId: bedIdOf["GW-11"].wardId, toBedId: bedIdOf["GW-11"].bedId,
+          reason: "Stable, stepped down from ICU", by: "Dr. Priya Rajan",
+        },
       ],
     },
   ]);

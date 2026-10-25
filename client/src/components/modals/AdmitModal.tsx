@@ -8,8 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ipd as ipdApi, patients as patientsApi, users as usersApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
-
-import { WARDS, DEPTS } from "@/lib/ipd";
+import BedPicker from "@/components/BedPicker";
+import { DEPTS } from "@/lib/ipd";
 
 interface Props {
   open: boolean;
@@ -20,13 +20,13 @@ interface Props {
   appointmentId?: string;
   fromDoctor?: string;
   fromDoctorId?: string;
+  bedId?: string;         // pre-selected bed (Bed Map → free bed → Admit here)
 }
 
-export default function AdmitModal({ open, onClose, onAdmitted, patientId: initPatientId, patientName: initPatientName, appointmentId, fromDoctor, fromDoctorId }: Props) {
+export default function AdmitModal({ open, onClose, onAdmitted, patientId: initPatientId, patientName: initPatientName, appointmentId, fromDoctor, fromDoctorId, bedId: initBedId }: Props) {
   const [search,    setSearch]    = useState("");
   const [selected,  setSelected]  = useState<any>(null);
-  const [ward,      setWard]      = useState("");
-  const [bed,       setBed]       = useState("");
+  const [bedId,     setBedId]     = useState(initBedId ?? "");
   const [dept,      setDept]      = useState("");
   const [diagnosis, setDiagnosis] = useState("");
   const [doctor,    setDoctor]    = useState(fromDoctor ?? "");
@@ -54,22 +54,23 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
 
   useEffect(() => {
     if (!open) {
-      setSearch(""); setSelected(null); setWard(""); setBed(""); setDept(""); setDiagnosis(""); setError("");
+      setSearch(""); setSelected(null); setBedId(""); setDept(""); setDiagnosis(""); setError("");
       if (!initPatientId) setShowSearch(true);
     }
+    if (open && initBedId) setBedId(initBedId);
     if (initPatientId && initPatientName) {
       setSelected({ uhid: initPatientId, name: initPatientName });
       setShowSearch(false);
     }
     if (fromDoctor)   setDoctor(fromDoctor);
     if (fromDoctorId) setDoctorId(fromDoctorId);
-  }, [open, initPatientId, initPatientName, fromDoctor, fromDoctorId]);
+  }, [open, initPatientId, initPatientName, fromDoctor, fromDoctorId, initBedId]);
 
   const patients: any[] = searchData?.patients ?? [];
 
   const handleSubmit = async () => {
-    if (!selected || !ward || !bed || !diagnosis || !doctor) {
-      setError("All fields required"); return;
+    if (!selected || !bedId || !diagnosis || !doctor) {
+      setError("Patient, bed, doctor and diagnosis are required"); return;
     }
     setSaving(true); setError("");
     try {
@@ -80,7 +81,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
         admittingDoctor:      doctor,
         admittingDoctorId:    doctorId,
         department:           dept || selected.department || "",
-        ward, bedNumber: bed,
+        bedId,
         provisionalDiagnosis: diagnosis,
       });
       onAdmitted();
@@ -140,20 +141,9 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
           )}
 
           {/* Ward + Bed */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Ward</Label>
-              <Select value={ward} onValueChange={setWard}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Select ward" /></SelectTrigger>
-                <SelectContent>
-                  {WARDS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Bed Number</Label>
-              <Input className="mt-1 uppercase" placeholder="e.g. GW-05, ICU-02" value={bed} onChange={(e) => setBed(e.target.value.toUpperCase())} />
-            </div>
+          <div>
+            <Label>Bed</Label>
+            <BedPicker className="mt-1" value={bedId} onChange={setBedId} />
           </div>
 
           {/* Department */}

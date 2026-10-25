@@ -5,6 +5,9 @@ import { getNextId } from "../lib/counter.js";
 import { AppError } from "../lib/AppError.js";
 import { logger } from "../lib/logger.js";
 import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
+import { normalizeBed, bedKeyForId, resolveBedForAdmission, markVacated, icuWardIds } from "./wardService.js";
+
+export { normalizeBed };
 
 async function nextAdmissionId(tenantId: string): Promise<string> {
   return getNextId(tenantId, "admission", "ADM-");
@@ -30,17 +33,14 @@ async function resolvePatient(tenantId: string, raw: string) {
   return patient;
 }
 
-// Bed numbers are typed by staff — "gw-05", "GW-05 " and "GW -05" are the same bed.
-export function normalizeBed(bed: string): string {
-  return String(bed ?? "").trim().toUpperCase().replace(/\s+/g, "");
-}
-
+// Legacy occupancy key for admissions made before the ward & bed master
+// (still used by migrate-ipd-phase1); new admissions use bedKeyForId.
 export function bedKeyFor(ward: string, bed: string): string {
   return `${String(ward ?? "").trim().toUpperCase()}|${normalizeBed(bed)}`;
 }
 
-function statusForWard(ward: string): "IPD" | "ICU" {
-  return ward.trim().toUpperCase() === "ICU" ? "ICU" : "IPD";
+function statusForWardType(type: string): "IPD" | "ICU" {
+  return type === "ICU" ? "ICU" : "IPD";
 }
 
 async function setPatientStatus(tenantId: string, uhid: string, update: Record<string, unknown>) {
@@ -98,11 +98,17 @@ export async function listAdmissions(tenantId: string, filters: IPDListFilters, 
   return { admissions, total: admissions.length };
 }
 
+// Active ICU admissions: in an ICU-type ward, or legacy rows named "ICU"
+export async function icuFilter(tenantId: string) {
+  const ids = await icuWardIds(tenantId);
+  return { tenantId, status: "Active", $or: [{ wardId: { $in: ids } }, { wardId: { $in: ["", null] }, ward: "ICU" }] };
+}
+
 export async function getStats(tenantId: string, tz: string) {
   const today = todayInTz(tz);
   const [active, icu, dischargedToday] = await Promise.all([
     IPDAdmission.countDocuments({ tenantId, status: "Active" }),
-    IPDAdmission.countDocuments({ tenantId, status: "Active", ward: "ICU" }),
+    IPDAdmission.countDocuments(await icuFilter(tenantId)),
     IPDAdmission.countDocuments({
       tenantId, status: "Discharged",
       dischargeDate: { $gte: startOfDayUtc(today, tz), $lte: endOfDayUtc(today, tz) },
@@ -125,29 +131,6 @@ export async function activeByPatient(tenantId: string, ids: string[]) {
   return map;
 }
 
-export async function getBedMap(tenantId: string) {
-  const active = await IPDAdmission.find({
-    tenantId,
-    status: "Active",
-  }).select("ward bedNumber patientName patientId admissionDate provisionalDiagnosis admittingDoctor admissionId");
-
-  const wardMap: Record<string, any[]> = {};
-  active.forEach((a) => {
-    if (!wardMap[a.ward]) wardMap[a.ward] = [];
-    wardMap[a.ward].push({
-      _id:         a._id,
-      admissionId: a.admissionId,
-      bedNumber:   a.bedNumber,
-      patientName: a.patientName,
-      patientId:   a.patientId,
-      since:       a.admissionDate,
-      diagnosis:   a.provisionalDiagnosis,
-      doctor:      a.admittingDoctor,
-    });
-  });
-  return wardMap;
-}
-
 export async function getAdmission(tenantId: string, id: string) {
   if (!mongoose.Types.ObjectId.isValid(id)) throw AppError.notFound("Admission not found");
   const admission = await IPDAdmission.findOne({ _id: id, tenantId });
@@ -160,18 +143,16 @@ export async function getAdmission(tenantId: string, id: string) {
 export async function admitPatient(tenantId: string, body: Record<string, any>) {
   const {
     patientId: rawPatientId, appointmentId, admittingDoctor, admittingDoctorId,
-    department, ward, bedNumber: rawBed, provisionalDiagnosis,
+    department, bedId, provisionalDiagnosis,
   } = body;
 
-  if (!rawPatientId || !admittingDoctor || !ward || !rawBed || !provisionalDiagnosis) {
-    throw AppError.badRequest("patientId, admittingDoctor, ward, bedNumber, provisionalDiagnosis required");
+  if (!rawPatientId || !admittingDoctor || !bedId || !provisionalDiagnosis) {
+    throw AppError.badRequest("patientId, admittingDoctor, bedId, provisionalDiagnosis required");
   }
 
   // Demographics come from the Patient record, not the client
   const patient = await resolvePatient(tenantId, String(rawPatientId));
   const uhid = patient.uhid;
-  const bedNumber = normalizeBed(rawBed);
-  const bedKey = bedKeyFor(ward, bedNumber);
 
   // Friendly pre-checks; the unique indexes are the real guard against races
   const alreadyAdmitted = await IPDAdmission.findOne({ tenantId, patientId: uhid, status: "Active" });
@@ -180,8 +161,8 @@ export async function admitPatient(tenantId: string, body: Record<string, any>) 
       `${patient.name} is already admitted (${alreadyAdmitted.admissionId}) in ${alreadyAdmitted.ward} — Bed ${alreadyAdmitted.bedNumber}. Discharge first or transfer the patient.`
     );
   }
-  const occupied = await IPDAdmission.findOne({ tenantId, bedKey, status: "Active" });
-  if (occupied) throw AppError.conflict(`Bed ${bedNumber} in ${ward} is already occupied by ${occupied.patientName}`);
+  const { bed, ward } = await resolveBedForAdmission(tenantId, String(bedId));
+  const bedNumber = bed.number;
 
   const admissionId = await nextAdmissionId(tenantId);
 
@@ -199,16 +180,18 @@ export async function admitPatient(tenantId: string, body: Record<string, any>) 
       admittingDoctor,
       admittingDoctorId: admittingDoctorId || "",
       department:        department || patient.department || "",
-      ward,
+      ward:              ward.name,
+      wardId:            String(ward._id),
       bedNumber,
-      bedKey,
+      bedId:             String(bed._id),
+      bedKey:            bedKeyForId(String(bed._id)),
       provisionalDiagnosis,
     });
   } catch (err: any) {
-    throw duplicateError(err, ward, bedNumber, patient.name) ?? err;
+    throw duplicateError(err, ward.name, bedNumber, patient.name) ?? err;
   }
 
-  await setPatientStatus(tenantId, uhid, { status: statusForWard(ward), admittedOn: admission.admissionDate });
+  await setPatientStatus(tenantId, uhid, { status: statusForWardType(ward.type), admittedOn: admission.admissionDate });
 
   return admission;
 }
@@ -238,32 +221,34 @@ export async function addRound(tenantId: string, nurseName: string, id: string, 
 }
 
 export async function transferPatient(tenantId: string, userName: string, id: string, body: Record<string, any>) {
-  const { ward, bedNumber: rawBed, reason } = body;
-  if (!ward || !rawBed) throw AppError.badRequest("ward and bedNumber are required");
+  const { bedId, reason } = body;
+  if (!bedId) throw AppError.badRequest("bedId is required");
 
   const current = await IPDAdmission.findOne({ _id: id, tenantId, status: "Active" });
   if (!current) throw AppError.notFound("Active admission not found");
+  if (String(bedId) === current.bedId) throw AppError.badRequest("Patient is already in that bed");
 
-  const bedNumber = normalizeBed(rawBed);
-  const bedKey = bedKeyFor(ward, bedNumber);
-  if (bedKey === current.bedKey) throw AppError.badRequest("Patient is already in that bed");
-
-  const occupied = await IPDAdmission.findOne({ tenantId, bedKey, status: "Active", _id: { $ne: id } });
-  if (occupied) throw AppError.conflict(`Bed ${bedNumber} in ${ward} is already occupied by ${occupied.patientName}`);
+  const { bed, ward } = await resolveBedForAdmission(tenantId, String(bedId), id);
+  const bedNumber = bed.number;
+  const fromIcu = current.wardId ? (await icuWardIds(tenantId)).includes(current.wardId) : current.ward === "ICU";
 
   let admission;
   try {
     admission = await IPDAdmission.findOneAndUpdate(
       { _id: id, tenantId, status: "Active" },
       {
-        $set: { ward, bedNumber, bedKey },
+        $set: { ward: ward.name, wardId: String(ward._id), bedNumber, bedId: String(bed._id), bedKey: bedKeyForId(String(bed._id)) },
         $push: {
           transfers: {
             at:       new Date(),
             fromWard: current.ward,
             fromBed:  current.bedNumber,
-            toWard:   ward,
+            toWard:   ward.name,
             toBed:    bedNumber,
+            fromWardId: current.wardId || "",
+            fromBedId:  current.bedId || "",
+            toWardId:   String(ward._id),
+            toBedId:    String(bed._id),
             reason:   reason || "",
             by:       userName,
           },
@@ -272,12 +257,13 @@ export async function transferPatient(tenantId: string, userName: string, id: st
       { new: true }
     );
   } catch (err: any) {
-    throw duplicateError(err, ward, bedNumber, current.patientName) ?? err;
+    throw duplicateError(err, ward.name, bedNumber, current.patientName) ?? err;
   }
   if (!admission) throw AppError.notFound("Active admission not found");
 
-  if (statusForWard(ward) !== statusForWard(current.ward)) {
-    await setPatientStatus(tenantId, admission.patientId, { status: statusForWard(ward) });
+  await markVacated(tenantId, current.bedId);
+  if ((ward.type === "ICU") !== fromIcu) {
+    await setPatientStatus(tenantId, admission.patientId, { status: statusForWardType(ward.type) });
   }
   return admission;
 }
@@ -326,6 +312,8 @@ export async function dischargePatient(tenantId: string, dischargedBy: string, i
     { new: true }
   );
   if (!admission) throw AppError.notFound("Active admission not found");
+
+  await markVacated(tenantId, admission.bedId);
 
   // Back to outpatient follow-up; "Discharged" is kept only for patients who expired
   await setPatientStatus(tenantId, admission.patientId, { status: condition === "Expired" ? "Discharged" : "OPD" });

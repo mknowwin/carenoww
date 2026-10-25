@@ -390,7 +390,6 @@ export const ipd = {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
     return get<any>(`/ipd${qs}`);
   },
-  beds:      () => get<any>("/ipd/beds"),
   stats:     () => get<{ active: number; icu: number; dischargedToday: number }>("/ipd/stats"),
   // { [uhid]: { _id, admissionId, ward, bedNumber, admissionDate } } for patients currently admitted
   activeByPatient: (ids: string[]) =>
@@ -402,6 +401,44 @@ export const ipd = {
   addRound:  (id: string, data: any) => post<any>(`/ipd/${id}/rounds`, data),
   discharge: (id: string, data: any) => post<any>(`/ipd/${id}/discharge`, data),
   transfer:  (id: string, data: any) => post<any>(`/ipd/${id}/transfer`, data),
+};
+
+// ── Wards & beds ──────────────────────────────────────────────────────────────
+export type BedStatus = "Available" | "Cleaning" | "Maintenance";
+export interface BedView {
+  _id: string;
+  number: string;
+  status: BedStatus;
+  active: boolean;
+  occupant: null | {
+    admissionDbId: string; admissionId: string; patientId: string; patientName: string;
+    since: string; diagnosis: string; doctor: string;
+  };
+}
+export interface WardView {
+  _id: string;
+  name: string;
+  code: string;
+  type: string;
+  bedRateId: string;
+  active: boolean;
+  sortOrder: number;
+  beds: BedView[];
+  counts: { total: number; occupied: number; available: number; cleaning: number; maintenance: number };
+}
+export const wards = {
+  // Active wards with beds + live occupancy; all=true includes inactive (Settings)
+  list:      (all = false) => get<WardView[]>(`/wards${all ? "?all=1" : ""}`),
+  create:    (data: { name: string; code?: string; type?: string; bedRateId?: string }) => post<any>("/wards", data),
+  update:    (id: string, data: Partial<{ name: string; code: string; type: string; bedRateId: string; sortOrder: number; active: boolean }>) =>
+    put<any>(`/wards/${id}`, data),
+  remove:    (id: string) => del<any>(`/wards/${id}`),
+  addBeds:   (wardId: string, data: { numbers: string[] } | { prefix: string; from: number; to: number; pad: number }) =>
+    post<{ added: number; skipped: number }>(`/wards/${wardId}/beds`, data),
+  updateBed: (bedId: string, data: { number?: string; active?: boolean }) => put<any>(`/wards/beds/${bedId}`, data),
+  setBedStatus: (bedId: string, status: BedStatus) =>
+    request<any>(`/wards/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  removeBed: (bedId: string) => del<any>(`/wards/beds/${bedId}`),
 };
 
 // ── Prescriptions ─────────────────────────────────────────────────────────────
@@ -467,4 +504,4 @@ export const publicApi = {
   display: (tenantId: string) => get<any>(`/public/display?tenantId=${encodeURIComponent(tenantId)}`),
 };
 
-export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, prescriptions, publicApi, referralDoctors, referralMasters, suppliers };
+export default { auth, superadmin, dashboard, patients, appointments, users, lab, pharmacy, billing, ratemaster, reports, ipd, wards, prescriptions, publicApi, referralDoctors, referralMasters, suppliers };

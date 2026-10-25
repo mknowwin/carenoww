@@ -7,15 +7,9 @@ import DrugInventory from "../models/DrugInventory.js";
 import LabOrder from "../models/LabOrder.js";
 import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { canonicalNames } from "./referralMasterService.js";
+import { listWards, bedTotals } from "./wardService.js";
+import { icuFilter } from "./ipdService.js";
 
-const WARD_CAPACITY: Record<string, number> = {
-  "General Ward": 80,
-  "ICU": 20,
-  "Private Ward": 30,
-  "Semi-Private": 20,
-  "Obs/Gyn": 15,
-  "Pediatric": 20,
-};
 
 // Revenue for a date range, keyed on when cash actually moved (payments[].paidAt)
 // rather than the bill's own creation date. A late payment recorded today on an
@@ -47,7 +41,7 @@ export async function getMetrics(tenantId: string, tz: string) {
     Patient.countDocuments({ tenantId, isActive: true }),
     Appointment.countDocuments({ tenantId, date: today, status: { $in: ["Confirmed", "Waiting", "In Consult"] } }),
     IPDAdmission.countDocuments({ tenantId, status: "Active" }),
-    IPDAdmission.countDocuments({ tenantId, status: "Active", ward: "ICU" }),
+    IPDAdmission.countDocuments(await icuFilter(tenantId)),
     Appointment.countDocuments({ tenantId, date: today }),
     BillingRecord.countDocuments({ tenantId, status: { $in: ["Pending", "Partial"] } }),
     Patient.countDocuments({ tenantId, riskLevel: "Critical", isActive: true }),
@@ -66,11 +60,9 @@ export async function getMetrics(tenantId: string, tz: string) {
     revenueForRange(tenantId, monthStart, monthEnd),
   ]);
 
-  // Bed occupancy rate from live IPD admissions
-  const activeAdmissions = await IPDAdmission.find({ tenantId, status: "Active" });
-  const totalBeds = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
-  const occupiedBeds = activeAdmissions.length;
-  const bedOccupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
+  // Bed occupancy from the tenant's ward & bed master (0 when no beds are set up)
+  const beds = await bedTotals(tenantId);
+  const bedOccupancyRate = beds.total > 0 ? Math.round((beds.occupied / beds.total) * 100) : 0;
 
   return {
     totalPatients,
@@ -89,15 +81,12 @@ export async function getMetrics(tenantId: string, tz: string) {
 }
 
 export async function getBedOccupancy(tenantId: string) {
-  const active = await IPDAdmission.find({ tenantId, status: "Active" });
-  const wardCounts: Record<string, number> = {};
-  active.forEach((a) => { wardCounts[a.ward] = (wardCounts[a.ward] || 0) + 1; });
-
-  return Object.entries(WARD_CAPACITY).map(([ward, total]) => ({
-    ward,
-    total,
-    occupied: wardCounts[ward] || 0,
-    available: total - (wardCounts[ward] || 0),
+  const wards = await listWards(tenantId);
+  return wards.map((w) => ({
+    ward:      w.name,
+    total:     w.counts.total,
+    occupied:  w.counts.occupied,
+    available: w.counts.total - w.counts.occupied,
   }));
 }
 

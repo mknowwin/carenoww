@@ -11,7 +11,7 @@ import {
   Monitor, Globe, Key, KeyRound, Database, CheckCircle2, Users, Plus, Trash2,
   Stethoscope, ChevronDown, ChevronRight, Clock, CalendarDays, Pencil,
   X, Loader2, UserPlus, Mic, FlaskConical, Pill, CreditCard, UserCheck, HeartPulse,
-  Upload, ImageIcon, IndianRupee, Printer, Share2, ClipboardList,
+  Upload, ImageIcon, IndianRupee, Printer, Share2, ClipboardList, BedDouble,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
@@ -19,7 +19,9 @@ import {
   auth as authApi, users as usersApi, ratemaster as ratemasterApi,
   referralDoctors as referralDoctorsApi, referralMasters as referralMastersApi, type ReferralMasterKind,
   icdCodes as icdCodesApi, type IcdCode,
+  wards as wardsApi, type WardView,
 } from "@/lib/api";
+import { WARD_TYPES, wardTypeColor } from "@/lib/ipd";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
@@ -1607,6 +1609,276 @@ function ServiceRatesSection() {
   );
 }
 
+// ── Wards & Beds — IPD ward/bed master (bed picker, bed map, occupancy) ──────
+const EMPTY_WARD_FORM = { name: "", code: "", type: "General", bedRateId: "none" };
+
+function WardsBedsSection() {
+  const qc = useQueryClient();
+  const { data: wardList = [], isLoading } = useQuery<WardView[]>({
+    queryKey: ["wards", "all"],
+    queryFn:  () => wardsApi.list(true),
+  });
+  const { data: rates = [] } = useQuery<any[]>({ queryKey: ["ratemaster"], queryFn: () => ratemasterApi.list() });
+  const bedRates = rates.filter((r) => r.category === "Bed Charges" || r.category === "Room");
+
+  const [form, setForm]     = useState(EMPTY_WARD_FORM);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [error, setError]   = useState("");
+  const [busy, setBusy]     = useState(false);
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ["wards"] });   // also refreshes IPD's active-only list
+  const fail = (title: string) => (e: any) => toast({ variant: "destructive", title, description: e.message });
+  const resetForm = () => { setForm(EMPTY_WARD_FORM); setEditId(null); setError(""); };
+
+  const startEdit = (w: WardView) => {
+    setEditId(w._id);
+    setForm({ name: w.name, code: w.code, type: w.type, bedRateId: w.bedRateId || "none" });
+    setError("");
+  };
+
+  const save = async () => {
+    const name = form.name.trim();
+    if (!name) { setError("Ward name is required."); return; }
+    setBusy(true); setError("");
+    const data = { name, code: form.code.trim(), type: form.type, bedRateId: form.bedRateId === "none" ? "" : form.bedRateId };
+    try {
+      if (editId) await wardsApi.update(editId, data);
+      else await wardsApi.create(data);
+      refresh();
+      resetForm();
+    } catch (e: any) {
+      setError(e.message || "Failed to save ward.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleWard = (w: WardView) => wardsApi.update(w._id, { active: !w.active }).then(refresh, fail("Could not update ward"));
+
+  const removeWard = async (w: WardView) => {
+    const ok = await confirm({ title: `Delete ${w.name}?`, description: `Its ${w.beds.length} bed(s) are deleted too.`, confirmText: "Delete", variant: "destructive" });
+    if (!ok) return;
+    try {
+      await wardsApi.remove(w._id);
+      if (editId === w._id) resetForm();
+      refresh();
+    } catch (e: any) {
+      // Used wards keep their history — offer to deactivate instead
+      if (e.statusCode === 409 && w.active && await confirm({ title: "Ward has admission history", description: `${e.message}. Deactivate ${w.name} so it can't be used for new admissions?`, confirmText: "Deactivate" })) {
+        await toggleWard(w);
+      } else if (e.statusCode !== 409) {
+        fail("Delete failed")(e);
+      }
+    }
+  };
+
+  const rateLabel = (id: string) => {
+    const r = rates.find((x) => x._id === id);
+    return r ? `${r.name} · ₹${r.defaultRate.toLocaleString()}/${(r.unit || "day").replace(/^per /, "")}` : "";
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold">Wards & Beds</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Wards and beds used for IPD admission, the bed map and dashboard occupancy. ICU-type wards set the patient's status to ICU.
+          A bed vacated by discharge or transfer is marked Cleaning until a nurse marks it ready. Wards and beds with admission history can be deactivated but not deleted.
+        </p>
+      </div>
+
+      {/* Add / Edit ward */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {editId ? "Edit Ward" : "Add Ward"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="space-y-1">
+              <Label className="text-xs">Name *</Label>
+              <Input className="h-8 text-sm" placeholder="e.g. General Ward" value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Bed prefix</Label>
+              <Input className="h-8 text-sm uppercase" placeholder="e.g. GW" value={form.code}
+                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Type</Label>
+              <Select value={form.type} onValueChange={(v) => setForm((f) => ({ ...f, type: v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{WARD_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Bed charge (per day)</Label>
+              <Select value={form.bedRateId} onValueChange={(v) => setForm((f) => ({ ...f, bedRateId: v }))}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not set</SelectItem>
+                  {bedRates.map((r) => <SelectItem key={r._id} value={r._id}>{r.name} — ₹{r.defaultRate.toLocaleString()}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {bedRates.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-2">Add "Bed Charges" or "Room" rates in Service Rates to link a daily bed charge.</p>
+          )}
+          {error && <p className="text-xs text-destructive mt-2">{error}</p>}
+          <div className="flex gap-2 mt-3">
+            <Button size="sm" onClick={save} disabled={busy}>{busy ? "Saving…" : editId ? "Update" : "Add Ward"}</Button>
+            {editId && <Button size="sm" variant="ghost" onClick={resetForm}>Cancel</Button>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Ward list */}
+      {isLoading ? (
+        <div className="text-xs text-muted-foreground py-4 text-center">Loading wards…</div>
+      ) : wardList.length === 0 ? (
+        <p className="text-xs text-muted-foreground pl-1">No wards yet — add your first ward above, then add its beds.</p>
+      ) : (
+        <div className="space-y-3">
+          {wardList.map((w) => (
+            <WardCard key={w._id} ward={w} rateLabel={rateLabel(w.bedRateId)}
+              onEdit={() => startEdit(w)} onToggle={() => toggleWard(w)} onDelete={() => removeWard(w)} onChanged={refresh} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WardCard({ ward, rateLabel, onEdit, onToggle, onDelete, onChanged }: {
+  ward: WardView; rateLabel: string;
+  onEdit: () => void; onToggle: () => void; onDelete: () => void; onChanged: () => void;
+}) {
+  const prefix = ward.code ? `${ward.code}-` : "";
+  const [range, setRange]   = useState({ prefix, from: "1", to: "10" });
+  const [single, setSingle] = useState("");
+  const [busy, setBusy]     = useState(false);
+
+  const add = async (data: Parameters<typeof wardsApi.addBeds>[1]) => {
+    setBusy(true);
+    try {
+      const res = await wardsApi.addBeds(ward._id, data);
+      toast({ title: `${res.added} bed(s) added`, description: res.skipped ? `${res.skipped} already existed.` : undefined });
+      setSingle("");
+      onChanged();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not add beds", description: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addRange = () => {
+    const from = parseInt(range.from), to = parseInt(range.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) {
+      toast({ variant: "destructive", title: "Invalid range", description: "Enter numbers with From ≤ To." }); return;
+    }
+    add({ prefix: range.prefix, from, to, pad: Math.max(2, String(to).length) });
+  };
+
+  const bedClick = async (b: WardView["beds"][number]) => {
+    if (!b.active) {
+      await wardsApi.updateBed(b._id, { active: true }).then(onChanged, (e) => toast({ variant: "destructive", title: "Could not reactivate", description: e.message }));
+      return;
+    }
+    if (b.occupant) {
+      toast({ title: `${b.number} is occupied`, description: `${b.occupant.patientName} (${b.occupant.admissionId}) — transfer or discharge first.` });
+      return;
+    }
+    const ok = await confirm({ title: `Remove bed ${b.number}?`, confirmText: "Remove", variant: "destructive" });
+    if (!ok) return;
+    try {
+      await wardsApi.removeBed(b._id);
+      onChanged();
+    } catch (e: any) {
+      if (e.statusCode === 409) {
+        // Used beds keep their history — deactivate instead
+        await wardsApi.updateBed(b._id, { active: false }).then(onChanged, (err) => toast({ variant: "destructive", title: "Could not deactivate", description: err.message }));
+        toast({ title: `${b.number} deactivated`, description: "It has admission history, so it was hidden instead of deleted. Click it to reactivate." });
+      } else {
+        toast({ variant: "destructive", title: "Could not remove bed", description: e.message });
+      }
+    }
+  };
+
+  return (
+    <Card className={ward.active ? "" : "opacity-60"}>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold">{ward.name}</span>
+              <Badge className={`text-xs border ${wardTypeColor(ward.type)}`}>{ward.type}</Badge>
+              {!ward.active && <Badge variant="outline" className="text-xs">Inactive</Badge>}
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {ward.counts.total} bed(s) · {ward.counts.occupied} occupied
+              {rateLabel ? ` · ${rateLabel}` : " · no bed charge linked"}
+            </p>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button size="icon" variant="ghost" className="h-6 w-6" title="Edit" onClick={onEdit}><Pencil className="h-3 w-3" /></Button>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={onToggle}>{ward.active ? "Deactivate" : "Activate"}</Button>
+            <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive" title="Delete" onClick={onDelete}><Trash2 className="h-3 w-3" /></Button>
+          </div>
+        </div>
+
+        {ward.beds.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {ward.beds.map((b) => (
+              <button key={b._id} onClick={() => bedClick(b)}
+                title={!b.active ? "Inactive — click to reactivate" : b.occupant ? `Occupied by ${b.occupant.patientName}` : `${b.status} — click to remove`}
+                className={`px-2 py-0.5 rounded border text-xs font-mono transition-colors ${
+                  !b.active ? "bg-muted text-muted-foreground line-through border-dashed"
+                  : b.occupant ? "bg-blue-50 border-blue-200 text-blue-700"
+                  : b.status === "Available" ? "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700"
+                  : "bg-amber-50 border-amber-200 text-amber-700"
+                }`}>
+                {b.number}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {ward.active && (
+          <div className="flex flex-wrap items-end gap-2 pt-1 border-t">
+            <div className="space-y-1 pt-2">
+              <Label className="text-xs">Prefix</Label>
+              <Input className="h-7 w-20 text-xs uppercase" value={range.prefix} onChange={(e) => setRange((r) => ({ ...r, prefix: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">From</Label>
+              <Input className="h-7 w-16 text-xs" type="number" min={0} value={range.from} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">To</Label>
+              <Input className="h-7 w-16 text-xs" type="number" min={0} value={range.to} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} />
+            </div>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={busy} onClick={addRange}>
+              <Plus className="h-3 w-3" /> Add range
+            </Button>
+            <span className="text-xs text-muted-foreground pb-1.5">or</span>
+            <Input className="h-7 w-28 text-xs uppercase" placeholder="Bed no." value={single}
+              onChange={(e) => setSingle(e.target.value.toUpperCase())}
+              onKeyDown={(e) => { if (e.key === "Enter" && single.trim()) add({ numbers: [single] }); }} />
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy || !single.trim()} onClick={() => add({ numbers: [single] })}>
+              Add bed
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Referrals — master lists for referral doctors and Area/VHN/… names ───────
 const REFERRAL_TABS = ["Doctor", "Area", "VHN", "Medical Shop", "Lab", "Other"] as const;
 type ReferralTab = typeof REFERRAL_TABS[number];
@@ -2065,6 +2337,7 @@ export default function SettingsPage() {
     ...(user?.role === "admin" ? [{ id: "departments",  label: "Departments & Doctors", icon: Stethoscope  }] : []),
     ...(user?.role === "admin" ? [{ id: "staff",        label: "Staff Management",      icon: UserCheck    }] : []),
     ...(user?.role === "admin" ? [{ id: "servicerates", label: "Service Rates",         icon: IndianRupee  }] : []),
+    ...(user?.role === "admin" ? [{ id: "wards",        label: "Wards & Beds",          icon: BedDouble    }] : []),
     ...(user?.role === "admin" ? [{ id: "referrals",    label: "Referrals",             icon: Share2       }] : []),
     ...(user?.role === "admin" ? [{ id: "icdcodes",     label: "ICD Codes",             icon: ClipboardList }] : []),
     { id: "notif",       label: "Notifications",        icon: Bell },
@@ -2073,7 +2346,11 @@ export default function SettingsPage() {
     ...(user?.role === "admin" ? [{ id: "users",       label: "All Users",             icon: Users       }] : []),
     { id: "system",      label: "System",               icon: Monitor },
   ];
-  const [active, setActive] = useState("profile");
+  // ?tab=<section id> opens a section directly (e.g. IPD → "Set up wards & beds")
+  const [active, setActive] = useState(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    return tab && sections.some((s) => s.id === tab) ? tab : "profile";
+  });
 
   const saveProfile = async () => {
     setProfileLoading(true); setProfileMsg("");
@@ -2273,6 +2550,9 @@ export default function SettingsPage() {
 
           {/* ── Service Rates ─────────────────────────────────── */}
           {active === "servicerates" && user?.role === "admin" && <ServiceRatesSection />}
+
+          {/* ── Wards & Beds ──────────────────────────────────── */}
+          {active === "wards" && user?.role === "admin" && <WardsBedsSection />}
 
           {/* ── Referrals ─────────────────────────────────────── */}
           {active === "referrals" && user?.role === "admin" && <ReferralsSection />}

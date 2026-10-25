@@ -12,7 +12,7 @@ router.get("/metrics", asyncHandler(async (req: AuthRequest, res) => {
   res.json({ success: true, data });
 }));
 
-// GET /api/dashboard/bed-occupancy — derived from live IPD admissions
+// GET /api/dashboard/bed-occupancy — per-ward beds from the ward & bed master
 router.get("/bed-occupancy", asyncHandler(async (req: AuthRequest, res) => {
   const data = await dashboardService.getBedOccupancy(req.user!.tenantId);
   res.json({ success: true, data });
