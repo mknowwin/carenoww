@@ -6,13 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search, Plus, User, Phone, Droplets, AlertTriangle,
-  CheckCircle2, Clock, Bed, Brain, QrCode, Upload, Pencil, LogOut, Stethoscope, CalendarPlus,
+  CheckCircle2, Clock, Bed, BedDouble, Brain, QrCode, Upload, Pencil, LogOut, Stethoscope, CalendarPlus,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { patients as patientsApi } from "@/lib/api";
 import { getInitials } from "@/lib/utils";
 import PatientModal from "@/components/modals/PatientModal";
 import PatientHistoryModal from "@/components/modals/PatientHistoryModal";
+import AdmittedBadge, { useActiveAdmissions } from "@/components/AdmittedBadge";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
 
@@ -82,6 +83,7 @@ export default function PatientsPage() {
   const rawPatients = apiData?.patients ?? [];
   // Normalize: API returns { _id, uhid } but UI uses { id }
   const PATIENTS = rawPatients.map((p: any) => ({ ...p, id: p.uhid || p._id || p.id }));
+  const admitted = useActiveAdmissions(PATIENTS.map((p: any) => p.uhid));
 
   const filtered = PATIENTS.filter((p: any) => {
     const q = effectiveSearch.toLowerCase();
@@ -178,6 +180,7 @@ export default function PatientsPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-sm">{p.name}</span>
                       <span className="text-xs text-muted-foreground font-mono">{p.id}</span>
+                      <AdmittedBadge admission={admitted[p.uhid]} compact />
                       <Badge className={`text-xs ${RISK_COLORS[p.riskLevel]}`}>
                         {p.riskLevel === "Critical" && <AlertTriangle className="h-2.5 w-2.5 mr-1" />}
                         {p.riskLevel}
@@ -225,6 +228,7 @@ export default function PatientsPage() {
                   <div>
                     <CardTitle className="text-base">{selectedPatient.name}</CardTitle>
                     <p className="text-xs text-muted-foreground font-mono">{selectedPatient.id}</p>
+                    <AdmittedBadge admission={admitted[selectedPatient.uhid]} />
                   </div>
                 </div>
               </CardHeader>
@@ -282,7 +286,16 @@ export default function PatientsPage() {
                     <CalendarPlus className="h-3 w-3" /> Book Appointment
                   </Button>
                 </div>
-                {selectedPatient.status !== "Discharged" && (
+                {admitted[selectedPatient.uhid] ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full gap-1 text-teal-700 border-teal-300 hover:bg-teal-50"
+                    onClick={() => setLocation("/ipd")}
+                  >
+                    <BedDouble className="h-3 w-3" /> Admitted — manage in IPD
+                  </Button>
+                ) : selectedPatient.status !== "Discharged" && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -291,7 +304,7 @@ export default function PatientsPage() {
                     onClick={() => discharge(selectedPatient)}
                   >
                     <LogOut className="h-3 w-3" />
-                    {discharging === selectedPatient.id ? "Discharging..." : "Discharge Patient"}
+                    {discharging === selectedPatient.id ? "Updating..." : "Mark Discharged"}
                   </Button>
                 )}
               </CardContent>

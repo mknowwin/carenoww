@@ -15,17 +15,19 @@ export interface LabListFilters {
   priority?: string;
   patientId?: string;
   appointmentId?: string;
+  admissionId?: string;
   page?: string;
   limit?: string;
 }
 
 export async function listOrders(tenantId: string, filters: LabListFilters) {
-  const { status, priority, patientId, appointmentId, page = "1", limit = "50" } = filters;
+  const { status, priority, patientId, appointmentId, admissionId, page = "1", limit = "50" } = filters;
   const query: any = { tenantId };
   if (status)        query.status        = status;
   if (priority)      query.priority      = priority;
   if (patientId)     query.patientId     = patientId;
   if (appointmentId) query.appointmentId = appointmentId;
+  if (admissionId)   query.admissionId   = admissionId;
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const [orders, total] = await Promise.all([

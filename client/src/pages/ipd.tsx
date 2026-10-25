@@ -4,41 +4,33 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  BedDouble, Plus, Clock, CheckCircle2, LogOut,
+  BedDouble, Plus, Clock, CheckCircle2, LogOut, Pencil, Printer,
   Activity, ChevronDown, ChevronUp, Stethoscope, ArrowLeftRight,
 } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { ipd as ipdApi } from "@/lib/api";
+import { ipd as ipdApi, users as usersApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { todayInTz } from "@/lib/utils";
+import { WARDS, DEPTS, wardColor, normalizeBed, stayDay, canDo } from "@/lib/ipd";
+import { printDischargeReport } from "@/lib/print";
 import AdmitModal from "@/components/modals/AdmitModal";
 import DischargeModal from "@/components/modals/DischargeModal";
 import NursingRoundModal from "@/components/modals/NursingRoundModal";
 
-const WARDS = ["General Ward", "ICU", "Private Ward", "Semi-Private", "Obs/Gyn", "Pediatric"];
-
-const WARD_COLORS: Record<string, string> = {
-  ICU:            "bg-red-50 border-red-200 text-red-700",
-  "General Ward": "bg-blue-50 border-blue-200 text-blue-700",
-  "Private Ward": "bg-purple-50 border-purple-200 text-purple-700",
-  "Semi-Private": "bg-teal-50 border-teal-200 text-teal-700",
-  "Obs/Gyn":      "bg-pink-50 border-pink-200 text-pink-700",
-  Pediatric:      "bg-amber-50 border-amber-200 text-amber-700",
-};
-const wardColor = (ward: string) => WARD_COLORS[ward] ?? "bg-gray-50 border-gray-200 text-gray-700";
-
-function daysSince(date: string | Date) {
-  return Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
-}
-
 export default function IPDPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const role = user?.role;
+  const tz = user?.timezone ?? "Asia/Kolkata";
   const [admitOpen,        setAdmitOpen]        = useState(false);
   const [dischargeTarget,  setDischargeTarget]  = useState<any>(null);
   const [roundTarget,      setRoundTarget]      = useState<any>(null);
   const [transferTarget,   setTransferTarget]   = useState<any>(null);
+  const [editTarget,       setEditTarget]       = useState<any>(null);
+  const [viewDischargedId, setViewDischargedId] = useState<string | null>(null);
   const [expandedId,       setExpandedId]       = useState<string | null>(null);
   const [wardFilter,       setWardFilter]       = useState("All");
   const [search,           setSearch]           = useState("");
@@ -54,15 +46,28 @@ export default function IPDPage() {
     queryFn:  () => ipdApi.beds(),
     refetchInterval: 30000,
   });
+  const { data: stats } = useQuery({
+    queryKey: ["ipd-stats"],
+    queryFn:  () => ipdApi.stats(),
+    refetchInterval: 30000,
+  });
   const { data: dischargedData } = useQuery({
     queryKey: ["ipd-discharged"],
-    queryFn:  () => ipdApi.list({ status: "Discharged" } as any),
+    queryFn:  () => ipdApi.list({ status: "Discharged", limit: "10" }),
     staleTime: 60000,
   });
 
+  const refresh = (opts: { discharged?: boolean; roundsOf?: string } = {}) => {
+    qc.invalidateQueries({ queryKey: ["ipd"] });
+    qc.invalidateQueries({ queryKey: ["ipd-beds"] });
+    qc.invalidateQueries({ queryKey: ["ipd-stats"] });
+    qc.invalidateQueries({ queryKey: ["ipd-active-by-patient"] });
+    if (opts.discharged) qc.invalidateQueries({ queryKey: ["ipd-discharged"] });
+    if (opts.roundsOf)   qc.invalidateQueries({ queryKey: ["ipd-rounds", opts.roundsOf] });
+  };
+
   const admissions: any[] = ipdData?.admissions ?? [];
   const discharged: any[] = dischargedData?.admissions ?? [];
-  const todayStr = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
   const wards = ["All", ...Array.from(new Set<string>(admissions.map((a: any) => String(a.ward))))];
 
@@ -71,17 +76,13 @@ export default function IPDPage() {
     const matchSearch = !q ||
       a.patientName.toLowerCase().includes(q) ||
       a.admissionId.toLowerCase().includes(q) ||
-      a.bedNumber.toLowerCase().includes(q);
+      a.bedNumber.toLowerCase().includes(q) ||
+      String(a.patientId ?? "").toLowerCase().includes(q);
     return matchSearch && (wardFilter === "All" || a.ward === wardFilter);
   });
 
-  const icu   = admissions.filter((a: any) => a.ward === "ICU").length;
-  const total = admissions.length;
-  const tz = user?.timezone ?? "Asia/Kolkata";
-  const dischargedToday = discharged.filter((d: any) =>
-    d.dischargeDate &&
-    new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(d.dischargeDate)) === todayStr
-  ).length;
+  const total = stats?.active ?? admissions.length;
+  const icu   = stats?.icu ?? admissions.filter((a: any) => a.ward === "ICU").length;
 
   return (
     <div className="space-y-4 animate-fadeIn">
@@ -91,17 +92,19 @@ export default function IPDPage() {
           <h2 className="text-lg font-bold">Inpatient (IPD)</h2>
           <p className="text-sm text-muted-foreground">{total} active admissions · {icu} in ICU</p>
         </div>
-        <Button size="sm" className="gap-2" onClick={() => setAdmitOpen(true)}>
-          <Plus className="h-4 w-4" /> Admit Patient
-        </Button>
+        {canDo(role, "admit") && (
+          <Button size="sm" className="gap-2" onClick={() => setAdmitOpen(true)}>
+            <Plus className="h-4 w-4" /> Admit Patient
+          </Button>
+        )}
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Total Admitted",   value: total,          color: "text-blue-600",   bg: "bg-blue-50" },
-          { label: "ICU",              value: icu,            color: "text-red-600",    bg: "bg-red-50" },
-          { label: "Discharged Today", value: dischargedToday, color: "text-teal-600",  bg: "bg-teal-50" },
+          { label: "Total Admitted",   value: total,                       color: "text-blue-600",   bg: "bg-blue-50" },
+          { label: "ICU",              value: icu,                         color: "text-red-600",    bg: "bg-red-50" },
+          { label: "Discharged Today", value: stats?.dischargedToday ?? 0, color: "text-teal-600",   bg: "bg-teal-50" },
           { label: "Wards Active",     value: Object.keys(bedsData ?? {}).length, color: "text-purple-600", bg: "bg-purple-50" },
         ].map((s) => (
           <Card key={s.label}>
@@ -132,7 +135,7 @@ export default function IPDPage() {
           <div className="lg:col-span-2 space-y-3">
             {/* Filters */}
             <div className="flex flex-wrap gap-2">
-              <Input placeholder="Search patient, bed, ADM-ID..." className="h-9 flex-1 min-w-40"
+              <Input placeholder="Search patient, UHID, bed, ADM-ID..." className="h-9 flex-1 min-w-40"
                 value={search} onChange={(e) => setSearch(e.target.value)} />
               <div className="flex gap-1.5 flex-wrap">
                 {wards.map((w) => (
@@ -148,8 +151,9 @@ export default function IPDPage() {
             )}
 
             {filtered.map((adm: any) => {
-              const days = daysSince(adm.admissionDate);
+              const day = stayDay(adm.admissionDate, tz);
               const open = expandedId === adm._id;
+              const demographics = [adm.patientId, adm.patientAge ? `${adm.patientAge}y` : "", adm.patientGender].filter(Boolean).join(" · ");
               return (
                 <Card key={adm._id} className="hover:shadow-sm transition-shadow">
                   <CardContent className="p-4">
@@ -163,14 +167,15 @@ export default function IPDPage() {
                           <Badge className="text-xs font-mono bg-blue-50 text-blue-700">{adm.admissionId}</Badge>
                           <Badge className={`text-xs border ${wardColor(adm.ward)}`}>{adm.ward}</Badge>
                         </div>
+                        {demographics && <p className="text-xs text-muted-foreground font-mono mt-0.5">{demographics}</p>}
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Bed {adm.bedNumber} · {adm.department} · {adm.admittingDoctor}
+                          Bed {adm.bedNumber}{adm.department ? ` · ${adm.department}` : ""} · {adm.admittingDoctor}
                         </p>
                         <p className="text-xs text-muted-foreground truncate mt-0.5">Dx: {adm.provisionalDiagnosis}</p>
                       </div>
                       <div className="shrink-0 text-right">
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock className="h-3 w-3" /> Day {days + 1}
+                          <Clock className="h-3 w-3" /> Day {day}
                         </div>
                         <p className="text-xs text-muted-foreground">{new Date(adm.admissionDate).toLocaleDateString("en-IN")}</p>
                       </div>
@@ -182,18 +187,30 @@ export default function IPDPage() {
                         <Activity className="h-3 w-3" />
                         {open ? <><ChevronUp className="h-3 w-3" /> Hide</> : <><ChevronDown className="h-3 w-3" /> Rounds</>}
                       </Button>
-                      <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
-                        onClick={() => setRoundTarget(adm)}>
-                        <Stethoscope className="h-3 w-3" /> Add Round
-                      </Button>
-                      <Button variant="outline" size="sm" className="h-7 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 gap-1"
-                        onClick={() => setTransferTarget(adm)}>
-                        <ArrowLeftRight className="h-3 w-3" /> Transfer
-                      </Button>
-                      <Button variant="outline" size="sm" className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 gap-1"
-                        onClick={() => setDischargeTarget(adm)}>
-                        <LogOut className="h-3 w-3" /> Discharge
-                      </Button>
+                      {canDo(role, "round") && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
+                          onClick={() => setRoundTarget(adm)}>
+                          <Stethoscope className="h-3 w-3" /> Add Round
+                        </Button>
+                      )}
+                      {canDo(role, "edit") && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
+                          onClick={() => setEditTarget(adm)}>
+                          <Pencil className="h-3 w-3" /> Edit
+                        </Button>
+                      )}
+                      {canDo(role, "transfer") && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 gap-1"
+                          onClick={() => setTransferTarget(adm)}>
+                          <ArrowLeftRight className="h-3 w-3" /> Transfer
+                        </Button>
+                      )}
+                      {canDo(role, "discharge") && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 gap-1"
+                          onClick={() => setDischargeTarget(adm)}>
+                          <LogOut className="h-3 w-3" /> Discharge
+                        </Button>
+                      )}
                     </div>
 
                     {open && <RoundsPanel admissionId={adm._id} />}
@@ -209,12 +226,13 @@ export default function IPDPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold">Recent Discharges</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-1">
                 {discharged.length === 0 && (
                   <p className="text-xs text-muted-foreground text-center py-3">No discharged patients</p>
                 )}
-                {discharged.slice(0, 10).map((d: any) => (
-                  <div key={d._id} className="flex items-center gap-2">
+                {discharged.map((d: any) => (
+                  <button key={d._id} onClick={() => setViewDischargedId(d._id)}
+                    className="w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left hover:bg-muted transition-colors">
                     <div className="w-7 h-7 rounded-full bg-teal-50 flex items-center justify-center shrink-0">
                       <CheckCircle2 className="h-3.5 w-3.5 text-teal-600" />
                     </div>
@@ -225,7 +243,7 @@ export default function IPDPage() {
                     <span className="text-xs text-muted-foreground shrink-0">
                       {d.dischargeDate ? new Date(d.dischargeDate).toLocaleDateString("en-IN") : "—"}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </CardContent>
             </Card>
@@ -233,31 +251,20 @@ export default function IPDPage() {
         </div>
       )}
 
-      {activeTab === "beds" && <BedMapView bedsData={bedsData ?? {}} />}
+      {activeTab === "beds" && <BedMapView bedsData={bedsData ?? {}} tz={tz} />}
 
-      <AdmitModal open={admitOpen} onClose={() => setAdmitOpen(false)}
-        onAdmitted={() => {
-          qc.invalidateQueries({ queryKey: ["ipd"] });
-          qc.invalidateQueries({ queryKey: ["ipd-beds"] });
-        }} />
+      <AdmitModal open={admitOpen} onClose={() => setAdmitOpen(false)} onAdmitted={() => refresh()} />
 
       {dischargeTarget && (
         <DischargeModal admission={dischargeTarget}
           onClose={() => setDischargeTarget(null)}
-          onDischarged={() => {
-            setDischargeTarget(null);
-            qc.invalidateQueries({ queryKey: ["ipd"] });
-            qc.invalidateQueries({ queryKey: ["ipd-beds"] });
-            qc.invalidateQueries({ queryKey: ["ipd-discharged"] });
-          }} />
+          onDischarged={() => refresh({ discharged: true })} />
       )}
 
       {roundTarget && (
         <NursingRoundModal admission={roundTarget}
           onClose={() => setRoundTarget(null)}
-          onSaved={() => {
-            qc.invalidateQueries({ queryKey: ["ipd-rounds", roundTarget._id] });
-          }} />
+          onSaved={() => refresh({ roundsOf: roundTarget._id })} />
       )}
 
       {transferTarget && (
@@ -265,11 +272,25 @@ export default function IPDPage() {
           admission={transferTarget}
           onClose={() => setTransferTarget(null)}
           onTransferred={() => {
+            refresh({ roundsOf: transferTarget._id });
             setTransferTarget(null);
-            qc.invalidateQueries({ queryKey: ["ipd"] });
-            qc.invalidateQueries({ queryKey: ["ipd-beds"] });
           }}
         />
+      )}
+
+      {editTarget && (
+        <EditAdmissionModal
+          admission={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => {
+            refresh({ roundsOf: editTarget._id });
+            setEditTarget(null);
+          }}
+        />
+      )}
+
+      {viewDischargedId && (
+        <DischargedDetailModal admissionId={viewDischargedId} tz={tz} onClose={() => setViewDischargedId(null)} />
       )}
     </div>
   );
@@ -288,29 +309,30 @@ function TransferModal({ admission, onClose, onTransferred }: { admission: any; 
     onError:    (e: any) => setError(e.message || "Transfer failed"),
   });
 
+  const unchanged = ward === admission.ward && normalizeBed(bed) === admission.bedNumber;
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-        <div>
-          <h3 className="text-base font-bold">Transfer Patient</h3>
-          <p className="text-sm text-muted-foreground mt-0.5">{admission.patientName} · {admission.admissionId}</p>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Transfer Patient</DialogTitle>
+          <p className="text-sm text-muted-foreground">{admission.patientName} · {admission.admissionId}</p>
           <p className="text-xs text-muted-foreground">Current: {admission.ward} — Bed {admission.bedNumber}</p>
-        </div>
+        </DialogHeader>
 
         <div className="space-y-3">
           <div>
             <Label className="text-xs">New Ward</Label>
-            <select
-              className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
-              value={ward}
-              onChange={(e) => setWard(e.target.value)}
-            >
-              {WARDS.map((w) => <option key={w} value={w}>{w}</option>)}
-            </select>
+            <Select value={ward} onValueChange={setWard}>
+              <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {WARDS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label className="text-xs">New Bed Number</Label>
-            <Input className="mt-1 h-9" placeholder="e.g. B-205" value={bed} onChange={(e) => setBed(e.target.value)} />
+            <Input className="mt-1 h-9 uppercase" placeholder="e.g. B-205" value={bed} onChange={(e) => setBed(e.target.value.toUpperCase())} />
           </div>
           <div>
             <Label className="text-xs">Reason (optional)</Label>
@@ -324,19 +346,149 @@ function TransferModal({ admission, onClose, onTransferred }: { admission: any; 
           <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
           <Button
             className="flex-1 gap-2"
-            disabled={!ward || !bed || ward === admission.ward && bed === admission.bedNumber || mut.isPending}
+            disabled={!ward || !bed.trim() || unchanged || mut.isPending}
             onClick={() => { setError(""); mut.mutate(); }}
           >
             <ArrowLeftRight className="h-4 w-4" />
             {mut.isPending ? "Transferring..." : "Confirm Transfer"}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-// ── Rounds panel (inline expand) ─────────────────────────────────────────────
+// ── Edit admission (diagnosis / department / doctor) ─────────────────────────
+function EditAdmissionModal({ admission, onClose, onSaved }: { admission: any; onClose: () => void; onSaved: () => void }) {
+  const [diagnosis, setDiagnosis] = useState(admission.provisionalDiagnosis ?? "");
+  const [dept,      setDept]      = useState(admission.department ?? "");
+  const [doctor,    setDoctor]    = useState(admission.admittingDoctor ?? "");
+  const [doctorId,  setDoctorId]  = useState(admission.admittingDoctorId ?? "");
+  const [error,     setError]     = useState("");
+
+  const { data: doctorsData } = useQuery({ queryKey: ["doctors-admit"], queryFn: () => usersApi.doctors() });
+  const doctors: any[] = doctorsData ?? [];
+
+  const mut = useMutation({
+    mutationFn: () => ipdApi.update(admission._id, {
+      provisionalDiagnosis: diagnosis, department: dept, admittingDoctor: doctor, admittingDoctorId: doctorId,
+    }),
+    onSuccess: onSaved,
+    onError:   (e: any) => setError(e.message || "Update failed"),
+  });
+
+  // Keep departments the admission already uses even if not in the fixed list
+  const deptOptions = dept && !DEPTS.includes(dept) ? [dept, ...DEPTS] : DEPTS;
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Admission</DialogTitle>
+          <p className="text-sm text-muted-foreground">{admission.patientName} · {admission.admissionId}</p>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs">Provisional Diagnosis</Label>
+            <Textarea className="mt-1 h-20" value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs">Department</Label>
+            <Select value={dept} onValueChange={setDept}>
+              <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Select department" /></SelectTrigger>
+              <SelectContent>
+                {deptOptions.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Admitting Doctor</Label>
+            <Select value={doctorId} onValueChange={(id) => {
+              setDoctorId(id);
+              setDoctor(doctors.find((d: any) => d._id === id)?.name ?? doctor);
+            }}>
+              <SelectTrigger className="mt-1 h-9"><SelectValue placeholder={doctor || "Select doctor"} /></SelectTrigger>
+              <SelectContent>
+                {doctors.map((d: any) => (
+                  <SelectItem key={d._id} value={d._id}>{d.name} — {d.specialty || d.department}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-xs text-muted-foreground">To change ward or bed, use Transfer.</p>
+        </div>
+
+        {error && <p className="text-sm text-destructive">{error}</p>}
+
+        <div className="flex gap-2 justify-end pt-1">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!diagnosis.trim() || !doctor || mut.isPending} onClick={() => { setError(""); mut.mutate(); }}>
+            {mut.isPending ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Discharged admission (read-only) ─────────────────────────────────────────
+function DischargedDetailModal({ admissionId, tz, onClose }: { admissionId: string; tz: string; onClose: () => void }) {
+  const { data: adm, isLoading } = useQuery({
+    queryKey: ["ipd-rounds", admissionId],
+    queryFn:  () => ipdApi.get(admissionId),
+  });
+  const d = adm?.discharge ?? {};
+  const rows: [string, string | undefined][] = adm ? [
+    ["Final Diagnosis",       d.finalDiagnosis],
+    ["Treatment Summary",     d.treatment],
+    ["Discharge Medications", d.medications],
+    ["Follow-up",             d.followUp],
+    ["Notes",                 d.notes],
+  ] : [];
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Discharge Summary</DialogTitle>
+        </DialogHeader>
+        {isLoading || !adm ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">Loading...</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="bg-teal-50 rounded-lg px-4 py-3">
+              <p className="text-sm font-semibold">{adm.patientName} <span className="font-mono text-xs text-muted-foreground">{adm.patientId}</span></p>
+              <p className="text-xs text-muted-foreground">
+                {adm.admissionId} · {adm.ward} {adm.bedNumber} · {adm.admittingDoctor}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {new Date(adm.admissionDate).toLocaleDateString("en-IN")} → {adm.dischargeDate ? new Date(adm.dischargeDate).toLocaleDateString("en-IN") : "—"}
+                {adm.dischargeDate && ` · ${stayDay(adm.admissionDate, tz, adm.dischargeDate)} days`}
+                {" · "}<span className="font-medium text-foreground">{d.condition ?? "—"}</span>
+                {d.dischargedBy && ` · by ${d.dischargedBy}`}
+              </p>
+            </div>
+            {rows.filter(([, v]) => v).map(([label, value]) => (
+              <div key={label}>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
+                <p className="text-sm whitespace-pre-wrap">{value}</p>
+              </div>
+            ))}
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="outline" onClick={onClose}>Close</Button>
+              <Button className="gap-2" onClick={() => printDischargeReport(adm)}>
+                <Printer className="h-4 w-4" /> Print Summary
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Rounds panel (inline expand): rounds + transfers, newest first ───────────
 function RoundsPanel({ admissionId }: { admissionId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["ipd-rounds", admissionId],
@@ -344,27 +496,48 @@ function RoundsPanel({ admissionId }: { admissionId: string }) {
     staleTime: 10000,
   });
   const rounds: any[] = data?.rounds ?? [];
+  const transfers: any[] = data?.transfers ?? [];
+  const timeline = [
+    ...rounds.map((r) => ({ kind: "round" as const, at: r.roundedAt, r })),
+    ...transfers.map((t) => ({ kind: "transfer" as const, at: t.at, t })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+  const fmt = (v: string) => new Date(v).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
+
   if (isLoading) return <p className="text-xs text-muted-foreground mt-2 pt-3 border-t">Loading rounds...</p>;
-  if (rounds.length === 0) return <p className="text-xs text-muted-foreground mt-2 pt-3 border-t">No nursing rounds recorded yet.</p>;
+  if (timeline.length === 0) return <p className="text-xs text-muted-foreground mt-2 pt-3 border-t">No nursing rounds recorded yet.</p>;
   return (
     <div className="mt-3 border-t pt-3 space-y-2">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nursing Rounds ({rounds.length})</p>
-      {[...rounds].reverse().slice(0, 5).map((r: any) => (
-        <div key={r._id} className="bg-muted/40 rounded-lg px-3 py-2">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+        Nursing Rounds ({rounds.length}){transfers.length ? ` · Transfers (${transfers.length})` : ""}
+      </p>
+      {timeline.slice(0, 8).map((e) => e.kind === "transfer" ? (
+        <div key={`t-${e.t._id}`} className="bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium">{r.nurse}</span>
-            <span className="text-xs text-muted-foreground">
-              {new Date(r.roundedAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
+            <span className="text-xs font-medium text-violet-700 flex items-center gap-1">
+              <ArrowLeftRight className="h-3 w-3" />
+              {e.t.fromWard ? `${e.t.fromWard} ${e.t.fromBed} → ` : "→ "}{e.t.toWard} {e.t.toBed}
             </span>
+            <span className="text-xs text-muted-foreground">{fmt(e.at)}</span>
+          </div>
+          {(e.t.reason || e.t.by) && (
+            <p className="text-xs mt-1 text-muted-foreground">{[e.t.reason, e.t.by && `by ${e.t.by}`].filter(Boolean).join(" · ")}</p>
+          )}
+        </div>
+      ) : (
+        <div key={e.r._id} className="bg-muted/40 rounded-lg px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">{e.r.nurse}</span>
+            <span className="text-xs text-muted-foreground">{fmt(e.at)}</span>
           </div>
           <div className="flex gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
-            {r.bp    && <span>BP: {r.bp}</span>}
-            {r.pulse ? <span>Pulse: {r.pulse}</span> : null}
-            {r.temp  ? <span>Temp: {r.temp}°F</span> : null}
-            {r.spo2  ? <span>SpO₂: {r.spo2}%</span> : null}
-            {r.weight ? <span>Wt: {r.weight}kg</span> : null}
+            {e.r.bp    && <span>BP: {e.r.bp}</span>}
+            {e.r.pulse ? <span>Pulse: {e.r.pulse}</span> : null}
+            {e.r.temp  ? <span>Temp: {e.r.temp}°F</span> : null}
+            {e.r.spo2  ? <span>SpO₂: {e.r.spo2}%</span> : null}
+            {e.r.weight ? <span>Wt: {e.r.weight}kg</span> : null}
           </div>
-          {r.notes && <p className="text-xs mt-1 text-foreground">{r.notes}</p>}
+          {e.r.notes && <p className="text-xs mt-1 text-foreground">{e.r.notes}</p>}
         </div>
       ))}
     </div>
@@ -372,7 +545,7 @@ function RoundsPanel({ admissionId }: { admissionId: string }) {
 }
 
 // ── Bed map view ──────────────────────────────────────────────────────────────
-function BedMapView({ bedsData }: { bedsData: Record<string, any[]> }) {
+function BedMapView({ bedsData, tz }: { bedsData: Record<string, any[]>; tz: string }) {
   const wards = Object.keys(bedsData);
   if (wards.length === 0) return (
     <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">No active admissions to display on bed map</CardContent></Card>
@@ -380,7 +553,7 @@ function BedMapView({ bedsData }: { bedsData: Record<string, any[]> }) {
   return (
     <div className="space-y-4">
       {wards.map((ward) => {
-        const beds: any[] = bedsData[ward];
+        const beds: any[] = [...bedsData[ward]].sort((a, b) => String(a.bedNumber).localeCompare(String(b.bedNumber), undefined, { numeric: true }));
         return (
           <Card key={ward}>
             <CardHeader className="pb-2">
@@ -399,7 +572,7 @@ function BedMapView({ bedsData }: { bedsData: Record<string, any[]> }) {
                     </div>
                     <p className="text-xs font-medium truncate">{b.patientName}</p>
                     <p className="text-xs text-muted-foreground truncate">{b.diagnosis}</p>
-                    <p className="text-xs text-muted-foreground">Day {daysSince(b.since) + 1}</p>
+                    <p className="text-xs text-muted-foreground">Day {stayDay(b.since, tz)}</p>
                   </div>
                 ))}
               </div>

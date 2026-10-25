@@ -29,6 +29,7 @@ export interface IPharmacyOrder extends Document {
   doctor: string;
   time: string;
   prescriptionId?: string;
+  admissionId?: string;
   dispensedBy?: string;
   dispensedAt?: Date;
   notes?: string;
@@ -64,6 +65,7 @@ const PharmacyOrderSchema = new Schema<IPharmacyOrder>(
     doctor:        { type: String, default: "" },
     time:          { type: String, default: "" },
     prescriptionId:{ type: String },
+    admissionId:   { type: String },   // IPD admission _id when dispensed for an inpatient
     dispensedBy:   { type: String },
     dispensedAt:   { type: Date },
     notes:         { type: String },
@@ -74,5 +76,6 @@ const PharmacyOrderSchema = new Schema<IPharmacyOrder>(
 PharmacyOrderSchema.index({ tenantId: 1, rxId: 1 }, { unique: true });
 PharmacyOrderSchema.index({ tenantId: 1, status: 1, dispensedAt: 1 });
 PharmacyOrderSchema.index({ tenantId: 1, "items.drugId": 1, dispensedAt: 1 });
+PharmacyOrderSchema.index({ tenantId: 1, admissionId: 1 }, { sparse: true });
 
 export default mongoose.model<IPharmacyOrder>("PharmacyOrder", PharmacyOrderSchema);

@@ -14,17 +14,19 @@ export interface PharmacyOrderListFilters {
   status?: string;
   patientId?: string;
   rxSource?: string;
+  admissionId?: string;
   search?: string;
   page?: string;
   limit?: string;
 }
 
 export async function listOrders(tenantId: string, filters: PharmacyOrderListFilters) {
-  const { status, patientId, rxSource, search, page = "1", limit = "50" } = filters;
+  const { status, patientId, rxSource, admissionId, search, page = "1", limit = "50" } = filters;
   const query: any = { tenantId };
   if (status)    query.status    = status;
   if (patientId) query.patientId = patientId;
   if (rxSource)  query.rxSource  = rxSource;
+  if (admissionId) query.admissionId = admissionId;
 
   if (search && search.trim()) {
     const regex = new RegExp(escapeRegex(search.trim()), "i");
@@ -76,7 +78,7 @@ function buildBillItems(dispensedItems: any[]) {
 export async function createOrder(tenantId: string, userName: string, body: Record<string, any>) {
   const {
     patientId, patientName, drug, qty, unit,
-    items, type, doctor, time, prescriptionId,
+    items, type, doctor, time, prescriptionId, admissionId,
     rxSource = "Digital", paperRxNote = "", notes,
     status: reqStatus,
   } = body;
@@ -109,6 +111,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
     doctor: doctor || "",
     time: time || new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
     prescriptionId: prescriptionId || undefined,
+    admissionId: admissionId || undefined,
     notes: notes || "",
     status: reqStatus || "Pending",
   };

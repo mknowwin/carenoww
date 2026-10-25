@@ -21,6 +21,7 @@
     "migrate:drugbatch-index": "node scripts/run-script.mjs migrate-drugbatch-index",
     "migrate:receivedby-id": "node scripts/run-script.mjs migrate-receivedby-id",
     "migrate:bill-notes": "node scripts/run-script.mjs migrate-bill-notes",
+    "migrate:ipd-phase1": "node scripts/run-script.mjs migrate-ipd-phase1",
     "icd:import": "node scripts/run-script.mjs import-icd-catalog",
     "rollup:refresh": "node scripts/run-script.mjs refresh-rollups",
     "rollup:backfill": "node scripts/run-script.mjs refresh-rollups",

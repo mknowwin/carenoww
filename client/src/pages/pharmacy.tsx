@@ -26,6 +26,7 @@ import DrugEditModal from "@/components/modals/DrugEditModal";
 import BulkUploadInventoryModal from "@/components/modals/BulkUploadInventoryModal";
 import HistoryModal from "@/components/modals/HistoryModal";
 import DrugBatchesModal from "@/components/modals/DrugBatchesModal";
+import AdmittedBadge, { useActiveAdmissions } from "@/components/AdmittedBadge";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -427,6 +428,8 @@ export default function PharmacyPage() {
     } finally { setCancellingGrn(null); }
   };
 
+  const admitted = useActiveAdmissions(filteredOrders.map((o) => o.patientId));
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -529,7 +532,10 @@ export default function PharmacyPage() {
                           <Badge className={`text-xs ${RX_SOURCE_COLORS[order.rxSource]}`}>{order.rxSource}</Badge>
                         )}
                       </div>
-                      <div className="font-semibold text-sm mt-1">{order.patientName}</div>
+                      <div className="font-semibold text-sm mt-1 flex items-center gap-2 flex-wrap">
+                        {order.patientName}
+                        <AdmittedBadge admission={admitted[order.patientId]} compact />
+                      </div>
                       <div className="text-sm text-muted-foreground">
                         {order.drug} &mdash; <span className="font-medium text-foreground">{order.qty} {order.unit}</span>
                       </div>

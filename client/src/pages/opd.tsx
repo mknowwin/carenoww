@@ -22,6 +22,7 @@ import PatientHistory from "@/components/PatientHistory";
 import SoapTextarea from "@/components/SoapTextarea";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
+import AdmittedBadge, { useActiveAdmissions } from "@/components/AdmittedBadge";
 
 // ── DICOM Renderer ────────────────────────────────────────────────────────────
 async function renderDicom(base64: string, canvas: HTMLCanvasElement) {
@@ -685,6 +686,7 @@ export default function OPDPage() {
   const queue: any[] = queueData ?? [];
 
   const activeAppt = queue.find((a) => a._id === selectedApptId) ?? queue.find((a) => a.status === "In Consult") ?? queue[0] ?? null;
+  const activeAdmission = useActiveAdmissions([activeAppt?.patientId])[activeAppt?.patientId ?? ""];
 
   // Load patient record for active appointment
   const { data: activePatient } = useQuery({
@@ -982,6 +984,7 @@ export default function OPDPage() {
                   <div>
                     <div className="text-sm font-semibold">{activeAppt.patientName}</div>
                     <div className="text-xs text-muted-foreground font-mono">{activeAppt.patientId}</div>
+                    <AdmittedBadge admission={activeAdmission} />
                   </div>
                 </div>
                 {activePatient && (
@@ -1185,8 +1188,10 @@ export default function OPDPage() {
                           <Pill className="h-3.5 w-3.5 text-amber-600" /> Write Prescription
                         </Button>
                         <Button variant="outline" size="sm" className="w-full gap-2 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
+                          disabled={!!activeAdmission}
+                          title={activeAdmission ? `Already admitted — ${activeAdmission.admissionId}, ${activeAdmission.ward} ${activeAdmission.bedNumber}` : undefined}
                           onClick={() => setAdmitModalOpen(true)}>
-                          <BedDouble className="h-3.5 w-3.5 text-blue-600" /> Admit to Ward
+                          <BedDouble className="h-3.5 w-3.5 text-blue-600" /> {activeAdmission ? "Already Admitted" : "Admit to Ward"}
                         </Button>
                         <Button size="sm" className="w-full gap-2 text-xs bg-teal-600 hover:bg-teal-700"
                           disabled={signing} onClick={handleCompleteSign}>
@@ -1238,11 +1243,18 @@ export default function OPDPage() {
       <AdmitModal
         open={admitModalOpen}
         onClose={() => setAdmitModalOpen(false)}
-        onAdmitted={() => setAdmitModalOpen(false)}
+        onAdmitted={() => {
+          setAdmitModalOpen(false);
+          qc.invalidateQueries({ queryKey: ["ipd"] });
+          qc.invalidateQueries({ queryKey: ["ipd-beds"] });
+          qc.invalidateQueries({ queryKey: ["ipd-stats"] });
+          qc.invalidateQueries({ queryKey: ["ipd-active-by-patient"] });
+        }}
         patientId={activeAppt?.patientId}
         patientName={activeAppt?.patientName}
         appointmentId={activeAppt?._id}
         fromDoctor={activeAppt?.doctor}
+        fromDoctorId={activeAppt?.doctorId}
       />
     </div>
   );

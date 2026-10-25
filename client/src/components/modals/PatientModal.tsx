@@ -129,7 +129,15 @@ export default function PatientModal({ open, onClose, existing }: Props) {
             <F label="Insurance"><SI value={form.insurance} onChange={(v) => set("insurance", v)} placeholder="Star Health / None" /></F>
             <F label="Address"><SI value={form.address} onChange={(v) => set("address", v)} placeholder="City / District" /></F>
             <F label="Department"><Sel value={form.department} onChange={(v) => set("department", v)} opts={DEPARTMENTS} /></F>
-            <F label="Status"><Sel value={form.status} onChange={(v) => set("status", v)} opts={["OPD", "IPD", "ICU", "Discharged"]} /></F>
+            {form.status === "IPD" || form.status === "ICU" ? (
+              <F label="Status">
+                <div className="h-9 flex items-center px-3 rounded-md border bg-muted text-sm text-muted-foreground" title="Changes with admit / transfer / discharge on the IPD page">
+                  {form.status} · managed from IPD
+                </div>
+              </F>
+            ) : (
+              <F label="Status"><Sel value={form.status} onChange={(v) => set("status", v)} opts={["OPD", "Discharged"]} /></F>
+            )}
             <F label="Risk Level"><Sel value={form.riskLevel} onChange={(v) => set("riskLevel", v)} opts={["Low", "Medium", "High", "Critical"]} /></F>
             <F label="Consulting Doctor"><SI value={form.doctor} onChange={(v) => set("doctor", v)} placeholder="Dr. Name" /></F>
             <F label="Diagnosis"><SI value={form.diagnosis} onChange={(v) => set("diagnosis", v)} placeholder="Primary diagnosis" /></F>

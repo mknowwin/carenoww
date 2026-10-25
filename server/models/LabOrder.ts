@@ -32,6 +32,7 @@ export interface ILabOrder extends Document {
   department?: string;
   reportedBy: string;
   appointmentId?: string;
+  admissionId?: string;
   notes?: string;
   editHistory: ILabResultEdit[];
   createdAt: Date;
@@ -77,6 +78,7 @@ const LabOrderSchema = new Schema<ILabOrder>(
     department:  { type: String, default: "" },
     reportedBy:  { type: String, default: "" },
     appointmentId: { type: String, default: "" },
+    admissionId: { type: String, default: "" },   // IPD admission _id when ordered for an inpatient
     notes:       { type: String, default: "" },
     editHistory: { type: [LabResultEditSchema], default: [] },
   },
@@ -88,5 +90,6 @@ LabOrderSchema.index({ tenantId: 1, ordered: 1 });
 LabOrderSchema.index({ tenantId: 1, doctor: 1, ordered: 1 });
 LabOrderSchema.index({ tenantId: 1, department: 1, ordered: 1 });
 LabOrderSchema.index({ tenantId: 1, diagnosis: 1, ordered: 1 });
+LabOrderSchema.index({ tenantId: 1, admissionId: 1 }, { partialFilterExpression: { admissionId: { $gt: "" } } });
 
 export default mongoose.model<ILabOrder>("LabOrder", LabOrderSchema);

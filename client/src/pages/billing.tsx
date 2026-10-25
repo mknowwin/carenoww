@@ -23,6 +23,7 @@ import AppErrorBoundary from "@/components/AppErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { confirm } from "@/hooks/use-confirm";
+import AdmittedBadge, { useActiveAdmissions } from "@/components/AdmittedBadge";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
@@ -305,6 +306,8 @@ export default function BillingPage() {
   const openNew    = () => { setPrefill(undefined); setEditBill(null); setPayOnly(false); setModalOpen(true); };
   const openEdit   = (bill: any) => { setPrefill(undefined); setEditBill(bill); setPayOnly(false); setModalOpen(true); };
   const openPayment= (bill: any) => { setPrefill(undefined); setEditBill(bill); setPayOnly(true);  setModalOpen(true); };
+
+  const admitted = useActiveAdmissions(filtered.map((b: any) => b.patientId));
 
   return (
     <div className="space-y-4 animate-fadeIn">
@@ -766,6 +769,7 @@ export default function BillingPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-sm">{bill.patientName}</span>
                       <span className="text-xs font-mono text-muted-foreground bg-muted px-1.5 rounded">{bill.id}</span>
+                      <AdmittedBadge admission={admitted[bill.patientId]} compact />
                       {isCreditNote ? (
                         <Badge className="text-xs bg-red-100 text-red-700">Credit Note</Badge>
                       ) : (

@@ -6,14 +6,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ipd as ipdApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
-import { BedDouble } from "lucide-react";
+import { BedDouble, CheckCircle2, Printer } from "lucide-react";
+import { printDischargeReport } from "@/lib/print";
 
 const CONDITIONS = ["Improved", "Same", "Deteriorated", "Expired", "LAMA"] as const;
 
 interface Props {
   admission: any;
   onClose: () => void;
-  onDischarged: () => void;
+  onDischarged: () => void;   // refresh lists; the modal stays open on its success step until onClose
 }
 
 export default function DischargeModal({ admission, onClose, onDischarged }: Props) {
@@ -25,12 +26,14 @@ export default function DischargeModal({ admission, onClose, onDischarged }: Pro
   const [notes,           setNotes]           = useState("");
   const [saving,          setSaving]          = useState(false);
   const [error,           setError]           = useState("");
+  const [discharged,      setDischarged]      = useState<any>(null);
 
   const handleDischarge = async () => {
     if (!finalDiagnosis || !condition) { setError("Final diagnosis and condition are required"); return; }
     setSaving(true); setError("");
     try {
-      await ipdApi.discharge(admission._id, { finalDiagnosis, treatment, medications, followUp, condition, notes });
+      const result = await ipdApi.discharge(admission._id, { finalDiagnosis, treatment, medications, followUp, condition, notes });
+      setDischarged(result);
       onDischarged();
     } catch (e: any) {
       setError(e.message || "Failed to discharge");
@@ -46,6 +49,24 @@ export default function DischargeModal({ admission, onClose, onDischarged }: Pro
         <DialogHeader>
           <DialogTitle>Discharge Summary</DialogTitle>
         </DialogHeader>
+
+        {discharged ? (
+          <div className="space-y-4 py-2 text-center">
+            <CheckCircle2 className="h-10 w-10 text-teal-600 mx-auto" />
+            <div>
+              <p className="font-semibold">{discharged.patientName} discharged</p>
+              <p className="text-sm text-muted-foreground">
+                {discharged.admissionId} · {discharged.discharge?.condition} · {days} day{days !== 1 ? "s" : ""} stay
+              </p>
+            </div>
+            <div className="flex gap-2 justify-center">
+              <Button variant="outline" onClick={onClose}>Done</Button>
+              <Button className="gap-2" onClick={() => printDischargeReport(discharged)}>
+                <Printer className="h-4 w-4" /> Print Summary
+              </Button>
+            </div>
+          </div>
+        ) : (<>
 
         {/* Patient info */}
         <div className="bg-blue-50 rounded-lg px-4 py-3 flex items-center gap-3">
@@ -109,6 +130,7 @@ export default function DischargeModal({ admission, onClose, onDischarged }: Pro
             </Button>
           </div>
         </div>
+        </>)}
       </DialogContent>
     </Dialog>
   );

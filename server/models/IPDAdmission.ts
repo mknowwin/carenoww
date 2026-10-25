@@ -11,6 +11,16 @@ export interface IRound {
   notes: string;
 }
 
+export interface ITransfer {
+  at: Date;
+  fromWard: string;
+  fromBed: string;
+  toWard: string;
+  toBed: string;
+  reason: string;
+  by: string;
+}
+
 export interface IDischarge {
   finalDiagnosis: string;
   treatment: string;
@@ -35,10 +45,12 @@ export interface IIPDAdmission extends Document {
   department: string;
   ward: string;
   bedNumber: string;
+  bedKey: string;
   admissionDate: Date;
   provisionalDiagnosis: string;
   status: "Active" | "Discharged" | "Transferred";
   rounds: IRound[];
+  transfers: ITransfer[];
   discharge?: IDischarge;
   dischargeDate?: Date;
   createdAt: Date;
@@ -54,6 +66,16 @@ const RoundSchema = new Schema<IRound>({
   spo2:       { type: Number, default: 0 },
   weight:     { type: Number },
   notes:      { type: String, default: "" },
+}, { _id: true });
+
+const TransferSchema = new Schema<ITransfer>({
+  at:       { type: Date, default: Date.now },
+  fromWard: { type: String, default: "" },
+  fromBed:  { type: String, default: "" },
+  toWard:   { type: String, required: true },
+  toBed:    { type: String, required: true },
+  reason:   { type: String, default: "" },
+  by:       { type: String, default: "" },
 }, { _id: true });
 
 const DischargeSchema = new Schema<IDischarge>({
@@ -81,10 +103,12 @@ const IPDAdmissionSchema = new Schema<IIPDAdmission>(
     department:        { type: String, required: true },
     ward:              { type: String, required: true },
     bedNumber:         { type: String, required: true },
+    bedKey:            { type: String, required: true },   // normalised "WARD|BED", see ipdService.bedKeyFor
     admissionDate:     { type: Date, default: Date.now },
     provisionalDiagnosis: { type: String, required: true },
     status:            { type: String, enum: ["Active","Discharged","Transferred"], default: "Active" },
     rounds:            { type: [RoundSchema], default: [] },
+    transfers:         { type: [TransferSchema], default: [] },
     discharge:         { type: DischargeSchema },
     dischargeDate:     { type: Date },
   },
@@ -94,5 +118,16 @@ const IPDAdmissionSchema = new Schema<IIPDAdmission>(
 IPDAdmissionSchema.index({ tenantId: 1, admissionId: 1 }, { unique: true });
 IPDAdmissionSchema.index({ tenantId: 1, status: 1 });
 IPDAdmissionSchema.index({ tenantId: 1, patientId: 1 });
+IPDAdmissionSchema.index({ tenantId: 1, dischargeDate: -1 });
+// One active patient per bed, and one active admission per patient (patientId = UHID).
+// Partial on status so discharged admissions keep their old bed/patient freely.
+IPDAdmissionSchema.index(
+  { tenantId: 1, bedKey: 1 },
+  { unique: true, partialFilterExpression: { status: "Active" }, name: "uniq_active_bed" }
+);
+IPDAdmissionSchema.index(
+  { tenantId: 1, patientId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: "Active" }, name: "uniq_active_patient" }
+);
 
 export default mongoose.model<IIPDAdmission>("IPDAdmission", IPDAdmissionSchema);

@@ -391,6 +391,11 @@ export const ipd = {
     return get<any>(`/ipd${qs}`);
   },
   beds:      () => get<any>("/ipd/beds"),
+  stats:     () => get<{ active: number; icu: number; dischargedToday: number }>("/ipd/stats"),
+  // { [uhid]: { _id, admissionId, ward, bedNumber, admissionDate } } for patients currently admitted
+  activeByPatient: (ids: string[]) =>
+    get<Record<string, { _id: string; admissionId: string; ward: string; bedNumber: string; admissionDate: string }>>(
+      `/ipd/active-by-patient?ids=${encodeURIComponent(ids.join(","))}`),
   get:       (id: string) => get<any>(`/ipd/${id}`),
   admit:     (data: any)  => post<any>("/ipd", data),
   update:    (id: string, data: any) => put<any>(`/ipd/${id}`, data),

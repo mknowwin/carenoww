@@ -7,15 +7,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ipd as ipdApi, patients as patientsApi, users as usersApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
 
-const WARDS    = ["General Ward", "ICU", "Private Ward", "Semi-Private", "Obs/Gyn", "Pediatric"];
-const DEPTS    = ["General Medicine", "Cardiology", "Orthopedics", "Neurology", "Obstetrics", "Pediatrics", "Emergency"];
+import { WARDS, DEPTS } from "@/lib/ipd";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onAdmitted: () => void;
-  patientId?: string;
+  patientId?: string;     // UHID
   patientName?: string;
   appointmentId?: string;
   fromDoctor?: string;
@@ -40,6 +40,12 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
     queryFn:  () => patientsApi.list({ search, limit: "8" }),
     enabled:  search.length > 1,
   });
+  const searchIds: string[] = (searchData?.patients ?? []).map((p: any) => p.uhid).filter(Boolean);
+  const { data: admittedMap } = useQuery({
+    queryKey: ["ipd-active-by-patient", searchIds],
+    queryFn:  () => ipdApi.activeByPatient(searchIds),
+    enabled:  searchIds.length > 0,
+  });
   const { data: doctorsData } = useQuery({
     queryKey: ["doctors-admit"],
     queryFn:  () => usersApi.doctors(),
@@ -52,7 +58,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
       if (!initPatientId) setShowSearch(true);
     }
     if (initPatientId && initPatientName) {
-      setSelected({ _id: initPatientId, name: initPatientName });
+      setSelected({ uhid: initPatientId, name: initPatientName });
       setShowSearch(false);
     }
     if (fromDoctor)   setDoctor(fromDoctor);
@@ -67,12 +73,9 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
     }
     setSaving(true); setError("");
     try {
+      // Server resolves the UHID and copies name/age/gender/phone from the patient record
       await ipdApi.admit({
-        patientId:            selected._id,
-        patientName:          selected.name,
-        patientAge:           selected.age,
-        patientGender:        selected.gender,
-        patientPhone:         selected.phone,
+        patientId:            selected.uhid || selected._id,
         appointmentId:        appointmentId || "",
         admittingDoctor:      doctor,
         admittingDoctorId:    doctorId,
@@ -105,13 +108,22 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
                 onChange={(e) => setSearch(e.target.value)} />
               {patients.length > 0 && (
                 <div className="border rounded-md mt-1 divide-y max-h-40 overflow-y-auto">
-                  {patients.map((p: any) => (
-                    <button key={p._id} className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors"
-                      onClick={() => { setSelected(p); setShowSearch(false); setDept(p.department || ""); }}>
-                      <span className="font-medium">{p.name}</span>
-                      <span className="text-muted-foreground ml-2">{p.uhid} · {p.phone}</span>
-                    </button>
-                  ))}
+                  {patients.map((p: any) => {
+                    const adm = admittedMap?.[p.uhid];
+                    return (
+                      <button key={p._id} disabled={!!adm}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                        onClick={() => { setSelected(p); setShowSearch(false); setDept(p.department || ""); }}>
+                        <span className="font-medium">{p.name}</span>
+                        <span className="text-muted-foreground ml-2">{[p.uhid, p.phone].filter(Boolean).join(" · ")}</span>
+                        {adm && (
+                          <Badge className="ml-2 text-[10px] bg-teal-50 text-teal-700 border border-teal-200">
+                            Admitted · {adm.ward} {adm.bedNumber}
+                          </Badge>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -119,7 +131,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
             <div className="flex items-center justify-between bg-muted/40 rounded-lg px-3 py-2">
               <div>
                 <p className="text-sm font-medium">{selected?.name}</p>
-                <p className="text-xs text-muted-foreground">{selected?.uhid} · {selected?.phone}</p>
+                <p className="text-xs text-muted-foreground">{[selected?.uhid, selected?.phone].filter(Boolean).join(" · ")}</p>
               </div>
               {!initPatientId && (
                 <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => setShowSearch(true)}>Change</Button>
@@ -140,7 +152,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
             </div>
             <div>
               <Label>Bed Number</Label>
-              <Input className="mt-1" placeholder="e.g. GW-05, ICU-02" value={bed} onChange={(e) => setBed(e.target.value)} />
+              <Input className="mt-1 uppercase" placeholder="e.g. GW-05, ICU-02" value={bed} onChange={(e) => setBed(e.target.value.toUpperCase())} />
             </div>
           </div>
 

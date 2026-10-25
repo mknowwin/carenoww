@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import Counter from "../models/Counter.js";
+import IPDAdmission from "../models/IPDAdmission.js";
 import { AppError } from "../lib/AppError.js";
 
 export interface PatientListFilters {
@@ -71,7 +72,9 @@ export async function listPatients(tenantId: string, filters: PatientListFilters
 
 export async function createPatient(tenantId: string, body: Record<string, unknown>) {
   const uhid = await nextUHID(tenantId);
-  return Patient.create({ ...body, tenantId, uhid });
+  // New patients start as OPD; IPD/ICU is only set by admitting them
+  const status = body.status === "IPD" || body.status === "ICU" ? "OPD" : body.status;
+  return Patient.create({ ...body, ...(status ? { status } : {}), tenantId, uhid });
 }
 
 export async function getPatient(tenantId: string, id: string) {
@@ -83,7 +86,23 @@ export async function getPatient(tenantId: string, id: string) {
   return patient;
 }
 
+// IPD/ICU status follows the patient's IPD admission (admit, transfer, discharge
+// in ipdService). Manual edits may only switch between OPD and Discharged.
+async function guardStatusChange(tenantId: string, id: string, status: unknown) {
+  if (status === undefined) return;
+  const current = await Patient.findOne({ _id: id, tenantId }).select("uhid status");
+  if (!current || current.status === status) return;
+  const active = await IPDAdmission.findOne({ tenantId, patientId: current.uhid, status: "Active" }).select("admissionId");
+  if (active) {
+    throw AppError.conflict(`Patient is admitted (${active.admissionId}) — transfer or discharge from the IPD page`);
+  }
+  if (status === "IPD" || status === "ICU") {
+    throw AppError.badRequest("Admit the patient from the IPD page to set IPD/ICU status");
+  }
+}
+
 export async function updatePatient(tenantId: string, id: string, body: Record<string, unknown>) {
+  await guardStatusChange(tenantId, id, body.status);
   const patient = await Patient.findOneAndUpdate(
     { _id: id, tenantId },
     { $set: body },

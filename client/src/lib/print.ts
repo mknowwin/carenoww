@@ -1007,25 +1007,43 @@ export function printPrescription(rx: any, clinicOverride?: ClinicInfo) {
 }
 
 // ── printDischargeReport ──────────────────────────────────────────────────────
+// Free-text clinical fields are escaped and keep their line breaks.
+const escHtml = (v: unknown) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+const escBlock = (v: unknown) => escHtml(v).replace(/\n/g, "<br>");
+
 export function printDischargeReport(admission: any, clinicOverride?: ClinicInfo) {
   const clinic = clinicOverride ?? getStoredClinic();
-  const admitDate    = admission.admissionDate
-    ? new Date(admission.admissionDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" })
-    : "—";
-  const dischargeDate = admission.dischargeDate
-    ? new Date(admission.dischargeDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" })
-    : new Date().toLocaleDateString("en-IN");
+  const d = admission.discharge ?? {};
+  const fmtDate = (v: any) => new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const fmtDateTime = (v: any) => new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const admitDate     = admission.admissionDate ? fmtDate(admission.admissionDate) : "—";
+  const dischargeDate = admission.dischargeDate ? fmtDate(admission.dischargeDate) : "—";
+  const stayDays = admission.admissionDate
+    ? Math.max(1, Math.round(((admission.dischargeDate ? new Date(admission.dischargeDate).getTime() : Date.now()) - new Date(admission.admissionDate).getTime()) / 86400000))
+    : null;
+  const demographics = [admission.patientAge ? `${admission.patientAge} yrs` : "", admission.patientGender || ""].filter(Boolean).join(" / ");
 
-  const rounds = ((admission.rounds || []) as any[])
-    .slice(-5)
-    .map((r: any) => `
+  const section = (title: string, value: unknown) => value ? `
+    <div style="margin-bottom:12px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid #ddd;padding-bottom:3px;">${title}</div>
+      <div style="font-size:12px;line-height:1.7;">${escBlock(value)}</div>
+    </div>` : "";
+
+  const rounds = ((admission.rounds || []) as any[]).slice(-5);
+  const roundRows = rounds.map((r: any) => `
       <tr>
-        <td>${r.date ? new Date(r.date).toLocaleDateString("en-IN") : "—"}</td>
-        <td>${r.notes || "—"}</td>
-        <td>${r.vitals?.bp || "—"}</td>
-        <td>${r.vitals?.spo2 || "—"}</td>
-        <td>${r.doctor || admission.primaryDoctor || "—"}</td>
-      </tr>`).join("") || `<tr><td colspan="5" style="text-align:center;color:#888;">No rounds recorded</td></tr>`;
+        <td>${r.roundedAt ? fmtDateTime(r.roundedAt) : "—"}</td>
+        <td>${escHtml(r.bp) || "—"}</td>
+        <td>${r.pulse || "—"}</td>
+        <td>${r.temp ? `${r.temp}°F` : "—"}</td>
+        <td>${r.spo2 ? `${r.spo2}%` : "—"}</td>
+        <td>${escBlock(r.notes) || "—"}</td>
+      </tr>`).join("");
+
+  const transfers = ((admission.transfers || []) as any[]).map((t: any) =>
+    `<li>${t.at ? fmtDateTime(t.at) : ""} — ${t.fromWard ? `${escHtml(t.fromWard)} ${escHtml(t.fromBed)} → ` : ""}${escHtml(t.toWard)} ${escHtml(t.toBed)}${t.reason ? ` (${escHtml(t.reason)})` : ""}</li>`
+  ).join("");
 
   const body = `
     ${clinicHeader(clinic)}
@@ -1036,48 +1054,57 @@ export function printDischargeReport(admission: any, clinicOverride?: ClinicInfo
         <div style="margin-top:4px;"><span class="badge">IPD</span></div>
       </div>
       <div class="doc-id">
-        <div style="font-size:14px;font-weight:700;font-family:monospace;">${admission.admissionId || admission._id?.slice(-6) || "—"}</div>
+        <div style="font-size:14px;font-weight:700;font-family:monospace;">${escHtml(admission.admissionId) || "—"}</div>
         <div>Admitted: ${admitDate}</div>
         <div>Discharged: ${dischargeDate}</div>
+        ${stayDays ? `<div>Length of stay: ${stayDays} day${stayDays !== 1 ? "s" : ""}</div>` : ""}
       </div>
     </div>
 
     <div class="meta">
-      <div class="meta-item"><label>Patient Name</label><span>${admission.patientName || "—"}</span></div>
-      <div class="meta-item"><label>UHID</label><span>${admission.patientId || "—"}</span></div>
-      <div class="meta-item"><label>Ward / Room</label><span>${admission.ward || "—"} — Bed ${admission.bedNumber || "—"}</span></div>
-      <div class="meta-item"><label>Primary Doctor</label><span>${admission.primaryDoctor || "—"}</span></div>
-      <div class="meta-item"><label>Diagnosis</label><span>${admission.diagnosis || "—"}</span></div>
-      <div class="meta-item"><label>Discharge Condition</label><span>${admission.dischargeCondition || admission.condition || "Stable"}</span></div>
+      <div class="meta-item"><label>Patient Name</label><span>${escHtml(admission.patientName) || "—"}</span></div>
+      <div class="meta-item"><label>UHID</label><span>${escHtml(admission.patientId) || "—"}</span></div>
+      ${demographics ? `<div class="meta-item"><label>Age / Gender</label><span>${escHtml(demographics)}</span></div>` : ""}
+      <div class="meta-item"><label>Ward / Bed</label><span>${escHtml(admission.ward) || "—"} — ${escHtml(admission.bedNumber) || "—"}</span></div>
+      <div class="meta-item"><label>Admitting Doctor</label><span>${escHtml(admission.admittingDoctor) || "—"}</span></div>
+      ${admission.department ? `<div class="meta-item"><label>Department</label><span>${escHtml(admission.department)}</span></div>` : ""}
+      <div class="meta-item"><label>Condition at Discharge</label><span>${escHtml(d.condition) || "—"}</span></div>
+      ${d.dischargedBy ? `<div class="meta-item"><label>Discharged By</label><span>${escHtml(d.dischargedBy)}</span></div>` : ""}
     </div>
 
-    ${admission.diagnosis ? `
-    <div style="margin-bottom:12px;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid #ddd;padding-bottom:3px;">Diagnosis &amp; Treatment Summary</div>
-      <div style="font-size:12px;line-height:1.7;">${admission.diagnosis}</div>
-    </div>` : ""}
+    ${section("Provisional Diagnosis (at admission)", admission.provisionalDiagnosis)}
+    ${section("Final Diagnosis", d.finalDiagnosis)}
+    ${section("Treatment Summary", d.treatment)}
+    ${section("Discharge Medications", d.medications)}
 
-    <div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid #ddd;padding-bottom:3px;">Clinical Notes (last 5 rounds)</div>
+    ${rounds.length ? `
+    <div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid #ddd;padding-bottom:3px;">Recent Vitals (last ${rounds.length} round${rounds.length !== 1 ? "s" : ""})</div>
     <table>
       <thead>
         <tr>
-          <th style="width:90px;">Date</th>
+          <th style="width:110px;">Date / Time</th>
+          <th style="width:65px;">BP</th>
+          <th style="width:50px;">Pulse</th>
+          <th style="width:55px;">Temp</th>
+          <th style="width:50px;">SpO₂</th>
           <th>Notes</th>
-          <th style="width:60px;">BP</th>
-          <th style="width:60px;">SpO₂</th>
-          <th style="width:110px;">Doctor</th>
         </tr>
       </thead>
-      <tbody>${rounds}</tbody>
-    </table>
+      <tbody>${roundRows}</tbody>
+    </table>` : ""}
 
-    ${admission.dischargeInstructions ? `
-    <div class="notes" style="margin-top:14px;"><strong>Discharge Instructions</strong>${admission.dischargeInstructions}</div>` : ""}
-
-    ${admission.followUpDate ? `
-    <div style="margin-top:12px;padding:8px 12px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:5px;font-size:12px;">
-      <strong>Follow-up Appointment:</strong> ${new Date(admission.followUpDate).toLocaleDateString("en-IN")}
+    ${transfers ? `
+    <div style="margin-top:12px;font-size:12px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid #ddd;padding-bottom:3px;">Ward Transfers</div>
+      <ul style="margin:0;padding-left:18px;line-height:1.7;">${transfers}</ul>
     </div>` : ""}
+
+    ${d.followUp ? `
+    <div style="margin-top:12px;padding:8px 12px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:5px;font-size:12px;">
+      <strong>Follow-up:</strong> ${escBlock(d.followUp)}
+    </div>` : ""}
+
+    ${d.notes ? `<div class="notes"><strong>Additional Notes</strong>${escBlock(d.notes)}</div>` : ""}
 
     <div class="sig-wrap" style="margin-top:30px;justify-content:space-between;">
       <div class="sig" style="width:200px;">Patient / Attendant Signature</div>

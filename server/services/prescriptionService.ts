@@ -78,6 +78,7 @@ export async function createPrescription(tenantId: string, user: { name: string;
       doctor:        user.name,
       time:          new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
       prescriptionId: prescription._id.toString(),
+      admissionId:    admissionId || undefined,
     });
   } catch {
     // pharmacy order creation is best-effort; don't fail the prescription

@@ -10,6 +10,7 @@ import { appointments as apptApi, users as usersApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { todayInTz } from "@/lib/utils";
 import AppointmentModal from "@/components/modals/AppointmentModal";
+import AdmittedBadge, { useActiveAdmissions } from "@/components/AdmittedBadge";
 import { toast } from "@/hooks/use-toast";
 import {
   Search, CheckCircle2, Clock, UserCheck, Users, Stethoscope,
@@ -120,6 +121,8 @@ export default function ReceptionPage() {
       setActionId(null);
     }
   };
+
+  const admitted = useActiveAdmissions(filtered.map((a: any) => a.patientId));
 
   return (
     <div className="space-y-4 animate-fadeIn">
@@ -277,6 +280,7 @@ export default function ReceptionPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-sm">{apt.patientName}</span>
                       <Badge className="text-xs font-mono bg-gray-100 text-gray-600">{apt.patientId}</Badge>
+                      <AdmittedBadge admission={admitted[apt.patientId]} />
                       <Badge className={`text-xs ${STATUS_COLOR[apt.status] ?? "bg-gray-100 text-gray-600"}`}>{apt.status}</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground mt-1 flex flex-wrap items-center gap-2">
