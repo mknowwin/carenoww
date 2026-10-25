@@ -30,10 +30,11 @@ interface Props {
   patientId: string;
   patientName: string;
   appointmentId?: string;
+  admissionId?: string;   // IPD admission _id when ordered from the inpatient chart
   doctor?: string;
 }
 
-export default function LabOrderModal({ open, onClose, onSaved, patientId, patientName, appointmentId, doctor }: Props) {
+export default function LabOrderModal({ open, onClose, onSaved, patientId, patientName, appointmentId, admissionId, doctor }: Props) {
   const { user } = useAuth();
   const todayStr = todayInTz(user?.timezone ?? "Asia/Kolkata");
 
@@ -99,6 +100,7 @@ export default function LabOrderModal({ open, onClose, onSaved, patientId, patie
         patientId,
         patientName,
         appointmentId: appointmentId || "",
+        admissionId:   admissionId || "",
         test:       selected.join(", "),
         priority,
         doctor:     doctor || "",

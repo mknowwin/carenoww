@@ -8,6 +8,7 @@ router.use(authMiddleware);
 
 // ── GET /api/ipd — list admissions (active by default) ────────────────────────
 // Discharged: ?status=Discharged&from=YYYY-MM-DD&to=YYYY-MM-DD&limit=50 (newest first)
+// ?status=all&patientId=UHID — every stay for a patient (history)
 router.get("/", asyncHandler(async (req: AuthRequest, res) => {
   const data = await ipdService.listAdmissions(req.user!.tenantId, req.query as Record<string, string>, req.user!.timezone);
   res.json({ success: true, data });
@@ -42,6 +43,12 @@ router.post("/", requireRole("admin", "doctor", "nurse", "receptionist"), asyncH
 router.post("/:id/rounds", requireRole("admin", "doctor", "nurse"), asyncHandler(async (req: AuthRequest, res) => {
   const round = await ipdService.addRound(req.user!.tenantId, req.user!.name, req.params.id, req.body);
   res.status(201).json({ success: true, data: round });
+}));
+
+// ── POST /api/ipd/:id/notes — doctor's progress note { subjective, objective, assessment, plan } ─
+router.post("/:id/notes", requireRole("admin", "doctor"), asyncHandler(async (req: AuthRequest, res) => {
+  const note = await ipdService.addProgressNote(req.user!.tenantId, { name: req.user!.name, id: req.user!.id }, req.params.id, req.body);
+  res.status(201).json({ success: true, data: note });
 }));
 
 // ── POST /api/ipd/:id/transfer — move patient to a different ward/bed ────────

@@ -10,6 +10,7 @@ import PatientsPage from "./pages/patients";
 import AppointmentsPage from "./pages/appointments";
 import OPDPage from "./pages/opd";
 import IPDPage from "./pages/ipd";
+import IPDChartPage from "./pages/ipd-chart";
 import PharmacyPage from "./pages/pharmacy";
 import LabPage from "./pages/lab";
 import BillingPage from "./pages/billing";
@@ -124,6 +125,7 @@ export default function App() {
       <Route path="/doctor-queue"  component={() => <Redirect to="/opd" />} />
       <Route path="/opd"           component={() => <ProtectedRoute component={OPDPage} module="opd" />} />
       <Route path="/ipd"           component={() => <ProtectedRoute component={IPDPage} module="ipd" />} />
+      <Route path="/ipd/:id"       component={() => <ProtectedRoute component={IPDChartPage} module="ipd" />} />
       <Route path="/pharmacy"      component={() => <ProtectedRoute component={PharmacyPage} module="pharmacy" />} />
       <Route path="/lab"           component={() => <ProtectedRoute component={LabPage} module="lab" />} />
       <Route path="/billing"       component={() => <ProtectedRoute component={BillingPage} module="billing" />} />

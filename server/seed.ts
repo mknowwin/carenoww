@@ -122,8 +122,15 @@ export async function seedTenant(tenantId: string) {
       admittingDoctor: "Dr. Karthik Nair", department: "Orthopedics", ward: "General Ward", ...bedRef("GW-05"),
       admissionDate: daysAgo(4), provisionalDiagnosis: "Hip Fracture — ORIF planned",
       rounds: [
-        { roundedAt: daysAgo(3, 8),  nurse: "Sr. Meena Thomas", bp: "138/86", pulse: 88, temp: 99.1, spo2: 96, notes: "Pain 6/10, analgesia given" },
-        { roundedAt: daysAgo(1, 20), nurse: "Sr. Meena Thomas", bp: "128/80", pulse: 80, temp: 98.6, spo2: 97, notes: "Post-op day 1, mobilising with walker" },
+        { roundedAt: daysAgo(3, 8),  nurse: "Sr. Meena Thomas", bp: "138/86", pulse: 88, temp: 99.1, spo2: 96, respRate: 18, notes: "Pain 6/10, analgesia given" },
+        { roundedAt: daysAgo(2, 20), nurse: "Sr. Meena Thomas", bp: "146/92", pulse: 104, temp: 100.8, spo2: 94, respRate: 22, intake: 1800, output: 1200, notes: "Post-op evening, febrile, informed duty doctor" },
+        { roundedAt: daysAgo(1, 20), nurse: "Sr. Meena Thomas", bp: "128/80", pulse: 80, temp: 98.6, spo2: 97, respRate: 16, notes: "Post-op day 1, mobilising with walker" },
+      ],
+      progressNotes: [
+        { at: daysAgo(2, 9), doctor: "Dr. Karthik Nair", subjective: "Hip pain, slept poorly", objective: "Shortening and external rotation of right leg, distal pulses present",
+          assessment: "Fracture of neck of right femur (S72.001A)", plan: "ORIF today, IV antibiotics, DVT prophylaxis" },
+        { at: daysAgo(1, 9), doctor: "Dr. Karthik Nair", subjective: "Pain controlled", objective: "Wound clean, afebrile this morning",
+          assessment: "Post-op day 1 after ORIF, low-grade fever settled", plan: "Physiotherapy, continue antibiotics 48h, review CBC" },
       ],
     },
     {

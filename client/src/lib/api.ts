@@ -399,6 +399,8 @@ export const ipd = {
   admit:     (data: any)  => post<any>("/ipd", data),
   update:    (id: string, data: any) => put<any>(`/ipd/${id}`, data),
   addRound:  (id: string, data: any) => post<any>(`/ipd/${id}/rounds`, data),
+  addNote:   (id: string, data: { subjective?: string; objective?: string; assessment?: string; plan?: string }) =>
+    post<any>(`/ipd/${id}/notes`, data),
   discharge: (id: string, data: any) => post<any>(`/ipd/${id}/discharge`, data),
   transfer:  (id: string, data: any) => post<any>(`/ipd/${id}/transfer`, data),
 };

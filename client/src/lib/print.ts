@@ -1019,8 +1019,10 @@ export function printDischargeReport(admission: any, clinicOverride?: ClinicInfo
   const fmtDateTime = (v: any) => new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   const admitDate     = admission.admissionDate ? fmtDate(admission.admissionDate) : "—";
   const dischargeDate = admission.dischargeDate ? fmtDate(admission.dischargeDate) : "—";
+  // Calendar days spanned (admitted 23rd, discharged 25th = 3), same count as the IPD chart
+  const calDay = (v: any) => { const d = new Date(v); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
   const stayDays = admission.admissionDate
-    ? Math.max(1, Math.round(((admission.dischargeDate ? new Date(admission.dischargeDate).getTime() : Date.now()) - new Date(admission.admissionDate).getTime()) / 86400000))
+    ? Math.round((calDay(admission.dischargeDate ?? Date.now()) - calDay(admission.admissionDate)) / 86400000) + 1
     : null;
   const demographics = [admission.patientAge ? `${admission.patientAge} yrs` : "", admission.patientGender || ""].filter(Boolean).join(" / ");
 
@@ -1038,6 +1040,7 @@ export function printDischargeReport(admission: any, clinicOverride?: ClinicInfo
         <td>${r.pulse || "—"}</td>
         <td>${r.temp ? `${r.temp}°F` : "—"}</td>
         <td>${r.spo2 ? `${r.spo2}%` : "—"}</td>
+        <td>${r.respRate || "—"}</td>
         <td>${escBlock(r.notes) || "—"}</td>
       </tr>`).join("");
 
@@ -1070,12 +1073,14 @@ export function printDischargeReport(admission: any, clinicOverride?: ClinicInfo
       ${admission.department ? `<div class="meta-item"><label>Department</label><span>${escHtml(admission.department)}</span></div>` : ""}
       <div class="meta-item"><label>Condition at Discharge</label><span>${escHtml(d.condition) || "—"}</span></div>
       ${d.dischargedBy ? `<div class="meta-item"><label>Discharged By</label><span>${escHtml(d.dischargedBy)}</span></div>` : ""}
+      ${d.deathAt ? `<div class="meta-item"><label>Time of Death</label><span>${fmtDateTime(d.deathAt)}</span></div>` : ""}
     </div>
 
     ${section("Provisional Diagnosis (at admission)", admission.provisionalDiagnosis)}
     ${section("Final Diagnosis", d.finalDiagnosis)}
     ${section("Treatment Summary", d.treatment)}
     ${section("Discharge Medications", d.medications)}
+    ${section("Left Against Medical Advice — Reason / Consent", d.lamaReason)}
 
     ${rounds.length ? `
     <div style="font-weight:700;font-size:13px;margin-bottom:5px;border-bottom:1px solid #ddd;padding-bottom:3px;">Recent Vitals (last ${rounds.length} round${rounds.length !== 1 ? "s" : ""})</div>
@@ -1087,6 +1092,7 @@ export function printDischargeReport(admission: any, clinicOverride?: ClinicInfo
           <th style="width:50px;">Pulse</th>
           <th style="width:55px;">Temp</th>
           <th style="width:50px;">SpO₂</th>
+          <th style="width:40px;">RR</th>
           <th>Notes</th>
         </tr>
       </thead>

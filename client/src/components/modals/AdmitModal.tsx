@@ -3,12 +3,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ipd as ipdApi, patients as patientsApi, users as usersApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import BedPicker from "@/components/BedPicker";
+import SoapTextarea from "@/components/SoapTextarea";
+import { toLocalInput } from "@/components/ipd/DischargeForm";
 import { DEPTS } from "@/lib/ipd";
 
 interface Props {
@@ -31,6 +32,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
   const [diagnosis, setDiagnosis] = useState("");
   const [doctor,    setDoctor]    = useState(fromDoctor ?? "");
   const [doctorId,  setDoctorId]  = useState(fromDoctorId ?? "");
+  const [admittedAt, setAdmittedAt] = useState("");   // "" = now; set only for late entry
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState("");
   const [showSearch, setShowSearch] = useState(!initPatientId);
@@ -54,7 +56,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
 
   useEffect(() => {
     if (!open) {
-      setSearch(""); setSelected(null); setBedId(""); setDept(""); setDiagnosis(""); setError("");
+      setSearch(""); setSelected(null); setBedId(""); setDept(""); setDiagnosis(""); setAdmittedAt(""); setError("");
       if (!initPatientId) setShowSearch(true);
     }
     if (open && initBedId) setBedId(initBedId);
@@ -83,6 +85,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
         department:           dept || selected.department || "",
         bedId,
         provisionalDiagnosis: diagnosis,
+        ...(admittedAt ? { admissionDate: new Date(admittedAt).toISOString() } : {}),
       });
       onAdmitted();
       onClose();
@@ -177,9 +180,27 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
           {/* Diagnosis */}
           <div>
             <Label>Provisional Diagnosis</Label>
-            <Textarea className="mt-1 h-20" placeholder="Initial diagnosis / reason for admission"
-              value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} />
+            <SoapTextarea field="assessment" className="mt-1" placeholder="Initial diagnosis / reason for admission (ICD-10 suggestions as you type)"
+              value={diagnosis} onChange={setDiagnosis} />
           </div>
+
+          {/* Late entry: patient was admitted earlier than now */}
+          {admittedAt === "" ? (
+            <button type="button" className="text-xs text-primary hover:underline"
+              onClick={() => setAdmittedAt(toLocalInput(new Date()))}>
+              Patient was admitted earlier? Set admission time
+            </button>
+          ) : (
+            <div className="flex items-end gap-2">
+              <div>
+                <Label className="text-xs">Admission Time</Label>
+                <Input className="mt-1 h-9" type="datetime-local" value={admittedAt}
+                  min={toLocalInput(new Date(Date.now() - 7 * 86400000))} max={toLocalInput(new Date())}
+                  onChange={(e) => setAdmittedAt(e.target.value)} />
+              </div>
+              <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={() => setAdmittedAt("")}>Use now</Button>
+            </div>
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 

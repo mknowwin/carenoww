@@ -17,6 +17,8 @@ interface Props {
   onClose: () => void;
   existing?: any;
   initialPatient?: { uhid?: string; name?: string; age?: string; gender?: string; phone?: string };
+  // New appointment defaults, e.g. a post-discharge follow-up from the IPD chart
+  prefill?: { type?: string; notes?: string; department?: string };
 }
 
 const DEPARTMENTS = [
@@ -72,7 +74,7 @@ function Sel({ value, onChange, opts, disabled }: {
   );
 }
 
-export default function AppointmentModal({ open, onClose, existing, initialPatient }: Props) {
+export default function AppointmentModal({ open, onClose, existing, initialPatient, prefill }: Props) {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isEdit = !!existing;
@@ -86,12 +88,12 @@ export default function AppointmentModal({ open, onClose, existing, initialPatie
     patientPhone: existing?.patientPhone ?? initialPatient?.phone  ?? "",
     doctorId:         existing?.doctorId         ?? "",
     doctor:           existing?.doctor           ?? "",
-    department:       existing?.department       ?? "Cardiology",
+    department:       existing?.department       ?? prefill?.department ?? "Cardiology",
     date:             existing?.date             ?? today,
     time:             existing?.time             ?? "",
-    type:             existing?.type             ?? "New",
+    type:             existing?.type             ?? prefill?.type ?? "New",
     status:           existing?.status           ?? "Scheduled",
-    notes:            existing?.notes            ?? "",
+    notes:            existing?.notes            ?? prefill?.notes ?? "",
     referringDoctor:  existing?.referringDoctor  ?? "",
     referralSource:   existing?.referralSource   ?? "",
     referralDetail:   existing?.referralDetail   ?? "",

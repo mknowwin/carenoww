@@ -1704,7 +1704,7 @@ function WardsBedsSection() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Bed prefix</Label>
-              <Input className="h-8 text-sm uppercase" placeholder="e.g. GW" value={form.code}
+              <Input className="h-8 text-sm uppercase placeholder:normal-case" placeholder="e.g. GW" value={form.code}
                 onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} />
             </div>
             <div className="space-y-1">
@@ -1866,7 +1866,7 @@ function WardCard({ ward, rateLabel, onEdit, onToggle, onDelete, onChanged }: {
               <Plus className="h-3 w-3" /> Add range
             </Button>
             <span className="text-xs text-muted-foreground pb-1.5">or</span>
-            <Input className="h-7 w-28 text-xs uppercase" placeholder="Bed no." value={single}
+            <Input className="h-7 w-28 text-xs uppercase placeholder:normal-case" placeholder="Bed no." value={single}
               onChange={(e) => setSingle(e.target.value.toUpperCase())}
               onKeyDown={(e) => { if (e.key === "Enter" && single.trim()) add({ numbers: [single] }); }} />
             <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy || !single.trim()} onClick={() => add({ numbers: [single] })}>

@@ -3,24 +3,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  BedDouble, Plus, Clock, CheckCircle2, LogOut, Pencil, Printer, Settings,
-  Activity, ChevronDown, ChevronUp, Stethoscope, ArrowLeftRight, Sparkles, Wrench,
+  BedDouble, Plus, Clock, CheckCircle2, LogOut, Pencil, Settings, AlarmClock,
+  ClipboardList, Stethoscope, ArrowLeftRight, Sparkles, Wrench,
 } from "lucide-react";
 import { useLocation } from "wouter";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { ipd as ipdApi, users as usersApi, wards as wardsApi, type WardView, type BedView, type BedStatus } from "@/lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ipd as ipdApi, wards as wardsApi, type WardView, type BedView, type BedStatus } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { DEPTS, wardTypeColor, stayDay, canDo } from "@/lib/ipd";
-import { printDischargeReport } from "@/lib/print";
+import { wardTypeColor, stayDay, canDo, roundDue, ROUND_DUE_HOURS } from "@/lib/ipd";
 import { toast } from "@/hooks/use-toast";
-import BedPicker, { useWards } from "@/components/BedPicker";
+import { useWards } from "@/components/BedPicker";
+import { TransferModal, EditAdmissionModal } from "@/components/ipd/AdmissionDialogs";
 import AdmitModal from "@/components/modals/AdmitModal";
-import DischargeModal from "@/components/modals/DischargeModal";
 import NursingRoundModal from "@/components/modals/NursingRoundModal";
 
 export default function IPDPage() {
@@ -32,12 +28,9 @@ export default function IPDPage() {
   const [admitOpen,        setAdmitOpen]        = useState(false);
   const [admitBedId,       setAdmitBedId]       = useState<string | undefined>();
   const [bedAction,        setBedAction]        = useState<{ ward: WardView; bed: BedView } | null>(null);
-  const [dischargeTarget,  setDischargeTarget]  = useState<any>(null);
   const [roundTarget,      setRoundTarget]      = useState<any>(null);
   const [transferTarget,   setTransferTarget]   = useState<any>(null);
   const [editTarget,       setEditTarget]       = useState<any>(null);
-  const [viewDischargedId, setViewDischargedId] = useState<string | null>(null);
-  const [expandedId,       setExpandedId]       = useState<string | null>(null);
   const [wardFilter,       setWardFilter]       = useState("All");
   const [search,           setSearch]           = useState("");
   const [activeTab,        setActiveTab]        = useState<"list" | "beds">("list");
@@ -58,6 +51,8 @@ export default function IPDPage() {
     queryFn:  () => ipdApi.list({ status: "Discharged", limit: "10" }),
     staleTime: 60000,
   });
+
+  const openChart = (id: string, tab?: string) => setLocation(`/ipd/${id}${tab ? `?tab=${tab}` : ""}`);
 
   const refresh = (opts: { discharged?: boolean; roundsOf?: string } = {}) => {
     qc.invalidateQueries({ queryKey: ["ipd"] });
@@ -185,12 +180,13 @@ export default function IPDPage() {
 
             {filtered.map((adm: any) => {
               const day = stayDay(adm.admissionDate, tz);
-              const open = expandedId === adm._id;
+              const due = roundDue(adm);
               const demographics = [adm.patientId, adm.patientAge ? `${adm.patientAge}y` : "", adm.patientGender].filter(Boolean).join(" · ");
               return (
                 <Card key={adm._id} className="hover:shadow-sm transition-shadow">
                   <CardContent className="p-4">
-                    <div className="flex items-start gap-3">
+                    <div className="flex items-start gap-3 cursor-pointer" role="link" tabIndex={0}
+                      onClick={() => openChart(adm._id)} onKeyDown={(e) => { if (e.key === "Enter") openChart(adm._id); }}>
                       <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
                         <BedDouble className="h-5 w-5 text-blue-600" />
                       </div>
@@ -199,6 +195,12 @@ export default function IPDPage() {
                           <span className="font-semibold text-sm">{adm.patientName}</span>
                           <Badge className="text-xs font-mono bg-blue-50 text-blue-700">{adm.admissionId}</Badge>
                           <Badge className={`text-xs border ${wardColor(adm.ward)}`}>{adm.ward}</Badge>
+                          {due && (
+                            <span title={`No nursing round in the last ${ROUND_DUE_HOURS} hours`}
+                              className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                              <AlarmClock className="h-3 w-3" /> Round due
+                            </span>
+                          )}
                         </div>
                         {demographics && <p className="text-xs text-muted-foreground font-mono mt-0.5">{demographics}</p>}
                         <p className="text-xs text-muted-foreground mt-0.5">
@@ -215,10 +217,8 @@ export default function IPDPage() {
                     </div>
 
                     <div className="flex gap-1.5 mt-3 flex-wrap">
-                      <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
-                        onClick={() => setExpandedId(open ? null : adm._id)}>
-                        <Activity className="h-3 w-3" />
-                        {open ? <><ChevronUp className="h-3 w-3" /> Hide</> : <><ChevronDown className="h-3 w-3" /> Rounds</>}
+                      <Button size="sm" className="h-7 text-xs gap-1" onClick={() => openChart(adm._id)}>
+                        <ClipboardList className="h-3 w-3" /> Open Chart
                       </Button>
                       {canDo(role, "round") && (
                         <Button variant="outline" size="sm" className="h-7 text-xs gap-1"
@@ -240,13 +240,11 @@ export default function IPDPage() {
                       )}
                       {canDo(role, "discharge") && (
                         <Button variant="outline" size="sm" className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 gap-1"
-                          onClick={() => setDischargeTarget(adm)}>
+                          onClick={() => openChart(adm._id, "discharge")}>
                           <LogOut className="h-3 w-3" /> Discharge
                         </Button>
                       )}
                     </div>
-
-                    {open && <RoundsPanel admissionId={adm._id} />}
                   </CardContent>
                 </Card>
               );
@@ -264,7 +262,7 @@ export default function IPDPage() {
                   <p className="text-xs text-muted-foreground text-center py-3">No discharged patients</p>
                 )}
                 {discharged.map((d: any) => (
-                  <button key={d._id} onClick={() => setViewDischargedId(d._id)}
+                  <button key={d._id} onClick={() => openChart(d._id)}
                     className="w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left hover:bg-muted transition-colors">
                     <div className="w-7 h-7 rounded-full bg-teal-50 flex items-center justify-center shrink-0">
                       <CheckCircle2 className="h-3.5 w-3.5 text-teal-600" />
@@ -296,9 +294,7 @@ export default function IPDPage() {
           role={role}
           onClose={() => setBedAction(null)}
           onAdmit={() => { setAdmitBedId(bedAction.bed._id); setAdmitOpen(true); setBedAction(null); }}
-          onOpenAdmission={(admissionDbId) => {
-            setActiveTab("list"); setWardFilter("All"); setSearch(""); setExpandedId(admissionDbId); setBedAction(null);
-          }}
+          onOpenAdmission={(admissionDbId) => openChart(admissionDbId)}
           onStatus={(status) => setBedStatus(bedAction.bed, status)}
         />
       )}
@@ -306,12 +302,6 @@ export default function IPDPage() {
       <AdmitModal open={admitOpen} bedId={admitBedId}
         onClose={() => { setAdmitOpen(false); setAdmitBedId(undefined); }}
         onAdmitted={() => refresh()} />
-
-      {dischargeTarget && (
-        <DischargeModal admission={dischargeTarget}
-          onClose={() => setDischargeTarget(null)}
-          onDischarged={() => refresh({ discharged: true })} />
-      )}
 
       {roundTarget && (
         <NursingRoundModal admission={roundTarget}
@@ -341,253 +331,14 @@ export default function IPDPage() {
         />
       )}
 
-      {viewDischargedId && (
-        <DischargedDetailModal admissionId={viewDischargedId} tz={tz} onClose={() => setViewDischargedId(null)} />
-      )}
-    </div>
-  );
-}
-
-// ── Transfer Modal ────────────────────────────────────────────────────────────
-function TransferModal({ admission, onClose, onTransferred }: { admission: any; onClose: () => void; onTransferred: () => void }) {
-  const [bedId,   setBedId]   = useState("");
-  const [reason,  setReason]  = useState("");
-  const [error,   setError]   = useState("");
-
-  const mut = useMutation({
-    mutationFn: () => ipdApi.transfer(admission._id, { bedId, reason }),
-    onSuccess:  onTransferred,
-    onError:    (e: any) => setError(e.message || "Transfer failed"),
-  });
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Transfer Patient</DialogTitle>
-          <p className="text-sm text-muted-foreground">{admission.patientName} · {admission.admissionId}</p>
-          <p className="text-xs text-muted-foreground">Current: {admission.ward} — Bed {admission.bedNumber}</p>
-        </DialogHeader>
-
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs">New Bed</Label>
-            <BedPicker className="mt-1 h-9" value={bedId} onChange={setBedId} currentBedId={admission.bedId} />
-          </div>
-          <div>
-            <Label className="text-xs">Reason (optional)</Label>
-            <Input className="mt-1 h-9" placeholder="e.g. Condition improved, moved from ICU" value={reason} onChange={(e) => setReason(e.target.value)} />
-          </div>
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <div className="flex gap-2 pt-1">
-          <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
-          <Button
-            className="flex-1 gap-2"
-            disabled={!bedId || mut.isPending}
-            onClick={() => { setError(""); mut.mutate(); }}
-          >
-            <ArrowLeftRight className="h-4 w-4" />
-            {mut.isPending ? "Transferring..." : "Confirm Transfer"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Edit admission (diagnosis / department / doctor) ─────────────────────────
-function EditAdmissionModal({ admission, onClose, onSaved }: { admission: any; onClose: () => void; onSaved: () => void }) {
-  const [diagnosis, setDiagnosis] = useState(admission.provisionalDiagnosis ?? "");
-  const [dept,      setDept]      = useState(admission.department ?? "");
-  const [doctor,    setDoctor]    = useState(admission.admittingDoctor ?? "");
-  const [doctorId,  setDoctorId]  = useState(admission.admittingDoctorId ?? "");
-  const [error,     setError]     = useState("");
-
-  const { data: doctorsData } = useQuery({ queryKey: ["doctors-admit"], queryFn: () => usersApi.doctors() });
-  const doctors: any[] = doctorsData ?? [];
-
-  const mut = useMutation({
-    mutationFn: () => ipdApi.update(admission._id, {
-      provisionalDiagnosis: diagnosis, department: dept, admittingDoctor: doctor, admittingDoctorId: doctorId,
-    }),
-    onSuccess: onSaved,
-    onError:   (e: any) => setError(e.message || "Update failed"),
-  });
-
-  // Keep departments the admission already uses even if not in the fixed list
-  const deptOptions = dept && !DEPTS.includes(dept) ? [dept, ...DEPTS] : DEPTS;
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Edit Admission</DialogTitle>
-          <p className="text-sm text-muted-foreground">{admission.patientName} · {admission.admissionId}</p>
-        </DialogHeader>
-
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs">Provisional Diagnosis</Label>
-            <Textarea className="mt-1 h-20" value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} />
-          </div>
-          <div>
-            <Label className="text-xs">Department</Label>
-            <Select value={dept} onValueChange={setDept}>
-              <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Select department" /></SelectTrigger>
-              <SelectContent>
-                {deptOptions.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Admitting Doctor</Label>
-            <Select value={doctorId} onValueChange={(id) => {
-              setDoctorId(id);
-              setDoctor(doctors.find((d: any) => d._id === id)?.name ?? doctor);
-            }}>
-              <SelectTrigger className="mt-1 h-9"><SelectValue placeholder={doctor || "Select doctor"} /></SelectTrigger>
-              <SelectContent>
-                {doctors.map((d: any) => (
-                  <SelectItem key={d._id} value={d._id}>{d.name} — {d.specialty || d.department}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="text-xs text-muted-foreground">To change ward or bed, use Transfer.</p>
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <div className="flex gap-2 justify-end pt-1">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={!diagnosis.trim() || !doctor || mut.isPending} onClick={() => { setError(""); mut.mutate(); }}>
-            {mut.isPending ? "Saving..." : "Save Changes"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Discharged admission (read-only) ─────────────────────────────────────────
-function DischargedDetailModal({ admissionId, tz, onClose }: { admissionId: string; tz: string; onClose: () => void }) {
-  const { data: adm, isLoading } = useQuery({
-    queryKey: ["ipd-rounds", admissionId],
-    queryFn:  () => ipdApi.get(admissionId),
-  });
-  const d = adm?.discharge ?? {};
-  const rows: [string, string | undefined][] = adm ? [
-    ["Final Diagnosis",       d.finalDiagnosis],
-    ["Treatment Summary",     d.treatment],
-    ["Discharge Medications", d.medications],
-    ["Follow-up",             d.followUp],
-    ["Notes",                 d.notes],
-  ] : [];
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Discharge Summary</DialogTitle>
-        </DialogHeader>
-        {isLoading || !adm ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">Loading...</p>
-        ) : (
-          <div className="space-y-3">
-            <div className="bg-teal-50 rounded-lg px-4 py-3">
-              <p className="text-sm font-semibold">{adm.patientName} <span className="font-mono text-xs text-muted-foreground">{adm.patientId}</span></p>
-              <p className="text-xs text-muted-foreground">
-                {adm.admissionId} · {adm.ward} {adm.bedNumber} · {adm.admittingDoctor}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {new Date(adm.admissionDate).toLocaleDateString("en-IN")} → {adm.dischargeDate ? new Date(adm.dischargeDate).toLocaleDateString("en-IN") : "—"}
-                {adm.dischargeDate && ` · ${stayDay(adm.admissionDate, tz, adm.dischargeDate)} days`}
-                {" · "}<span className="font-medium text-foreground">{d.condition ?? "—"}</span>
-                {d.dischargedBy && ` · by ${d.dischargedBy}`}
-              </p>
-            </div>
-            {rows.filter(([, v]) => v).map(([label, value]) => (
-              <div key={label}>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
-                <p className="text-sm whitespace-pre-wrap">{value}</p>
-              </div>
-            ))}
-            <div className="flex gap-2 justify-end pt-2">
-              <Button variant="outline" onClick={onClose}>Close</Button>
-              <Button className="gap-2" onClick={() => printDischargeReport(adm)}>
-                <Printer className="h-4 w-4" /> Print Summary
-              </Button>
-            </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Rounds panel (inline expand): rounds + transfers, newest first ───────────
-function RoundsPanel({ admissionId }: { admissionId: string }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ["ipd-rounds", admissionId],
-    queryFn:  () => ipdApi.get(admissionId),
-    staleTime: 10000,
-  });
-  const rounds: any[] = data?.rounds ?? [];
-  const transfers: any[] = data?.transfers ?? [];
-  const timeline = [
-    ...rounds.map((r) => ({ kind: "round" as const, at: r.roundedAt, r })),
-    ...transfers.map((t) => ({ kind: "transfer" as const, at: t.at, t })),
-  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-
-  const fmt = (v: string) => new Date(v).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
-
-  if (isLoading) return <p className="text-xs text-muted-foreground mt-2 pt-3 border-t">Loading rounds...</p>;
-  if (timeline.length === 0) return <p className="text-xs text-muted-foreground mt-2 pt-3 border-t">No nursing rounds recorded yet.</p>;
-  return (
-    <div className="mt-3 border-t pt-3 space-y-2">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-        Nursing Rounds ({rounds.length}){transfers.length ? ` · Transfers (${transfers.length})` : ""}
-      </p>
-      {timeline.slice(0, 8).map((e) => e.kind === "transfer" ? (
-        <div key={`t-${e.t._id}`} className="bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-violet-700 flex items-center gap-1">
-              <ArrowLeftRight className="h-3 w-3" />
-              {e.t.fromWard ? `${e.t.fromWard} ${e.t.fromBed} → ` : "→ "}{e.t.toWard} {e.t.toBed}
-            </span>
-            <span className="text-xs text-muted-foreground">{fmt(e.at)}</span>
-          </div>
-          {(e.t.reason || e.t.by) && (
-            <p className="text-xs mt-1 text-muted-foreground">{[e.t.reason, e.t.by && `by ${e.t.by}`].filter(Boolean).join(" · ")}</p>
-          )}
-        </div>
-      ) : (
-        <div key={e.r._id} className="bg-muted/40 rounded-lg px-3 py-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium">{e.r.nurse}</span>
-            <span className="text-xs text-muted-foreground">{fmt(e.at)}</span>
-          </div>
-          <div className="flex gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
-            {e.r.bp    && <span>BP: {e.r.bp}</span>}
-            {e.r.pulse ? <span>Pulse: {e.r.pulse}</span> : null}
-            {e.r.temp  ? <span>Temp: {e.r.temp}°F</span> : null}
-            {e.r.spo2  ? <span>SpO₂: {e.r.spo2}%</span> : null}
-            {e.r.weight ? <span>Wt: {e.r.weight}kg</span> : null}
-          </div>
-          {e.r.notes && <p className="text-xs mt-1 text-foreground">{e.r.notes}</p>}
-        </div>
-      ))}
     </div>
   );
 }
 
 // ── Bed map view ──────────────────────────────────────────────────────────────
 const BED_STYLES = {
-  occupied:    { box: "bg-blue-50 border-blue-200",       label: "text-blue-700",          icon: "text-blue-500" },
-  Available:   { box: "bg-emerald-50 border-emerald-200 border-dashed", label: "text-emerald-700", icon: "text-emerald-500" },
+  occupied:    { box: "bg-blue-100 border-blue-300",      label: "text-blue-800",          icon: "text-blue-600" },
+  Available:   { box: "bg-background border-emerald-300 border-dashed", label: "text-emerald-700", icon: "text-emerald-500" },
   Cleaning:    { box: "bg-amber-50 border-amber-200",     label: "text-amber-700",         icon: "text-amber-500" },
   Maintenance: { box: "bg-gray-100 border-gray-200",      label: "text-gray-500",          icon: "text-gray-400" },
 } as const;
@@ -682,7 +433,7 @@ function BedActionDialog({ ward, bed, tz, role, onClose, onAdmit, onOpenAdmissio
               <p className="text-xs text-muted-foreground">{o.admissionId} · Day {stayDay(o.since, tz)} · {o.doctor}</p>
               <p className="text-xs text-muted-foreground truncate">Dx: {o.diagnosis}</p>
             </div>
-            <Button className="w-full" onClick={() => onOpenAdmission(o.admissionDbId)}>Open in patient list</Button>
+            <Button className="w-full" onClick={() => onOpenAdmission(o.admissionDbId)}>Open chart</Button>
           </div>
         ) : (
           <div className="space-y-2">

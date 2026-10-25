@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ipd as ipdApi } from "@/lib/api";
+import { vitalFlags } from "@/lib/ipd";
+import VitalFlags from "@/components/ipd/VitalFlags";
 
 interface Props {
   admission: any;
@@ -12,28 +14,33 @@ interface Props {
   onSaved: () => void;
 }
 
+const num = (v: string) => (v ? parseFloat(v) : undefined);
+
 export default function NursingRoundModal({ admission, onClose, onSaved }: Props) {
-  const [bp,     setBp]     = useState("");
-  const [pulse,  setPulse]  = useState("");
-  const [temp,   setTemp]   = useState("");
-  const [spo2,   setSpo2]   = useState("");
-  const [weight, setWeight] = useState("");
+  const [v, setV] = useState({ bp: "", pulse: "", temp: "", spo2: "", respRate: "", weight: "", intake: "", output: "" });
   const [notes,  setNotes]  = useState("");
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState("");
+  const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((s) => ({ ...s, [k]: e.target.value }));
+
+  const flags = vitalFlags({ bp: v.bp, pulse: num(v.pulse), temp: num(v.temp), spo2: num(v.spo2), respRate: num(v.respRate) });
 
   const handleSave = async () => {
-    if (!pulse && !temp && !bp && !spo2 && !notes) {
+    if (!Object.values(v).some(Boolean) && !notes.trim()) {
       setError("Enter at least one vital or note"); return;
     }
+    if (v.bp && !/^\s*\d{2,3}\s*\/\s*\d{2,3}\s*$/.test(v.bp)) { setError("BP should look like 120/80"); return; }
     setSaving(true); setError("");
     try {
       await ipdApi.addRound(admission._id, {
-        bp:     bp     || "",
-        pulse:  pulse  ? parseFloat(pulse)  : 0,
-        temp:   temp   ? parseFloat(temp)   : 0,
-        spo2:   spo2   ? parseFloat(spo2)   : 0,
-        weight: weight ? parseFloat(weight) : undefined,
+        bp:       v.bp.replace(/\s/g, ""),
+        pulse:    num(v.pulse) ?? 0,
+        temp:     num(v.temp) ?? 0,
+        spo2:     num(v.spo2) ?? 0,
+        respRate: num(v.respRate),
+        weight:   num(v.weight),
+        intake:   num(v.intake),
+        output:   num(v.output),
         notes,
       });
       onSaved();
@@ -44,9 +51,17 @@ export default function NursingRoundModal({ admission, onClose, onSaved }: Props
     }
   };
 
+  const field = (k: keyof typeof v, label: string, placeholder: string, type = "number") => (
+    <div>
+      <Label className="text-xs">{label}</Label>
+      <Input className="mt-1 h-8 text-sm" type={type} inputMode={type === "number" ? "decimal" : undefined}
+        placeholder={placeholder} value={v[k]} onChange={set(k)} />
+    </div>
+  );
+
   return (
     <Dialog open={!!admission} onOpenChange={onClose}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Nursing Round — {admission?.patientName}</DialogTitle>
         </DialogHeader>
@@ -56,29 +71,18 @@ export default function NursingRoundModal({ admission, onClose, onSaved }: Props
             {admission?.ward} · Bed {admission?.bedNumber}
           </p>
 
-          {/* Vitals grid */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">BP (mmHg)</Label>
-              <Input className="mt-1 h-8 text-sm" placeholder="120/80" value={bp} onChange={(e) => setBp(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-xs">Pulse (bpm)</Label>
-              <Input className="mt-1 h-8 text-sm" type="number" placeholder="72" value={pulse} onChange={(e) => setPulse(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-xs">Temp (°F)</Label>
-              <Input className="mt-1 h-8 text-sm" type="number" placeholder="98.6" value={temp} onChange={(e) => setTemp(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-xs">SpO₂ (%)</Label>
-              <Input className="mt-1 h-8 text-sm" type="number" placeholder="98" value={spo2} onChange={(e) => setSpo2(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-xs">Weight (kg)</Label>
-              <Input className="mt-1 h-8 text-sm" type="number" placeholder="Optional" value={weight} onChange={(e) => setWeight(e.target.value)} />
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {field("bp", "BP (mmHg)", "120/80", "text")}
+            {field("pulse", "Pulse (bpm)", "72")}
+            {field("temp", "Temp (°F)", "98.6")}
+            {field("spo2", "SpO₂ (%)", "98")}
+            {field("respRate", "Resp. rate (/min)", "16")}
+            {field("weight", "Weight (kg)", "Optional")}
+            {field("intake", "Intake (ml)", "Optional")}
+            {field("output", "Output (ml)", "Optional")}
           </div>
+
+          <VitalFlags flags={flags} />
 
           <div>
             <Label className="text-xs">Round Notes</Label>

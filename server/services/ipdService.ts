@@ -75,9 +75,26 @@ export interface IPDListFilters {
   limit?: string;
 }
 
+// Backdating window for clinical times entered late (admission, discharge, death)
+const BACKDATE_DAYS = 7;
+
+// Optional clinical time: defaults to now; must not be in the future or older than
+// BACKDATE_DAYS (and, when given, not before `notBefore`)
+function clinicalTime(raw: unknown, label: string, notBefore?: Date): Date {
+  if (raw === undefined || raw === null || raw === "") return new Date();
+  const t = new Date(String(raw));
+  if (isNaN(t.getTime())) throw AppError.badRequest(`Invalid ${label}`);
+  const now = Date.now();
+  if (t.getTime() > now + 5 * 60000) throw AppError.badRequest(`${label} cannot be in the future`);
+  if (t.getTime() < now - BACKDATE_DAYS * 86400000) throw AppError.badRequest(`${label} can be at most ${BACKDATE_DAYS} days ago`);
+  if (notBefore && t < notBefore) throw AppError.badRequest(`${label} cannot be before admission`);
+  return t;
+}
+
 export async function listAdmissions(tenantId: string, filters: IPDListFilters, tz = "Asia/Kolkata") {
   const { status = "Active", patientId, ward, from, to, limit } = filters;
-  const query: any = { tenantId, status };
+  // status=all → every admission (patient history); otherwise one status
+  const query: any = status === "all" ? { tenantId } : { tenantId, status };
   if (patientId) query.patientId = normalizeUhid(patientId);
   if (ward)      query.ward      = ward;
 
@@ -89,10 +106,11 @@ export async function listAdmissions(tenantId: string, filters: IPDListFilters, 
   }
 
   // Active admissions are a bounded set (beds); discharged ones grow forever.
-  const max = Math.min(parseInt(limit || "") || (discharged ? 50 : 500), 500);
+  const max = Math.min(parseInt(limit || "") || (discharged || status === "all" ? 50 : 500), 500);
 
+  // Lists skip notes for size; the last round drives "due for round" on the IPD list
   const admissions = await IPDAdmission.find(query)
-    .select("-rounds")  // skip rounds in list for performance
+    .select({ progressNotes: 0, rounds: { $slice: -1 } })
     .sort(discharged ? { dischargeDate: -1 } : { admissionDate: -1 })
     .limit(max);
   return { admissions, total: admissions.length };
@@ -143,7 +161,7 @@ export async function getAdmission(tenantId: string, id: string) {
 export async function admitPatient(tenantId: string, body: Record<string, any>) {
   const {
     patientId: rawPatientId, appointmentId, admittingDoctor, admittingDoctorId,
-    department, bedId, provisionalDiagnosis,
+    department, bedId, provisionalDiagnosis, admissionDate: rawAdmissionDate,
   } = body;
 
   if (!rawPatientId || !admittingDoctor || !bedId || !provisionalDiagnosis) {
@@ -153,6 +171,7 @@ export async function admitPatient(tenantId: string, body: Record<string, any>) 
   // Demographics come from the Patient record, not the client
   const patient = await resolvePatient(tenantId, String(rawPatientId));
   const uhid = patient.uhid;
+  const admissionDate = clinicalTime(rawAdmissionDate, "Admission time");
 
   // Friendly pre-checks; the unique indexes are the real guard against races
   const alreadyAdmitted = await IPDAdmission.findOne({ tenantId, patientId: uhid, status: "Active" });
@@ -186,9 +205,13 @@ export async function admitPatient(tenantId: string, body: Record<string, any>) 
       bedId:             String(bed._id),
       bedKey:            bedKeyForId(String(bed._id)),
       provisionalDiagnosis,
+      admissionDate,
     });
   } catch (err: any) {
     throw duplicateError(err, ward.name, bedNumber, patient.name) ?? err;
+  }
+  if (Date.now() - admissionDate.getTime() > 3600000) {
+    logger.info({ module: "ipd", message: "Admission entered with an earlier admission time", tenantId, admissionId, admissionDate });
   }
 
   await setPatientStatus(tenantId, uhid, { status: statusForWardType(ward.type), admittedOn: admission.admissionDate });
@@ -197,7 +220,7 @@ export async function admitPatient(tenantId: string, body: Record<string, any>) 
 }
 
 export async function addRound(tenantId: string, nurseName: string, id: string, body: Record<string, any>) {
-  const { bp, pulse, temp, spo2, weight, notes } = body;
+  const { bp, pulse, temp, spo2, weight, respRate, intake, output, notes } = body;
   const admission = await IPDAdmission.findOneAndUpdate(
     { _id: id, tenantId, status: "Active" },
     {
@@ -210,6 +233,9 @@ export async function addRound(tenantId: string, nurseName: string, id: string, 
           temp:      temp   || 0,
           spo2:      spo2   || 0,
           weight:    weight || undefined,
+          respRate:  respRate || undefined,
+          intake:    intake   || undefined,
+          output:    output   || undefined,
           notes:     notes  || "",
         },
       },
@@ -218,6 +244,26 @@ export async function addRound(tenantId: string, nurseName: string, id: string, 
   );
   if (!admission) throw AppError.notFound("Active admission not found");
   return admission.rounds[admission.rounds.length - 1];
+}
+
+// Doctor's progress note (SOAP) on an active admission
+export async function addProgressNote(tenantId: string, user: { name: string; id: string }, id: string, body: Record<string, any>) {
+  const note = {
+    subjective: String(body.subjective ?? "").trim(),
+    objective:  String(body.objective  ?? "").trim(),
+    assessment: String(body.assessment ?? "").trim(),
+    plan:       String(body.plan       ?? "").trim(),
+  };
+  if (!note.subjective && !note.objective && !note.assessment && !note.plan) {
+    throw AppError.badRequest("Write at least one section of the note");
+  }
+  const admission = await IPDAdmission.findOneAndUpdate(
+    { _id: id, tenantId, status: "Active" },
+    { $push: { progressNotes: { ...note, at: new Date(), doctor: user.name, doctorId: user.id || "" } } },
+    { new: true }
+  );
+  if (!admission) throw AppError.notFound("Active admission not found");
+  return admission.progressNotes[admission.progressNotes.length - 1];
 }
 
 export async function transferPatient(tenantId: string, userName: string, id: string, body: Record<string, any>) {
@@ -288,9 +334,23 @@ export async function updateAdmission(tenantId: string, id: string, body: Record
 }
 
 export async function dischargePatient(tenantId: string, dischargedBy: string, id: string, body: Record<string, any>) {
-  const { finalDiagnosis, treatment, medications, followUp, condition, notes } = body;
+  const { finalDiagnosis, treatment, medications, followUp, condition, notes, dischargeDate: rawDischargeDate, deathAt: rawDeathAt, lamaReason } = body;
   if (!finalDiagnosis || !condition) {
     throw AppError.badRequest("finalDiagnosis and condition are required");
+  }
+
+  const current = await IPDAdmission.findOne({ _id: id, tenantId, status: "Active" }).select("admissionDate");
+  if (!current) throw AppError.notFound("Active admission not found");
+
+  const dischargeDate = clinicalTime(rawDischargeDate, "Discharge time", current.admissionDate);
+  const extra: Record<string, unknown> = {};
+  if (condition === "Expired") {
+    if (!rawDeathAt) throw AppError.badRequest("Time of death is required when the patient has expired");
+    extra.deathAt = clinicalTime(rawDeathAt, "Time of death", current.admissionDate);
+  }
+  if (condition === "LAMA") {
+    if (!String(lamaReason ?? "").trim()) throw AppError.badRequest("Reason / consent note is required for LAMA");
+    extra.lamaReason = String(lamaReason).trim();
   }
 
   const admission = await IPDAdmission.findOneAndUpdate(
@@ -298,7 +358,8 @@ export async function dischargePatient(tenantId: string, dischargedBy: string, i
     {
       $set: {
         status:       "Discharged",
-        dischargeDate: new Date(),
+        dischargeDate,
+        dischargeRecordedAt: new Date(),
         discharge: {
           finalDiagnosis, treatment: treatment || "",
           medications:   medications || "",
@@ -306,6 +367,7 @@ export async function dischargePatient(tenantId: string, dischargedBy: string, i
           condition,
           notes:         notes       || "",
           dischargedBy,
+          ...extra,
         },
       },
     },

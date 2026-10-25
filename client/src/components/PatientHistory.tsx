@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CalendarDays, Hash, Pill, FlaskConical, Eye } from "lucide-react";
+import { CalendarDays, Hash, Pill, FlaskConical, Eye, BedDouble } from "lucide-react";
 import VisitDetailModal from "@/components/modals/VisitDetailModal";
-import { appointments as apptApi, lab as labApi, prescriptions as rxApi } from "@/lib/api";
+import { appointments as apptApi, lab as labApi, prescriptions as rxApi, ipd as ipdApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { stayDay } from "@/lib/ipd";
 
 const LAB_STATUS_COLOR: Record<string, string> = {
   Pending:    "bg-amber-100 text-amber-700",
@@ -97,9 +100,58 @@ function LabList({ orders }: { orders: any[] }) {
 }
 
 // Full visit history for a patient: vitals, SOAP, prescriptions and lab results per visit.
+const fmtDay = (v: string) => new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+// One inpatient stay in the history timeline; opens the IPD chart
+function StayCard({ stay, scripts, labs, onOpen }: { stay: any; scripts: any[]; labs: any[]; onOpen: () => void }) {
+  const { user } = useAuth();
+  const active = stay.status === "Active";
+  const days = stayDay(stay.admissionDate, user?.timezone ?? "Asia/Kolkata", stay.dischargeDate ?? new Date());
+  return (
+    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
+      className="border border-blue-200 bg-blue-50/30 rounded-xl p-3 cursor-pointer hover:shadow-sm hover:border-blue-300 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
+          <BedDouble className="h-4 w-4 text-blue-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium">IPD · {fmtDay(stay.admissionDate)} – {stay.dischargeDate ? fmtDay(stay.dischargeDate) : "now"}</span>
+            <Badge className={`text-xs ${active ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>
+              {active ? "Admitted" : stay.discharge?.condition ?? "Discharged"}
+            </Badge>
+            <span className="text-xs font-mono text-muted-foreground">{stay.admissionId}</span>
+            <Button size="sm" variant="outline" className="ml-auto h-7 gap-1 text-xs"
+              onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+              <Eye className="h-3 w-3" /> Open chart
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {stay.admittingDoctor} · {stay.ward} {stay.bedNumber} · {days} day{days !== 1 ? "s" : ""}
+          </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            <span className="font-semibold text-foreground">{stay.discharge?.finalDiagnosis ? "Final diagnosis" : "Diagnosis"}:</span>{" "}
+            {stay.discharge?.finalDiagnosis || stay.provisionalDiagnosis}
+          </p>
+          <RxList scripts={scripts} />
+          <LabList orders={labs} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PatientHistory({ patientId }: { patientId: string }) {
+  const [, setLocation] = useLocation();
   const [showCancelled, setShowCancelled] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+
+  const { data: stayData } = useQuery({
+    queryKey: ["ipd-history", patientId],
+    queryFn:  () => ipdApi.list({ status: "all", patientId, limit: "50" }),
+    enabled:  !!patientId,
+    retry: false,
+  });
 
   const { data: histData, isLoading } = useQuery({
     queryKey: ["appt-history", patientId],
@@ -135,15 +187,27 @@ export default function PatientHistory({ patientId }: { patientId: string }) {
   const labsByAppt = groupByAppt(labOrders);
   const rxByAppt   = groupByAppt(scripts);
 
-  // Orders not tied to a listed visit (e.g. IPD, or older than the visit page)
+  const stays: any[] = stayData?.admissions ?? [];
+  const stayIds = new Set(stays.map((s) => String(s._id)));
+  const labsForStay = (id: string) => labOrders.filter((o) => o.admissionId === id);
+  const rxForStay   = (id: string) => scripts.filter((r) => r.admissionId === id);
+
+  // Orders not tied to a listed visit or stay (e.g. older than the visit page)
   const visitIds = new Set(allVisits.map((a) => String(a._id || a.id)));
-  const otherLabs = labOrders.filter((o) => !o.appointmentId || !visitIds.has(String(o.appointmentId)));
-  const otherRx   = scripts.filter((r) => !r.appointmentId || !visitIds.has(String(r.appointmentId)));
+  const unlinked = (o: any) => !(o.appointmentId && visitIds.has(String(o.appointmentId))) && !(o.admissionId && stayIds.has(String(o.admissionId)));
+  const otherLabs = labOrders.filter(unlinked);
+  const otherRx   = scripts.filter(unlinked);
+
+  // OPD visits and IPD stays in one newest-first timeline
+  const timeline = [
+    ...history.map((a: any) => ({ kind: "visit" as const, t: new Date(a.date).getTime(), a })),
+    ...stays.map((s: any) => ({ kind: "stay" as const, t: new Date(s.admissionDate).getTime(), s })),
+  ].sort((x, y) => y.t - x.t);
 
   if (isLoading) {
     return <div className="text-center py-12 text-muted-foreground text-sm">Loading visit history...</div>;
   }
-  if (allVisits.length === 0 && otherLabs.length === 0 && otherRx.length === 0) {
+  if (allVisits.length === 0 && stays.length === 0 && otherLabs.length === 0 && otherRx.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground text-sm">
         <CalendarDays className="h-10 w-10 mx-auto mb-3 opacity-30" />
@@ -166,7 +230,12 @@ export default function PatientHistory({ patientId }: { patientId: string }) {
         </div>
       )}
 
-      {history.map((a: any) => {
+      {timeline.map((entry) => {
+        if (entry.kind === "stay") {
+          const sid = String(entry.s._id);
+          return <StayCard key={`stay-${sid}`} stay={entry.s} scripts={rxForStay(sid)} labs={labsForStay(sid)} onOpen={() => setLocation(`/ipd/${sid}`)} />;
+        }
+        const a = entry.a;
         const id = String(a._id || a.id);
         const visitLabs = labsByAppt.get(id) ?? [];
         const visitRx   = rxByAppt.get(id) ?? [];
@@ -235,7 +304,7 @@ export default function PatientHistory({ patientId }: { patientId: string }) {
       {(otherLabs.length > 0 || otherRx.length > 0) && (
         <div className="border rounded-xl p-3">
           <p className="text-sm font-medium">Other orders</p>
-          <p className="text-xs text-muted-foreground">Not linked to an OPD visit above (e.g. IPD)</p>
+          <p className="text-xs text-muted-foreground">Not linked to a visit or stay above</p>
           <RxList scripts={otherRx} />
           <LabList orders={otherLabs} />
         </div>

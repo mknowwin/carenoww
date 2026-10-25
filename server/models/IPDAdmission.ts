@@ -8,7 +8,21 @@ export interface IRound {
   temp: number;
   spo2: number;
   weight?: number;
+  respRate?: number;     // breaths/min
+  intake?: number;       // ml since last round
+  output?: number;       // ml since last round
   notes: string;
+}
+
+// Doctor's daily progress note (SOAP); nursing observations stay in rounds
+export interface IProgressNote {
+  at: Date;
+  doctor: string;
+  doctorId: string;
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan: string;
 }
 
 export interface ITransfer {
@@ -33,6 +47,8 @@ export interface IDischarge {
   condition: "Improved" | "Same" | "Deteriorated" | "Expired" | "LAMA";
   notes: string;
   dischargedBy: string;
+  deathAt?: Date;        // required when condition is Expired
+  lamaReason?: string;   // required when condition is LAMA (left against medical advice)
 }
 
 export interface IIPDAdmission extends Document {
@@ -56,9 +72,11 @@ export interface IIPDAdmission extends Document {
   provisionalDiagnosis: string;
   status: "Active" | "Discharged" | "Transferred";
   rounds: IRound[];
+  progressNotes: IProgressNote[];
   transfers: ITransfer[];
   discharge?: IDischarge;
-  dischargeDate?: Date;
+  dischargeDate?: Date;          // clinical discharge time (may be backdated)
+  dischargeRecordedAt?: Date;    // when the discharge was entered
   createdAt: Date;
   updatedAt: Date;
 }
@@ -71,7 +89,20 @@ const RoundSchema = new Schema<IRound>({
   temp:       { type: Number, default: 0 },
   spo2:       { type: Number, default: 0 },
   weight:     { type: Number },
+  respRate:   { type: Number },
+  intake:     { type: Number },
+  output:     { type: Number },
   notes:      { type: String, default: "" },
+}, { _id: true });
+
+const ProgressNoteSchema = new Schema<IProgressNote>({
+  at:         { type: Date, default: Date.now },
+  doctor:     { type: String, required: true },
+  doctorId:   { type: String, default: "" },
+  subjective: { type: String, default: "" },
+  objective:  { type: String, default: "" },
+  assessment: { type: String, default: "" },
+  plan:       { type: String, default: "" },
 }, { _id: true });
 
 const TransferSchema = new Schema<ITransfer>({
@@ -97,6 +128,8 @@ const DischargeSchema = new Schema<IDischarge>({
   condition:      { type: String, enum: ["Improved","Same","Deteriorated","Expired","LAMA"], default: "Improved" },
   notes:          { type: String, default: "" },
   dischargedBy:   { type: String, default: "" },
+  deathAt:        { type: Date },
+  lamaReason:     { type: String },
 }, { _id: false });
 
 const IPDAdmissionSchema = new Schema<IIPDAdmission>(
@@ -119,13 +152,15 @@ const IPDAdmissionSchema = new Schema<IIPDAdmission>(
     // Occupancy key with a partial unique index: "BED:<bedId>" for master beds,
     // legacy "WARD|BED" (normalised) for admissions made before the bed master
     bedKey:            { type: String, required: true },
-    admissionDate:     { type: Date, default: Date.now },
+    admissionDate:     { type: Date, default: Date.now },   // clinical admission time (may be backdated; createdAt = entry time)
     provisionalDiagnosis: { type: String, required: true },
     status:            { type: String, enum: ["Active","Discharged","Transferred"], default: "Active" },
     rounds:            { type: [RoundSchema], default: [] },
+    progressNotes:     { type: [ProgressNoteSchema], default: [] },
     transfers:         { type: [TransferSchema], default: [] },
     discharge:         { type: DischargeSchema },
     dischargeDate:     { type: Date },
+    dischargeRecordedAt: { type: Date },
   },
   { timestamps: true }
 );
