@@ -10,7 +10,7 @@ export interface IWard extends Document {
   name: string;
   code: string;          // short bed prefix, e.g. "GW" → beds GW-01, GW-02
   type: WardType;
-  bedRateId?: string;    // ServiceRateMaster entry charged per bed-day (IPD billing)
+  dailyRateIds: string[];   // ServiceRateMaster entries charged per day in this ward (room, nursing, diet…), one IPD bill line each
   active: boolean;
   sortOrder: number;
   createdAt: Date;
@@ -23,7 +23,7 @@ const WardSchema = new Schema<IWard>(
     name:      { type: String, required: true, trim: true },
     code:      { type: String, default: "", trim: true, uppercase: true },
     type:      { type: String, enum: WARD_TYPES, default: "General" },
-    bedRateId: { type: String, default: "" },
+    dailyRateIds: { type: [String], default: [] },
     active:    { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
   },

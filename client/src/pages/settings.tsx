@@ -1610,7 +1610,7 @@ function ServiceRatesSection() {
 }
 
 // ── Wards & Beds — IPD ward/bed master (bed picker, bed map, occupancy) ──────
-const EMPTY_WARD_FORM = { name: "", code: "", type: "General", bedRateId: "none" };
+const EMPTY_WARD_FORM = { name: "", code: "", type: "General", dailyRateIds: [] as string[] };
 
 function WardsBedsSection() {
   const qc = useQueryClient();
@@ -1619,7 +1619,8 @@ function WardsBedsSection() {
     queryFn:  () => wardsApi.list(true),
   });
   const { data: rates = [] } = useQuery<any[]>({ queryKey: ["ratemaster"], queryFn: () => ratemasterApi.list() });
-  const bedRates = rates.filter((r) => r.category === "Bed Charges" || r.category === "Room");
+  // Rates that can be charged per day of stay: room/bed rates, or anything with unit "per day" (nursing, diet…)
+  const dailyRates = rates.filter((r) => r.isActive !== false && (r.unit === "per day" || r.category === "Bed Charges" || r.category === "Room"));
 
   const [form, setForm]     = useState(EMPTY_WARD_FORM);
   const [editId, setEditId] = useState<string | null>(null);
@@ -1632,7 +1633,7 @@ function WardsBedsSection() {
 
   const startEdit = (w: WardView) => {
     setEditId(w._id);
-    setForm({ name: w.name, code: w.code, type: w.type, bedRateId: w.bedRateId || "none" });
+    setForm({ name: w.name, code: w.code, type: w.type, dailyRateIds: w.dailyRateIds ?? [] });
     setError("");
   };
 
@@ -1640,7 +1641,7 @@ function WardsBedsSection() {
     const name = form.name.trim();
     if (!name) { setError("Ward name is required."); return; }
     setBusy(true); setError("");
-    const data = { name, code: form.code.trim(), type: form.type, bedRateId: form.bedRateId === "none" ? "" : form.bedRateId };
+    const data = { name, code: form.code.trim(), type: form.type, dailyRateIds: form.dailyRateIds };
     try {
       if (editId) await wardsApi.update(editId, data);
       else await wardsApi.create(data);
@@ -1672,9 +1673,16 @@ function WardsBedsSection() {
     }
   };
 
-  const rateLabel = (id: string) => {
-    const r = rates.find((x) => x._id === id);
-    return r ? `${r.name} · ₹${r.defaultRate.toLocaleString()}/${(r.unit || "day").replace(/^per /, "")}` : "";
+  const toggleRate = (id: string) => setForm((f) => ({
+    ...f, dailyRateIds: f.dailyRateIds.includes(id) ? f.dailyRateIds.filter((x) => x !== id) : [...f.dailyRateIds, id],
+  }));
+  const perDay = (ids: string[]) => ids.reduce((sum, id) => sum + (rates.find((r) => r._id === id)?.defaultRate ?? 0), 0);
+  // "General Ward bed ₹1,200 + Nursing care ₹300 = ₹1,500/day"
+  const chargesLabel = (ids: string[]) => {
+    const linked = ids.map((id) => rates.find((r) => r._id === id)).filter(Boolean);
+    if (linked.length === 0) return "";
+    const parts = linked.map((r: any) => `${r.name} ₹${r.defaultRate.toLocaleString("en-IN")}`).join(" + ");
+    return linked.length > 1 ? `${parts} = ₹${perDay(ids).toLocaleString("en-IN")}/day` : `${parts}/day`;
   };
 
   return (
@@ -1683,6 +1691,7 @@ function WardsBedsSection() {
         <h3 className="text-sm font-semibold">Wards & Beds</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
           Wards and beds used for IPD admission, the bed map and dashboard occupancy. ICU-type wards set the patient's status to ICU.
+          Link one or more daily charges from Service Rates (e.g. bed + nursing + diet); every bed in the ward is billed each one per calendar day.
           A bed vacated by discharge or transfer is marked Cleaning until a nurse marks it ready. Wards and beds with admission history can be deactivated but not deleted.
         </p>
       </div>
@@ -1695,7 +1704,7 @@ function WardsBedsSection() {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <div className="space-y-1">
               <Label className="text-xs">Name *</Label>
               <Input className="h-8 text-sm" placeholder="e.g. General Ward" value={form.name}
@@ -1714,20 +1723,38 @@ function WardsBedsSection() {
                 <SelectContent>{WARD_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Bed charge (per day)</Label>
-              <Select value={form.bedRateId} onValueChange={(v) => setForm((f) => ({ ...f, bedRateId: v }))}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Not set</SelectItem>
-                  {bedRates.map((r) => <SelectItem key={r._id} value={r._id}>{r.name} — ₹{r.defaultRate.toLocaleString()}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
-          {bedRates.length === 0 && (
-            <p className="text-xs text-muted-foreground mt-2">Add "Bed Charges" or "Room" rates in Service Rates to link a daily bed charge.</p>
-          )}
+
+          {/* Daily charges linked from Service Rates — each becomes its own line on the IPD bill */}
+          <div className="mt-3 space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <Label className="text-xs">Daily charges (from Service Rates)</Label>
+              {form.dailyRateIds.length > 0 && (
+                <span className="text-xs text-muted-foreground">Total <span className="font-semibold text-foreground">₹{perDay(form.dailyRateIds).toLocaleString("en-IN")}</span> per bed per day</span>
+              )}
+            </div>
+            {dailyRates.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No daily rates yet. In Service Rates, add rates with category Bed Charges / Room, or unit "per day" (e.g. Nursing, Diet).
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {dailyRates.map((r) => {
+                  const on = form.dailyRateIds.includes(r._id);
+                  return (
+                    <button key={r._id} type="button" onClick={() => toggleRate(r._id)} aria-pressed={on}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                        on ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
+                      }`}>
+                      {on && <CheckCircle2 className="h-3 w-3" />}
+                      {r.name} <span className={on ? "opacity-80" : "text-muted-foreground"}>₹{r.defaultRate.toLocaleString("en-IN")}</span>
+                      <span className={`text-[10px] ${on ? "opacity-70" : "text-muted-foreground"}`}>{r.category}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           {error && <p className="text-xs text-destructive mt-2">{error}</p>}
           <div className="flex gap-2 mt-3">
             <Button size="sm" onClick={save} disabled={busy}>{busy ? "Saving…" : editId ? "Update" : "Add Ward"}</Button>
@@ -1744,7 +1771,7 @@ function WardsBedsSection() {
       ) : (
         <div className="space-y-3">
           {wardList.map((w) => (
-            <WardCard key={w._id} ward={w} rateLabel={rateLabel(w.bedRateId)}
+            <WardCard key={w._id} ward={w} rateLabel={chargesLabel(w.dailyRateIds ?? [])}
               onEdit={() => startEdit(w)} onToggle={() => toggleWard(w)} onDelete={() => removeWard(w)} onChanged={refresh} />
           ))}
         </div>
@@ -1821,7 +1848,7 @@ function WardCard({ ward, rateLabel, onEdit, onToggle, onDelete, onChanged }: {
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               {ward.counts.total} bed(s) · {ward.counts.occupied} occupied
-              {rateLabel ? ` · ${rateLabel}` : " · no bed charge linked"}
+              {rateLabel ? ` · ${rateLabel}` : " · no daily charges linked"}
             </p>
           </div>
           <div className="flex items-center gap-1 shrink-0">

@@ -56,7 +56,7 @@ export default function BillTab({ admission, isAdmin }: { admission: any; isAdmi
         <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <div className="flex-1">
-            No bed charge is linked for {Array.from(new Set(data.missingRates)).join(", ")} — those days are not billed.
+            No daily charges are linked for {Array.from(new Set(data.missingRates)).join(", ")} — those days are not billed.
             {isAdmin && (
               <button className="ml-1 underline font-medium" onClick={() => setLocation("/settings?tab=wards")}>Set it in Wards & Beds</button>
             )}
@@ -90,7 +90,14 @@ export default function BillTab({ admission, isAdmin }: { admission: any; isAdmi
             <tbody>
               {data.segments.map((s) => (
                 <tr key={s.key} className="border-b last:border-0">
-                  <td className="px-4 py-1.5">{s.ward} <span className="text-muted-foreground">{s.bed}</span></td>
+                  <td className="px-4 py-1.5">
+                    {s.ward} <span className="text-muted-foreground">{s.bed}</span>
+                    {s.charges.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {s.charges.map((c) => `${c.name} ${formatCurrencyFull(c.rate)}`).join(" + ")}
+                      </p>
+                    )}
+                  </td>
                   <td className="px-4 py-1.5 whitespace-nowrap">{fmtDay(s.from)} – {s.ongoing ? "today" : fmtDay(s.to)}</td>
                   <td className="px-4 py-1.5 text-right">{s.days}</td>
                   <td className="px-4 py-1.5 text-right">{s.rate > 0 ? formatCurrencyFull(s.rate) : <span className="text-amber-700">not set</span>}</td>

@@ -410,7 +410,10 @@ export const ipd = {
 
 export interface IpdBedSegment {
   key: string; wardId: string; ward: string; bed: string; from: string; to: string;
-  ongoing: boolean; days: number; rateName: string; rate: number; amount: number;
+  ongoing: boolean; days: number;
+  charges: { key: string; rateId: string; name: string; category: string; rate: number; amount: number }[];
+  rate: number;     // all daily charges per day
+  amount: number;
 }
 export interface IpdBilling {
   segments: IpdBedSegment[];
@@ -436,7 +439,7 @@ export interface WardView {
   name: string;
   code: string;
   type: string;
-  bedRateId: string;
+  dailyRateIds: string[];   // Service Rates charged per day in this ward
   active: boolean;
   sortOrder: number;
   beds: BedView[];
@@ -445,8 +448,8 @@ export interface WardView {
 export const wards = {
   // Active wards with beds + live occupancy; all=true includes inactive (Settings)
   list:      (all = false) => get<WardView[]>(`/wards${all ? "?all=1" : ""}`),
-  create:    (data: { name: string; code?: string; type?: string; bedRateId?: string }) => post<any>("/wards", data),
-  update:    (id: string, data: Partial<{ name: string; code: string; type: string; bedRateId: string; sortOrder: number; active: boolean }>) =>
+  create:    (data: { name: string; code?: string; type?: string; dailyRateIds?: string[] }) => post<any>("/wards", data),
+  update:    (id: string, data: Partial<{ name: string; code: string; type: string; dailyRateIds: string[]; sortOrder: number; active: boolean }>) =>
     put<any>(`/wards/${id}`, data),
   remove:    (id: string) => del<any>(`/wards/${id}`),
   addBeds:   (wardId: string, data: { numbers: string[] } | { prefix: string; from: number; to: number; pad: number }) =>

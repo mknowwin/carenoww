@@ -12,8 +12,9 @@ import { AppError } from "../lib/AppError.js";
 // stay in one ward (admission → transfer → … → discharge/now); on a transfer day
 // both wards charge that date.
 //
-// Bed lines live on the admission's IPD bill(s) as items with itemId
-// "bed:<segment index>:<ward>". syncBedCharges() tops them up to the days owed
+// A ward links one or more daily charges (Ward.dailyRateIds → Service Rates:
+// room, nursing, diet…). Each charge of each segment is one bill line with itemId
+// "bed:<segment index>:<ward>:<rate id>". syncBedCharges() tops them up to the days owed
 // (adjusting the line on the open bill), so it is safe to call any time:
 // opening the Bill tab, on transfer and at discharge. No cron needed.
 
@@ -27,6 +28,15 @@ function calendarDays(from: Date, to: Date, tz: string): number {
 const fmtDay = (d: Date, tz: string) =>
   new Intl.DateTimeFormat("en-IN", { timeZone: tz, day: "2-digit", month: "short" }).format(d);
 
+export interface DailyCharge {
+  key: string;           // bill line itemId
+  rateId: string;
+  name: string;
+  category: string;      // Service Rates category
+  rate: number;          // per day
+  amount: number;        // days × rate
+}
+
 export interface BedSegment {
   key: string;
   wardId: string;
@@ -36,25 +46,26 @@ export interface BedSegment {
   to: Date;
   ongoing: boolean;
   days: number;
-  rateName: string;
-  rate: number;          // per day; 0 when the ward has no bed charge linked
+  charges: DailyCharge[];   // empty when the ward has no daily charge linked
+  rate: number;             // sum of the charges, per day
   amount: number;
 }
 
-async function wardRates(tenantId: string, wardIds: string[], wardNames: string[]) {
+async function wardCharges(tenantId: string, wardIds: string[], wardNames: string[]) {
   const wards = await Ward.find({
     tenantId,
     $or: [{ _id: { $in: wardIds.filter((id) => mongoose.Types.ObjectId.isValid(id)) } }, { name: { $in: wardNames } }],
   }).lean();
-  const rateIds = wards.map((w) => w.bedRateId).filter((id): id is string => !!id && mongoose.Types.ObjectId.isValid(id));
-  const rates = await ServiceRateMaster.find({ tenantId, _id: { $in: rateIds } }).lean();
+  const rateIds = wards.flatMap((w) => w.dailyRateIds ?? []).filter((id) => mongoose.Types.ObjectId.isValid(id));
+  // A deactivated rate stops being charged from the next sync
+  const rates = await ServiceRateMaster.find({ tenantId, _id: { $in: rateIds }, isActive: true }).lean();
   const rateById = new Map(rates.map((r) => [String(r._id), r]));
   const byId = new Map(wards.map((w) => [String(w._id), w]));
   const byName = new Map(wards.map((w) => [w.name.toUpperCase(), w]));
   return (wardId: string, name: string) => {
     const w = (wardId && byId.get(wardId)) || byName.get(name.toUpperCase());
-    const r = w?.bedRateId ? rateById.get(w.bedRateId) : undefined;
-    return { wardId: w ? String(w._id) : wardId, rateName: r?.name ?? "", rate: r?.defaultRate ?? 0 };
+    const charges = (w?.dailyRateIds ?? []).map((id) => rateById.get(id)).filter((r): r is NonNullable<typeof r> => !!r && r.defaultRate > 0);
+    return { wardId: w ? String(w._id) : wardId, charges };
   };
 }
 
@@ -71,23 +82,32 @@ export async function bedSegments(tenantId: string, admission: any, tz: string):
   }];
   for (const t of transfers) stops.push({ wardId: t.toWardId || "", ward: t.toWard, bed: t.toBed, from: new Date(t.at) });
 
-  const rateFor = await wardRates(tenantId, stops.map((s) => s.wardId), stops.map((s) => s.ward));
+  const chargesFor = await wardCharges(tenantId, stops.map((s) => s.wardId), stops.map((s) => s.ward));
   return stops.map((s, i) => {
     const to = i + 1 < stops.length ? stops[i + 1].from : end;
-    const { wardId, rateName, rate } = rateFor(s.wardId, s.ward);
+    const { wardId, charges: rates } = chargesFor(s.wardId, s.ward);
     const days = calendarDays(s.from, to, tz);
+    const key = `${BED_ITEM_PREFIX}${i}:${wardId || s.ward}`;
+    const charges: DailyCharge[] = rates.map((r) => ({
+      key: `${key}:${r._id}`, rateId: String(r._id), name: r.name, category: r.category,
+      rate: r.defaultRate, amount: days * r.defaultRate,
+    }));
+    const rate = charges.reduce((sum, c) => sum + c.rate, 0);
     return {
-      key: `${BED_ITEM_PREFIX}${i}:${wardId || s.ward}`,
-      wardId, ward: s.ward, bed: s.bed, from: s.from, to,
+      key, wardId, ward: s.ward, bed: s.bed, from: s.from, to,
       ongoing: i === stops.length - 1 && !admission.dischargeDate,
-      days, rateName, rate, amount: days * rate,
+      days, charges, rate, amount: days * rate,
     };
   });
 }
 
-function bedLineDescription(seg: BedSegment, tz: string) {
+function chargeLine(seg: BedSegment, c: DailyCharge, tz: string) {
   const range = seg.days === 1 ? fmtDay(seg.from, tz) : `${fmtDay(seg.from, tz)} – ${seg.ongoing ? "today" : fmtDay(seg.to, tz)}`;
-  return `Bed charges — ${seg.ward} ${seg.bed} (${range})`;
+  return {
+    description: `${c.name} — ${seg.ward} ${seg.bed} (${range})`,
+    // Bill items only know Room / Other; the rate name carries the detail
+    category: c.category === "Room" || c.category === "Bed Charges" ? "Room" : "Other",
+  };
 }
 
 function statusFor(amount: number, paid: number) {
@@ -120,23 +140,19 @@ export async function syncBedCharges(tenantId: string, admissionDbId: string, tz
       const newLines: any[] = [];
       let delta = 0;
 
-      for (const seg of segments) {
-        if (seg.rate <= 0) continue;
-        const diff = seg.days - (billed.get(seg.key) ?? 0);
-        const line = open?.items.find((it) => it.itemId === seg.key);
+      for (const seg of segments) for (const c of seg.charges) {
+        const diff = seg.days - (billed.get(c.key) ?? 0);
+        const line = open?.items.find((it) => it.itemId === c.key);
+        const { description, category } = chargeLine(seg, c, tz);
         if (line) {
-          const qty = line.quantity + diff;
           const before = line.total;
-          line.quantity = Math.max(qty, 0);
-          line.unitPrice = seg.rate;
-          line.total = line.quantity * seg.rate;
-          line.description = bedLineDescription(seg, tz);
+          line.quantity = Math.max(line.quantity + diff, 0);
+          line.unitPrice = c.rate;
+          line.total = line.quantity * c.rate;
+          line.description = description;
           delta += line.total - before;
         } else if (diff > 0) {
-          newLines.push({
-            itemId: seg.key, description: bedLineDescription(seg, tz), category: "Room",
-            quantity: diff, unitPrice: seg.rate, total: diff * seg.rate,
-          });
+          newLines.push({ itemId: c.key, description, category, quantity: diff, unitPrice: c.rate, total: diff * c.rate });
         }
         // diff < 0 with no editable line (already paid/locked): leave it for finance to adjust
       }
@@ -170,7 +186,7 @@ export async function admissionBilling(tenantId: string, admissionDbId: string, 
     BillingRecord.find({ tenantId, admissionId: String(admission._id), status: { $ne: "Cancelled" } }).sort({ createdAt: 1 }).lean(),
   ]);
   const totals = bills.reduce((t, b) => ({ amount: t.amount + b.amount, paid: t.paid + b.paid, balance: t.balance + b.balance }), { amount: 0, paid: 0, balance: 0 });
-  return { segments, bills, totals, missingRates: segments.filter((s) => s.rate <= 0).map((s) => s.ward) };
+  return { segments, bills, totals, missingRates: segments.filter((s) => s.charges.length === 0).map((s) => s.ward) };
 }
 
 export async function outstandingBalance(tenantId: string, admissionDbId: string) {

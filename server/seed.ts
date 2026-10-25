@@ -97,17 +97,20 @@ export async function seedTenant(tenantId: string) {
 
   // Seed wards & beds (Settings → Wards & Beds)
   const wardDefs = [
-    { name: "General Ward", code: "GW",  type: "General",  beds: 20, rate: 1500 },
-    { name: "ICU",          code: "ICU", type: "ICU",      beds: 6,  rate: 6000 },
-    { name: "Private Ward", code: "PW",  type: "Private",  beds: 8,  rate: 3500 },
-    { name: "Obs/Gyn",      code: "OB",  type: "Obs/Gyn",  beds: 6,  rate: 2000 },
-  ];
+    { name: "General Ward", code: "GW",  type: "General",  beds: 20, charges: [["General Ward bed", "Bed Charges", 1200], ["Nursing care — General", "Nursing", 300]] },
+    { name: "ICU",          code: "ICU", type: "ICU",      beds: 6,  charges: [["ICU bed", "Bed Charges", 5000], ["ICU nursing & monitoring", "Nursing", 1000]] },
+    { name: "Private Ward", code: "PW",  type: "Private",  beds: 8,  charges: [["Private room", "Room", 3500]] },
+    { name: "Obs/Gyn",      code: "OB",  type: "Obs/Gyn",  beds: 6,  charges: [["Obs/Gyn bed", "Bed Charges", 2000]] },
+  ] as const;
   const bedIdOf: Record<string, { wardId: string; bedId: string }> = {};
   for (const [i, w] of wardDefs.entries()) {
-    // Daily bed charge (Service Rates → Bed Charges) linked to the ward for IPD billing
-    await ServiceRateMaster.deleteMany({ tenantId: tid, category: "Bed Charges", name: `${w.name} bed` });
-    const rate = await ServiceRateMaster.create({ tenantId: tid, category: "Bed Charges", name: `${w.name} bed`, defaultRate: w.rate, unit: "per day" });
-    const ward = await Ward.create({ tenantId: tid, name: w.name, code: w.code, type: w.type, sortOrder: i, bedRateId: String(rate._id) });
+    // Daily charges (Service Rates, unit "per day") linked to the ward for IPD billing
+    const dailyRateIds: string[] = [];
+    for (const [name, category, defaultRate] of w.charges) {
+      await ServiceRateMaster.deleteMany({ tenantId: tid, name });
+      dailyRateIds.push(String((await ServiceRateMaster.create({ tenantId: tid, category, name, defaultRate, unit: "per day" }))._id));
+    }
+    const ward = await Ward.create({ tenantId: tid, name: w.name, code: w.code, type: w.type, sortOrder: i, dailyRateIds });
     const beds = await Bed.insertMany(Array.from({ length: w.beds }, (_, n) => ({
       tenantId: tid, wardId: ward._id, number: `${w.code}-${String(n + 1).padStart(2, "0")}`,
     })));

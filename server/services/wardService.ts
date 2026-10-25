@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Ward, { WARD_TYPES, WardType } from "../models/Ward.js";
 import Bed, { BED_STATUSES, BedStatus } from "../models/Bed.js";
 import IPDAdmission from "../models/IPDAdmission.js";
+import ServiceRateMaster from "../models/ServiceRateMaster.js";
 import { AppError } from "../lib/AppError.js";
 
 // Bed numbers are typed by staff — "gw-05", "GW-05 " and "GW -05" are the same bed.
@@ -12,6 +13,17 @@ export function normalizeBed(bed: string): string {
 export const bedKeyForId = (bedId: string) => `BED:${bedId}`;
 
 const isObjectId = (id: string) => mongoose.Types.ObjectId.isValid(id);
+
+// Daily charges linked to a ward: existing, active rates of this tenant, no duplicates
+async function cleanDailyRateIds(tenantId: string, raw: unknown): Promise<string[]> {
+  if (!Array.isArray(raw)) throw AppError.badRequest("dailyRateIds must be a list");
+  const ids = [...new Set(raw.map(String).filter(Boolean))];
+  if (ids.some((id) => !isObjectId(id))) throw AppError.badRequest("Invalid rate id");
+  if (ids.length === 0) return [];
+  const found = await ServiceRateMaster.countDocuments({ tenantId, _id: { $in: ids }, isActive: true });
+  if (found !== ids.length) throw AppError.badRequest("One or more daily charges were not found");
+  return ids;
+}
 
 function assertType(type?: string): WardType {
   if (type === undefined || type === "") return "General";
@@ -74,7 +86,7 @@ export async function listWards(tenantId: string, includeInactive = false) {
     const live = wardBeds.filter((b) => b.active);
     const occupied = live.filter((b) => b.occupant).length;
     return {
-      _id: String(w._id), name: w.name, code: w.code, type: w.type, bedRateId: w.bedRateId,
+      _id: String(w._id), name: w.name, code: w.code, type: w.type, dailyRateIds: w.dailyRateIds ?? [],
       active: w.active, sortOrder: w.sortOrder,
       beds: wardBeds,
       counts: {
@@ -140,7 +152,7 @@ export async function createWard(tenantId: string, body: Record<string, any>) {
     tenantId, name,
     code: String(body.code ?? "").trim(),
     type: assertType(body.type),
-    bedRateId: body.bedRateId || "",
+    dailyRateIds: body.dailyRateIds === undefined ? [] : await cleanDailyRateIds(tenantId, body.dailyRateIds),
     sortOrder: count,
   });
 }
@@ -162,7 +174,7 @@ export async function updateWard(tenantId: string, id: string, body: Record<stri
   }
   if (body.code !== undefined)      ward.code = String(body.code).trim();
   if (body.type !== undefined)      ward.type = assertType(body.type);
-  if (body.bedRateId !== undefined) ward.bedRateId = body.bedRateId || "";
+  if (body.dailyRateIds !== undefined) ward.dailyRateIds = await cleanDailyRateIds(tenantId, body.dailyRateIds);
   if (body.sortOrder !== undefined) ward.sortOrder = Number(body.sortOrder) || 0;
   if (body.active !== undefined) {
     if (!body.active && await IPDAdmission.exists({ tenantId, status: "Active", wardId: id })) {

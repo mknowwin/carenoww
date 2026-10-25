@@ -12,13 +12,13 @@ router.get("/", asyncHandler(async (req: AuthRequest, res) => {
   res.json({ success: true, data });
 }));
 
-// POST /api/wards  { name, code?, type?, bedRateId? }
+// POST /api/wards  { name, code?, type?, dailyRateIds? }
 router.post("/", requireRole("admin"), asyncHandler(async (req: AuthRequest, res) => {
   const ward = await wardService.createWard(req.user!.tenantId, req.body);
   res.status(201).json({ success: true, data: ward });
 }));
 
-// PUT /api/wards/:id  { name?, code?, type?, bedRateId?, sortOrder?, active? }
+// PUT /api/wards/:id  { name?, code?, type?, dailyRateIds?, sortOrder?, active? }
 router.put("/:id", requireRole("admin"), asyncHandler(async (req: AuthRequest, res) => {
   const ward = await wardService.updateWard(req.user!.tenantId, req.params.id, req.body);
   res.json({ success: true, data: ward });
