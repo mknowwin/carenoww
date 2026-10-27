@@ -124,6 +124,21 @@ function DrugAutocomplete({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Esc with the list open closes only the list. The dialog catches Esc on the
+  // document in the capture phase (before onKeyDown), so take it on window first —
+  // otherwise Esc closes the whole prescription dialog and drops the items typed.
+  useEffect(() => {
+    if (!open) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.target !== inputRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onEsc, true);
+    return () => window.removeEventListener("keydown", onEsc, true);
+  }, [open]);
+
   const select = (drug: InventoryDrug) => {
     onSelect(drug);
     setOpen(false);
@@ -135,7 +150,6 @@ function DrugAutocomplete({
     if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => Math.min(i + 1, suggestions.length - 1)); }
     if (e.key === "ArrowUp")   { e.preventDefault(); setActiveIdx((i) => Math.max(i - 1, 0)); }
     if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); select(suggestions[activeIdx]); }
-    if (e.key === "Escape")    { setOpen(false); }
   };
 
   return (
@@ -147,7 +161,7 @@ function DrugAutocomplete({
         value={value}
         onChange={(e) => { onChange(e.target.value); }}
         onFocus={() => { setFocused(true); if (value.length >= 2) fetchSuggestions(value); }}
-        onBlur={() => setFocused(false)}
+        onBlur={() => { setFocused(false); setOpen(false); }}   // Tab to the next field closes the list (picks use onMouseDown, so they keep focus)
         onKeyDown={handleKeyDown}
         autoComplete="off"
       />

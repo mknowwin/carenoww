@@ -238,7 +238,7 @@ export default function IPDChartPage() {
       {transferOpen && <TransferModal admission={adm} onClose={() => setTransferOpen(false)} onTransferred={() => { refresh(); setTransferOpen(false); }} />}
       {editOpen && <EditAdmissionModal admission={adm} onClose={() => setEditOpen(false)} onSaved={() => { refresh(); setEditOpen(false); }} />}
       <PrescriptionModal open={rxOpen} onClose={() => setRxOpen(false)}
-        onSaved={() => { qc.invalidateQueries({ queryKey: ["ipd-rx", id] }); setRxOpen(false); }}
+        onSaved={() => qc.invalidateQueries({ queryKey: ["ipd-rx", id] })}
         patientId={adm.patientId} patientName={adm.patientName} admissionId={adm._id} type="IPD" />
       <LabOrderModal open={labOpen} onClose={() => setLabOpen(false)}
         onSaved={() => qc.invalidateQueries({ queryKey: ["ipd-labs", id] })}
