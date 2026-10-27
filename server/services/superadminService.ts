@@ -4,6 +4,7 @@ import Tenant, { MODULE_KEYS } from "../models/Tenant.js";
 import User from "../models/User.js";
 import Patient from "../models/Patient.js";
 import { AppError } from "../lib/AppError.js";
+import { forgetTenantStatus } from "../middleware/auth.js";
 import { seedCommonIcdCodes } from "./icdCodeService.js";
 
 const SUPERADMIN_JWT_SECRET = process.env.SUPERADMIN_JWT_SECRET || "carenoww_superadmin_secret_change_in_prod";
@@ -11,7 +12,7 @@ const SUPERADMIN_EMAIL = process.env.SUPERADMIN_EMAIL || "superadmin@carenoww.io
 const SUPERADMIN_PASSWORD = process.env.SUPERADMIN_PASSWORD || "SuperAdmin@2026!";
 
 export async function login(email: string, password: string) {
-  if (!email || !password) {
+  if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
     throw AppError.badRequest("Email and password required");
   }
   if (email.toLowerCase() !== SUPERADMIN_EMAIL.toLowerCase()) {
@@ -131,24 +132,28 @@ export async function updateTenant(id: string, body: Record<string, any>) {
   }
   const tenant = await Tenant.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true });
   if (!tenant) throw AppError.notFound("Tenant not found");
+  forgetTenantStatus(id);
   return tenant;
 }
 
 export async function suspendTenant(id: string) {
   const tenant = await Tenant.findByIdAndUpdate(id, { status: "suspended" }, { new: true });
   if (!tenant) throw AppError.notFound("Tenant not found");
+  forgetTenantStatus(id);
   return { message: "Tenant suspended", tenant };
 }
 
 export async function activateTenant(id: string) {
   const tenant = await Tenant.findByIdAndUpdate(id, { status: "active" }, { new: true });
   if (!tenant) throw AppError.notFound("Tenant not found");
+  forgetTenantStatus(id);
   return { message: "Tenant activated", tenant };
 }
 
 export async function cancelTenant(id: string) {
   const tenant = await Tenant.findByIdAndUpdate(id, { status: "cancelled" }, { new: true });
   if (!tenant) throw AppError.notFound("Tenant not found");
+  forgetTenantStatus(id);
   return { message: "Tenant cancelled" };
 }
 

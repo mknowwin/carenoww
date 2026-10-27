@@ -35,6 +35,17 @@ import * as publicDisplayService from "./services/publicDisplayService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+// Flat query strings only: every value is a string (repeated keys joined with ","), so
+// "?status[$ne]=x" can't smuggle a Mongo operator object into a filter and "?search=a&search=b"
+// can't hand an array to code expecting a string. Express's default ("extended") parses both.
+app.set("query parser", (str: string) => {
+  const query: Record<string, string> = {};
+  for (const [key, value] of new URLSearchParams(str)) {
+    if (key === "__proto__") continue;
+    query[key] = Object.prototype.hasOwnProperty.call(query, key) ? `${query[key]},${value}` : value;
+  }
+  return query;
+});
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3201;
 
 // ── Request tracing ───────────────────────────────────────────────────────────

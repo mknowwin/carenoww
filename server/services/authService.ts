@@ -7,7 +7,7 @@ import { AppError } from "../lib/AppError.js";
 const JWT_SECRET = process.env.JWT_SECRET || "carenoww_dev_secret_change_in_prod";
 
 export async function login(email: string, password: string) {
-  if (!email || !password) {
+  if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
     throw AppError.badRequest("Email and password required");
   }
 
