@@ -97,7 +97,11 @@ function clinicalTime(raw: unknown, label: string, notBefore?: Date): Date {
   const now = Date.now();
   if (t.getTime() > now + 5 * 60000) throw AppError.badRequest(`${label} cannot be in the future`);
   if (t.getTime() < now - BACKDATE_DAYS * 86400000) throw AppError.badRequest(`${label} can be at most ${BACKDATE_DAYS} days ago`);
-  if (notBefore && t < notBefore) throw AppError.badRequest(`${label} cannot be before admission`);
+  if (notBefore && t < notBefore) {
+    // Forms send whole minutes, so a time in the admission's own minute counts as the admission time
+    if (t.getTime() < Math.floor(notBefore.getTime() / 60000) * 60000) throw AppError.badRequest(`${label} cannot be before admission`);
+    return new Date(notBefore);
+  }
   return t;
 }
 
@@ -189,6 +193,10 @@ export async function admitPatient(tenantId: string, body: Record<string, any>) 
     throw AppError.conflict(
       `${patient.name} is already admitted (${alreadyAdmitted.admissionId}) in ${alreadyAdmitted.ward} — Bed ${alreadyAdmitted.bedNumber}. Discharge first or transfer the patient.`
     );
+  }
+  const death = await IPDAdmission.findOne({ tenantId, patientId: uhid, "discharge.condition": "Expired" }).select("admissionId").lean();
+  if (death) {
+    throw AppError.conflict(`${patient.name} was recorded as expired (${death.admissionId}) and cannot be admitted.`);
   }
   const { bed, ward } = await resolveBedForAdmission(tenantId, String(bedId));
   const bedNumber = bed.number;

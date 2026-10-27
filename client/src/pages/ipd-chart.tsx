@@ -80,11 +80,13 @@ export default function IPDChartPage() {
     queryKey: ["ipd-rx", id],
     queryFn:  () => rxApi.list({ admissionId: id }),
     retry: false,
+    meta: { silent: true },   // 403 for finance / receptionist is shown in the tab, not as an error toast
   });
   const { data: labData, error: labError } = useQuery({
     queryKey: ["ipd-labs", id],
     queryFn:  () => labApi.list({ admissionId: id, limit: "100" }),
     retry: false,
+    meta: { silent: true },
   });
 
   const refresh = () => {

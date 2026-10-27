@@ -168,7 +168,9 @@ function DrugAutocomplete({
       {open && suggestions.length > 0 && dropPos && createPortal(
         <div
           ref={dropdownRef}
-          style={{ position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999 }}
+          // A modal dialog sets pointer-events:none on <body>; the portal sits outside the
+          // dialog, so it must opt back in or mouse clicks on a suggestion do nothing
+          style={{ position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999, pointerEvents: "auto" }}
           className="bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden"
         >
           <div className="px-2 py-1 border-b border-gray-100 flex items-center gap-1.5">
