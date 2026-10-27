@@ -1255,6 +1255,7 @@ export default function OPDPage() {
         appointmentId={activeAppt?._id}
         fromDoctor={activeAppt?.doctor}
         fromDoctorId={activeAppt?.doctorId}
+        diagnosis={soapNote.assessment}
       />
     </div>
   );

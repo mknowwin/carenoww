@@ -172,6 +172,22 @@ export default function SoapTextarea({ field, value, onChange, placeholder, clas
 
   const showList = open && items.length > 0;
 
+  // Esc with the list open closes only the list. Dialogs (Radix) listen for Esc on
+  // the document in the capture phase — before this textarea's onKeyDown runs — so
+  // the key is caught on window first; otherwise Esc would close the whole dialog
+  // (e.g. Admit / Discharge) and throw away everything typed.
+  useEffect(() => {
+    if (!showList) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.target !== ref.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onEsc, true);
+    return () => window.removeEventListener("keydown", onEsc, true);
+  }, [showList]);
+
   const pick = (s: Suggestion) => {
     const next = value.slice(0, s.start) + s.insert + value.slice(caret);
     const pos  = s.start + s.insert.length;
@@ -189,7 +205,6 @@ export default function SoapTextarea({ field, value, onChange, placeholder, clas
     if (e.key === "ArrowDown")      { e.preventDefault(); setActive((i) => (i + 1) % items.length); }
     else if (e.key === "ArrowUp")   { e.preventDefault(); setActive((i) => (i - 1 + items.length) % items.length); }
     else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pick(items[active]); }
-    else if (e.key === "Escape")    { e.preventDefault(); setOpen(false); }
   };
 
   return (

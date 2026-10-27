@@ -22,9 +22,12 @@ interface Props {
   fromDoctor?: string;
   fromDoctorId?: string;
   bedId?: string;         // pre-selected bed (Bed Map → free bed → Admit here)
+  diagnosis?: string;     // starting provisional diagnosis, e.g. the OPD SOAP Assessment
 }
 
-export default function AdmitModal({ open, onClose, onAdmitted, patientId: initPatientId, patientName: initPatientName, appointmentId, fromDoctor, fromDoctorId, bedId: initBedId }: Props) {
+const Req = () => <span className="text-destructive">*</span>;
+
+export default function AdmitModal({ open, onClose, onAdmitted, patientId: initPatientId, patientName: initPatientName, appointmentId, fromDoctor, fromDoctorId, bedId: initBedId, diagnosis: initDiagnosis }: Props) {
   const [search,    setSearch]    = useState("");
   const [selected,  setSelected]  = useState<any>(null);
   const [bedId,     setBedId]     = useState(initBedId ?? "");
@@ -35,6 +38,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
   const [admittedAt, setAdmittedAt] = useState("");   // "" = now; set only for late entry
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState("");
+  const [tried,     setTried]     = useState(false);   // show missing-field hints after the first submit
   const [showSearch, setShowSearch] = useState(!initPatientId);
 
   const { data: searchData } = useQuery({
@@ -56,24 +60,40 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
 
   useEffect(() => {
     if (!open) {
-      setSearch(""); setSelected(null); setBedId(""); setDept(""); setDiagnosis(""); setAdmittedAt(""); setError("");
+      setSearch(""); setSelected(null); setBedId(""); setDept(""); setDiagnosis(""); setAdmittedAt(""); setError(""); setTried(false);
       if (!initPatientId) setShowSearch(true);
     }
     if (open && initBedId) setBedId(initBedId);
+    if (open && initDiagnosis?.trim()) setDiagnosis((d) => d || initDiagnosis.trim());
     if (initPatientId && initPatientName) {
       setSelected({ uhid: initPatientId, name: initPatientName });
       setShowSearch(false);
     }
     if (fromDoctor)   setDoctor(fromDoctor);
     if (fromDoctorId) setDoctorId(fromDoctorId);
-  }, [open, initPatientId, initPatientName, fromDoctor, fromDoctorId, initBedId]);
+  }, [open, initPatientId, initPatientName, fromDoctor, fromDoctorId, initBedId, initDiagnosis]);
 
   const patients: any[] = searchData?.patients ?? [];
 
+  // Only the fields still empty, so the message says exactly what to fix
+  const missing = {
+    patient:   !selected,
+    bed:       !bedId,
+    doctor:    !doctor,
+    diagnosis: !diagnosis.trim(),
+  };
+  const missingLabels = [
+    missing.patient && "select a patient", missing.bed && "choose a bed",
+    missing.doctor && "select the admitting doctor", missing.diagnosis && "enter a provisional diagnosis",
+  ].filter(Boolean) as string[];
+  const missingMessage = missingLabels.length
+    ? `Please ${missingLabels.length > 1 ? `${missingLabels.slice(0, -1).join(", ")} and ${missingLabels[missingLabels.length - 1]}` : missingLabels[0]}.`
+    : "";
+  const flag = (k: keyof typeof missing) => (tried && missing[k] ? "border-destructive focus-visible:ring-destructive" : "");
+
   const handleSubmit = async () => {
-    if (!selected || !bedId || !diagnosis || !doctor) {
-      setError("Patient, bed, doctor and diagnosis are required"); return;
-    }
+    setTried(true);
+    if (missingLabels.length) { setError(""); return; }
     setSaving(true); setError("");
     try {
       // Server resolves the UHID and copies name/age/gender/phone from the patient record
@@ -84,7 +104,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
         admittingDoctorId:    doctorId,
         department:           dept || selected.department || "",
         bedId,
-        provisionalDiagnosis: diagnosis,
+        provisionalDiagnosis: diagnosis.trim(),
         ...(admittedAt ? { admissionDate: new Date(admittedAt).toISOString() } : {}),
       });
       onAdmitted();
@@ -107,8 +127,8 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
           {/* Patient selection */}
           {showSearch ? (
             <div>
-              <Label>Search Patient</Label>
-              <Input className="mt-1" placeholder="Name, UHID, phone..." value={search}
+              <Label>Search Patient <Req /></Label>
+              <Input className={`mt-1 ${flag("patient")}`} placeholder="Name, UHID, phone..." value={search}
                 onChange={(e) => setSearch(e.target.value)} />
               {patients.length > 0 && (
                 <div className="border rounded-md mt-1 divide-y max-h-40 overflow-y-auto">
@@ -145,8 +165,8 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
 
           {/* Ward + Bed */}
           <div>
-            <Label>Bed</Label>
-            <BedPicker className="mt-1" value={bedId} onChange={setBedId} />
+            <Label>Bed <Req /></Label>
+            <BedPicker className={`mt-1 ${flag("bed")}`} value={bedId} onChange={setBedId} />
           </div>
 
           {/* Department */}
@@ -162,13 +182,13 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
 
           {/* Admitting doctor */}
           <div>
-            <Label>Admitting Doctor</Label>
+            <Label>Admitting Doctor <Req /></Label>
             <Select value={doctorId} onValueChange={(id) => {
               const doc = (doctorsData ?? []).find((d: any) => d._id === id);
               setDoctorId(id);
               setDoctor(doc?.name ?? "");
             }}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder={doctor || "Select doctor"} /></SelectTrigger>
+              <SelectTrigger className={`mt-1 ${flag("doctor")}`}><SelectValue placeholder={doctor || "Select doctor"} /></SelectTrigger>
               <SelectContent>
                 {(doctorsData ?? []).map((d: any) => (
                   <SelectItem key={d._id} value={d._id}>{d.name} — {d.specialty || d.department}</SelectItem>
@@ -179,8 +199,8 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
 
           {/* Diagnosis */}
           <div>
-            <Label>Provisional Diagnosis</Label>
-            <SoapTextarea field="assessment" className="mt-1" placeholder="Initial diagnosis / reason for admission (ICD-10 suggestions as you type)"
+            <Label>Provisional Diagnosis <Req /></Label>
+            <SoapTextarea field="assessment" className={`mt-1 ${flag("diagnosis")}`} placeholder="Initial diagnosis / reason for admission (ICD-10 suggestions as you type)"
               value={diagnosis} onChange={setDiagnosis} />
           </div>
 
@@ -202,6 +222,7 @@ export default function AdmitModal({ open, onClose, onAdmitted, patientId: initP
             </div>
           )}
 
+          {tried && missingMessage && <p className="text-sm text-destructive">{missingMessage}</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="flex gap-2 justify-end pt-2">
