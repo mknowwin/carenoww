@@ -3,9 +3,10 @@ import Tenant from "../models/Tenant.js";
 import TenantDailyRollup from "../models/TenantDailyRollup.js";
 import TenantFilterCache from "../models/TenantFilterCache.js";
 import BillingRecord from "../models/BillingRecord.js";
-import { todayInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
+import { todayInTz, dateStrInTz, startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { _live, liveInvestigationTypes, liveDiagnoses } from "./insightsService.js";
 import { liveDrugSalesReport } from "./pharmacyReportService.js";
+import { logger } from "../lib/logger.js";
 
 const CONCURRENCY = 5;
 
@@ -88,6 +89,55 @@ export async function refreshTenantDay(tenantId: string, dateStr: string, tz: st
     },
     { upsert: true }
   );
+}
+
+// One refresh at a time per tenant-day: a refresh that started before a later write
+// could otherwise finish last and overwrite the rollup with older counts. Writes
+// arriving mid-refresh share the running promise and trigger one more pass.
+const dayRefreshes = new Map<string, { rerun: boolean; promise?: Promise<void> }>();
+
+function refreshTenantDaySerialized(tenantId: string, dateStr: string, tz: string): Promise<void> {
+  const key = `${tenantId}|${dateStr}`;
+  const running = dayRefreshes.get(key);
+  if (running) {
+    running.rerun = true;
+    return running.promise!;
+  }
+  const entry: { rerun: boolean; promise?: Promise<void> } = { rerun: false };
+  dayRefreshes.set(key, entry);
+  entry.promise = (async () => {
+    try {
+      do {
+        entry.rerun = false;
+        await refreshTenantDay(tenantId, dateStr, tz);
+      } while (entry.rerun);
+    } finally {
+      dayRefreshes.delete(key);
+    }
+  })();
+  return entry.promise;
+}
+
+// Recomputes the "final" rollups of past days after a late correction to their source
+// data, since reports read those days from the rollup and the nightly finalize job
+// only covers the trailing 7 days. Today is read live and future days have no rollup
+// yet, so both are skipped. Takes "YYYY-MM-DD" strings or Dates (bucketed into the
+// tenant's calendar day). Call it only after any transaction has committed, or it
+// recomputes without the change. Never throws: the write that triggered it has already
+// succeeded, and a failure leaves the rollup stale until a manual rollup:refresh.
+export async function refreshSettledDays(tenantId: string, dates: (string | Date | null | undefined)[], tz: string) {
+  try {
+    const today = todayInTz(tz);
+    const dayStrs = dates.map((d) => (d instanceof Date ? dateStrInTz(d, tz) : d));
+    const settled = [...new Set(dayStrs)].filter(
+      (d): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && d < today
+    );
+    await Promise.all(settled.map((d) => refreshTenantDaySerialized(tenantId, d, tz).catch((err) => {
+      logger.error({ module: "rollup", message: "Rollup refresh failed", tenantId, date: d, error: String(err) });
+    })));
+  } catch (err) {
+    logger.error({ module: "rollup", message: "Rollup refresh failed", tenantId, dates, error: String(err) });
+  }
 }
 
 export async function refreshFilterCache(tenantId: string) {

@@ -20,13 +20,13 @@ router.get("/orders/:id", requireRole("admin", "doctor", "nurse", "lab_tech"), a
 
 // ── POST /api/lab/orders ──────────────────────────────────────────────────────
 router.post("/orders", requireRole("admin", "doctor", "nurse", "lab_tech", "receptionist"), asyncHandler(async (req: AuthRequest, res) => {
-  const order = await labService.createOrder(req.user!.tenantId, req.user!.name, req.body);
+  const order = await labService.createOrder(req.user!.tenantId, req.user!.timezone, req.user!.name, req.body);
   res.status(201).json({ success: true, data: order });
 }));
 
 // ── PUT /api/lab/orders/:id — update status / enter result ───────────────────
 router.put("/orders/:id", requireRole("admin", "doctor", "nurse", "lab_tech"), asyncHandler(async (req: AuthRequest, res) => {
-  const data = await labService.updateOrder(req.user!.tenantId, req.user!.name, req.params.id, req.body);
+  const data = await labService.updateOrder(req.user!.tenantId, req.user!.timezone, req.user!.name, req.params.id, req.body);
   res.json({ success: true, data });
 }));
 

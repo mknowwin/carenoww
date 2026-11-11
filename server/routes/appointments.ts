@@ -34,7 +34,7 @@ router.get("/slots", asyncHandler(async (req: AuthRequest, res) => {
 
 // ── POST /api/appointments ────────────────────────────────────────────────────
 router.post("/", requireRole("admin", "doctor", "receptionist"), asyncHandler(async (req: AuthRequest, res) => {
-  const appointment = await appointmentService.createAppointment(req.user!.tenantId, req.body);
+  const appointment = await appointmentService.createAppointment(req.user!.tenantId, req.user!.timezone, req.body);
   res.status(201).json({ success: true, data: appointment });
 }));
 
@@ -46,7 +46,7 @@ router.get("/:id", asyncHandler(async (req: AuthRequest, res) => {
 
 // ── PUT /api/appointments/:id ─────────────────────────────────────────────────
 router.put("/:id", requireRole("admin", "doctor", "receptionist", "nurse"), asyncHandler(async (req: AuthRequest, res) => {
-  const data = await appointmentService.updateAppointment(req.user!.tenantId, req.user!.name, req.params.id, req.body);
+  const data = await appointmentService.updateAppointment(req.user!.tenantId, req.user!.timezone, req.user!.name, req.params.id, req.body);
   res.json({ success: true, data });
 }));
 
@@ -64,7 +64,7 @@ router.post("/:id/call", requireRole("admin", "doctor", "nurse"), asyncHandler(a
 
 // ── DELETE /api/appointments/:id — cancel ─────────────────────────────────────
 router.delete("/:id", requireRole("admin", "receptionist"), asyncHandler(async (req: AuthRequest, res) => {
-  const data = await appointmentService.cancelAppointment(req.user!.tenantId, req.params.id);
+  const data = await appointmentService.cancelAppointment(req.user!.tenantId, req.user!.timezone, req.params.id);
   res.json({ success: true, data });
 }));
 

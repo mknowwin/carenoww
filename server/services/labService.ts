@@ -5,6 +5,7 @@ import { createOrAppendBill } from "../lib/autoBilling.js";
 import { getNextId } from "../lib/counter.js";
 import { AppError } from "../lib/AppError.js";
 import { categorizeTest } from "../lib/testCategories.js";
+import { refreshSettledDays } from "./rollupService.js";
 
 async function nextLabId(tenantId: string): Promise<string> {
   return getNextId(tenantId, "lab", "LAB-");
@@ -43,7 +44,7 @@ export async function getOrder(tenantId: string, id: string) {
   return order;
 }
 
-export async function createOrder(tenantId: string, doctorName: string, body: Record<string, any>) {
+export async function createOrder(tenantId: string, tz: string, doctorName: string, body: Record<string, any>) {
   const { patientId, patientName, test } = body;
   if (!patientId || !patientName || !test) {
     throw AppError.badRequest("patientId, patientName, test required");
@@ -56,7 +57,7 @@ export async function createOrder(tenantId: string, doctorName: string, body: Re
     department = appt?.department || "";
   }
 
-  return LabOrder.create({
+  const order = await LabOrder.create({
     ...body,
     tenantId,
     labId,
@@ -66,9 +67,11 @@ export async function createOrder(tenantId: string, doctorName: string, body: Re
     parameters: body.parameters || [],
     sampleDate: body.sampleDate || null,
   });
+  await refreshSettledDays(tenantId, [order.ordered], tz);
+  return order;
 }
 
-export async function updateOrder(tenantId: string, userName: string, id: string, body: Record<string, any>) {
+export async function updateOrder(tenantId: string, tz: string, userName: string, id: string, body: Record<string, any>) {
   const allowed = ["status", "result", "diagnosis", "priority", "notes", "parameters", "sampleDate", "reportedBy"];
   const update: any = {};
   allowed.forEach((k) => { if (body[k] !== undefined) update[k] = body[k]; });
@@ -131,9 +134,16 @@ export async function updateOrder(tenantId: string, userName: string, id: string
         createdBy: userName,
       });
       autoBill = { billId: (bill as any).billId };
+      // May have appended to this encounter's older open bill.
+      await refreshSettledDays(tenantId, [bill.date], tz);
     } catch (billErr) {
       console.error("Auto-billing failed for lab order:", billErr);
     }
+  }
+
+  // Investigation totals count Completed orders on the day they were ordered.
+  if ((before.status === "Completed") !== (order.status === "Completed")) {
+    await refreshSettledDays(tenantId, [order.ordered], tz);
   }
 
   return { ...order.toObject(), autoBill };

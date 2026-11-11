@@ -5,7 +5,12 @@
 
 /** Returns "YYYY-MM-DD" in the given IANA timezone. */
 export function todayInTz(tz: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  return dateStrInTz(new Date(), tz);
+}
+
+/** Returns the "YYYY-MM-DD" calendar day of a moment in the given IANA timezone. */
+export function dateStrInTz(date: Date, tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(date);
 }
 
 /** Returns "YYYY-MM" in the given IANA timezone. */

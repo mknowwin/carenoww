@@ -32,13 +32,13 @@ router.put("/:id", requireRole("admin", "receptionist", "nurse", "finance", "pha
 
 // ── DELETE /api/billing/:id — permanently delete a draft bill ────────────────
 router.delete("/:id", requireRole("admin", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
-  const data = await billingService.deleteDraftBill(req.user!.tenantId, req.params.id);
+  const data = await billingService.deleteDraftBill(req.user!.tenantId, req.user!.timezone, req.params.id);
   res.json({ success: true, data });
 }));
 
 // ── POST /api/billing/:id/payments — record a payment installment ─────────────
 router.post("/:id/payments", requireRole("admin", "receptionist", "finance", "nurse", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
-  const updated = await billingService.postPayment(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
+  const updated = await billingService.postPayment(req.user!.tenantId, req.user!.timezone, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
   res.status(201).json({ success: true, data: updated });
 }));
 
@@ -62,7 +62,7 @@ router.put("/:id/notes/:noteId", requireRole("admin", "receptionist", "nurse", "
 
 // ── POST /api/billing/:id/cancel — void a bill (only if unpaid) ──────────────
 router.post("/:id/cancel", requireRole("admin", "finance", "pharmacy_admin", "pharmacist"), asyncHandler(async (req: AuthRequest, res) => {
-  const bill = await billingService.cancelBill(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body?.reason);
+  const bill = await billingService.cancelBill(req.user!.tenantId, req.user!.timezone, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body?.reason);
   res.json({ success: true, data: bill });
 }));
 
@@ -80,7 +80,7 @@ router.get("/:id/credit-notes", requireRole("admin", "finance", "receptionist", 
 
 // ── POST /api/billing/:id/pre-auth — submit insurance pre-authorisation ───────
 router.post("/:id/pre-auth", requireRole("admin", "finance", "receptionist"), asyncHandler(async (req: AuthRequest, res) => {
-  const bill = await billingService.submitPreAuth(req.user!.tenantId, req.params.id, req.body);
+  const bill = await billingService.submitPreAuth(req.user!.tenantId, req.user!.timezone, req.params.id, req.body);
   res.json({ success: true, data: bill });
 }));
 
@@ -92,13 +92,13 @@ router.put("/:id/pre-auth", requireRole("admin", "finance"), asyncHandler(async 
 
 // ── POST /api/billing/:id/claim — file insurance claim ───────────────────────
 router.post("/:id/claim", requireRole("admin", "finance"), asyncHandler(async (req: AuthRequest, res) => {
-  const updated = await billingService.fileClaim(req.user!.tenantId, req.params.id, req.body);
+  const updated = await billingService.fileClaim(req.user!.tenantId, req.user!.timezone, req.params.id, req.body);
   res.json({ success: true, data: updated });
 }));
 
 // ── PUT /api/billing/:id/claim — update claim status (through to Settled) ─────
 router.put("/:id/claim", requireRole("admin", "finance"), asyncHandler(async (req: AuthRequest, res) => {
-  const updated = await billingService.updateClaim(req.user!.tenantId, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
+  const updated = await billingService.updateClaim(req.user!.tenantId, req.user!.timezone, { id: req.user!.id, name: req.user!.name }, req.params.id, req.body);
   res.json({ success: true, data: updated });
 }));
 

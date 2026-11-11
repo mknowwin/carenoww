@@ -225,9 +225,10 @@ export async function getReferralStats(tenantId: string, tz: string, month?: str
   const nextMonth  = mon === 12 ? `${year + 1}-01-01` : `${year}-${pad(mon + 1)}-01`;
 
   const { field, source, master } = REFERRAL_STATS_TYPES[by];
-  // Doctor referrals booked before the Referral Source dropdown have no source set.
+  // Doctor referrals booked before the Referral Source dropdown have no source set. A
+  // doctor name left on another source's referral counts under that source only.
   const sourceMatch = by === "doctor"
-    ? { $or: [{ referralSource: "Doctor" }, { referringDoctor: { $nin: [null, ""] } }] }
+    ? { $or: [{ referralSource: "Doctor" }, { referralSource: { $in: [null, ""] }, referringDoctor: { $nin: [null, ""] } }] }
     : source ? { referralSource: source } : { [field]: { $nin: [null, ""] } };
 
   const groups: { names: string[]; count: number }[] = await Appointment.aggregate([
