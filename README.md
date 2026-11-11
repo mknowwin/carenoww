@@ -68,6 +68,12 @@ docker exec carenoww-app node scripts/run-script.mjs migrate-referral-fields
 #    --to = yesterday (not a future day). Past-day Insights numbers may change: they
 #    are corrected to match the records. No dry run; only cached totals are rewritten.
 docker exec carenoww-app node scripts/run-script.mjs refresh-rollups --from=YYYY-MM-DD --to=YYYY-MM-DD
+
+# e) Bill line ids: finalizing a draft whose drug quantity split across batches gave
+#    both batch lines the same id, so Return selected both rows. Gives each line its
+#    own id; past returns stay on the line they were made against.
+docker exec carenoww-app node scripts/run-script.mjs migrate-bill-item-ids --dry-run
+docker exec carenoww-app node scripts/run-script.mjs migrate-bill-item-ids
 ```
 
 If `migrate-ipd-phase1` reports **duplicate active admissions** (same bed or same patient twice), it skips creating the unique indexes. Discharge or fix the duplicates it lists, then run it again.

@@ -133,9 +133,15 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
         throw err;
       }
       await syncDrugStock(tenantId.toString(), item.drugId, session);
-      for (const u of used) {
+      // A line that already has an _id (a draft being finalized, or a saved
+      // line re-sent) keeps it on its first batch only; extra batch lines get
+      // their own _id from Mongoose. Sharing one _id made the return screen
+      // treat both batch lines as the same row.
+      const { _id: lineId, ...lineRest } = item;
+      used.forEach((u, i) => {
         result.push({
-          ...item,
+          ...lineRest,
+          ...(i === 0 && lineId ? { _id: lineId } : {}),
           quantity: u.deducted,
           unitPrice: u.mrpPerUnit,
           total: u.deducted * u.mrpPerUnit,
@@ -143,7 +149,7 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
           batchId: u.batchId.toString(),
           expiryDate: u.expiryDate,
         });
-      }
+      });
     } else {
       if (drug.stock < qty) {
         const err: any = new Error("Insufficient stock");
