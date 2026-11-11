@@ -8,6 +8,7 @@ import { startOfDayUtc, endOfDayUtc } from "../lib/dateUtils.js";
 import { getNextId } from "../lib/counter.js";
 import { fefoDeduct, syncDrugStock, getAvailableStock } from "../lib/fefo.js";
 import { AppError } from "../lib/AppError.js";
+import { refreshSettledDays } from "./rollupService.js";
 
 function computeStatus(amount: number, paid: number): "Paid" | "Partial" | "Pending" {
   if (paid >= amount) return "Paid";
@@ -275,11 +276,12 @@ export async function listBills(tenantId: string, user: { id: string; role: stri
 
 // Drafts never carry payments or deducted stock (see createBill/updateBill),
 // so there's nothing to reverse — a plain delete is safe.
-export async function deleteDraftBill(tenantId: string, id: string) {
+export async function deleteDraftBill(tenantId: string, tz: string, id: string) {
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
   if (bill.status !== "Draft") throw AppError.conflict("Only draft bills can be deleted");
   await BillingRecord.deleteOne({ _id: id, tenantId });
+  await refreshBillDays(tenantId, tz, bill);
   return { message: "Draft bill deleted" };
 }
 
@@ -491,12 +493,19 @@ function formatInTimezone(date: Date, timezone?: string): string {
   }
 }
 
+// The daily rollup counts a bill's type, status, amount and discount on the bill's own
+// `date`, and its cancelled amount on `cancelledAt`, so changing an older bill changes
+// those past days. Payments are stamped with the current time, which is read live.
+function refreshBillDays(tenantId: string, tz: string, bill: { date?: Date; cancelledAt?: Date } | null) {
+  return refreshSettledDays(tenantId, [bill?.date, bill?.cancelledAt], tz);
+}
+
 export async function updateBill(
   tenantId: string,
   user: { id: string; name: string },
   id: string,
   body: Record<string, any>,
-  timezone?: string
+  timezone: string
 ) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
@@ -621,7 +630,9 @@ export async function updateBill(
       }
     }
     if (!Object.keys(mongoUpdate.$push).length) delete mongoUpdate.$push;
-    return BillingRecord.findOneAndUpdate({ _id: id, tenantId }, mongoUpdate, { new: true });
+    const saved = await BillingRecord.findOneAndUpdate({ _id: id, tenantId }, mongoUpdate, { new: true });
+    await refreshBillDays(tenantId, timezone, saved);
+    return saved;
   }
 
   // Finalizing a draft draws a real fiscal invoice number and, for Pharmacy
@@ -667,10 +678,11 @@ export async function updateBill(
     await session.endSession();
   }
 
+  await refreshBillDays(tenantId, timezone, updated);
   return updated;
 }
 
-export async function postPayment(tenantId: string, user: { id: string; name: string }, id: string, body: Record<string, any>) {
+export async function postPayment(tenantId: string, tz: string, user: { id: string; name: string }, id: string, body: Record<string, any>) {
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
   if (bill.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
@@ -697,7 +709,7 @@ export async function postPayment(tenantId: string, user: { id: string; name: st
   const newBalance = bill.amount - newPaid;
   const newStatus = computeStatus(bill.amount, newPaid);
 
-  return BillingRecord.findByIdAndUpdate(
+  const updated = await BillingRecord.findByIdAndUpdate(
     bill._id,
     {
       $push: { payments: entry },
@@ -712,6 +724,8 @@ export async function postPayment(tenantId: string, user: { id: string; name: st
     },
     { new: true }
   );
+  await refreshBillDays(tenantId, tz, updated);
+  return updated;
 }
 
 export async function unlockBill(tenantId: string, user: { id: string; name: string }, id: string) {
@@ -766,7 +780,7 @@ export async function updateBillNote(tenantId: string, user: { id: string; name:
 // Cancels a bill outright. Only allowed before any payment has been
 // collected — once money has changed hands, use returnBillItems instead,
 // which handles the refund. Reverses any Pharmacy stock deduction.
-export async function cancelBill(tenantId: string, user: { id: string; name: string }, id: string, reason?: string) {
+export async function cancelBill(tenantId: string, tz: string, user: { id: string; name: string }, id: string, reason?: string) {
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
   if (bill.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
@@ -799,6 +813,7 @@ export async function cancelBill(tenantId: string, user: { id: string; name: str
     await session.endSession();
   }
 
+  await refreshBillDays(tenantId, tz, updated);
   return updated;
 }
 
@@ -928,13 +943,13 @@ export async function returnBillItems(
   return { bill, creditNote };
 }
 
-export async function submitPreAuth(tenantId: string, id: string, body: Record<string, any>) {
+export async function submitPreAuth(tenantId: string, tz: string, id: string, body: Record<string, any>) {
   const existing = await BillingRecord.findOne({ _id: id, tenantId });
   if (!existing) throw AppError.notFound("Bill not found");
   if (existing.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
   const { tpaName, policyNo, memberNo, preAuthNo } = body;
-  return BillingRecord.findOneAndUpdate(
+  const updated = await BillingRecord.findOneAndUpdate(
     { _id: id, tenantId },
     {
       $set: {
@@ -948,6 +963,8 @@ export async function submitPreAuth(tenantId: string, id: string, body: Record<s
     },
     { new: true }
   );
+  await refreshBillDays(tenantId, tz, updated);
+  return updated;
 }
 
 export async function updatePreAuth(tenantId: string, id: string, body: Record<string, any>) {
@@ -968,14 +985,14 @@ export async function updatePreAuth(tenantId: string, id: string, body: Record<s
   );
 }
 
-export async function fileClaim(tenantId: string, id: string, body: Record<string, any>) {
+export async function fileClaim(tenantId: string, tz: string, id: string, body: Record<string, any>) {
   const { claimAmount } = body;
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
   if (bill.docType === "CreditNote") throw AppError.conflict("Credit notes cannot be modified");
 
   const claimNo = await getNextId(tenantId, "claim", "CLM-");
-  return BillingRecord.findByIdAndUpdate(
+  const updated = await BillingRecord.findByIdAndUpdate(
     bill._id,
     {
       $set: {
@@ -988,9 +1005,11 @@ export async function fileClaim(tenantId: string, id: string, body: Record<strin
     },
     { new: true }
   );
+  await refreshBillDays(tenantId, tz, updated);
+  return updated;
 }
 
-export async function updateClaim(tenantId: string, user: { id: string; name: string }, id: string, body: Record<string, any>) {
+export async function updateClaim(tenantId: string, tz: string, user: { id: string; name: string }, id: string, body: Record<string, any>) {
   const { claimStatus, settledAmount, rejectionReason } = body;
   const bill = await BillingRecord.findOne({ _id: id, tenantId });
   if (!bill) throw AppError.notFound("Bill not found");
@@ -1024,7 +1043,9 @@ export async function updateClaim(tenantId: string, user: { id: string; name: st
     };
   }
 
-  return BillingRecord.findByIdAndUpdate(bill._id, updates, { new: true });
+  const updated = await BillingRecord.findByIdAndUpdate(bill._id, updates, { new: true });
+  await refreshBillDays(tenantId, tz, updated);
+  return updated;
 }
 
 export async function salesByStaff(

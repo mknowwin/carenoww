@@ -72,7 +72,7 @@ function sumCountByName<K extends string>(rows: ({ [k in K]: string } & { count:
     if (existing) existing.count += row.count;
     else map.set(k, { ...row, [keyField]: name });
   }
-  return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  return Array.from(map.values()).sort((a, b) => b.count - a.count || String(a[keyField]).localeCompare(String(b[keyField])));
 }
 
 // ── settled/live split ──────────────────────────────────────────────────────
@@ -338,7 +338,7 @@ async function liveReferralsBySource(tenantId: string, fromStr: string, toStr: s
     { $match: { tenantId: oid(tenantId), date: { $gte: fromStr, $lte: toStr }, status: { $ne: "Cancelled" }, referralSource: { $nin: [null, ""] } } },
     { $group: { _id: "$referralSource", count: { $sum: 1 } } },
     { $project: { _id: 0, referralSource: "$_id", count: 1 } },
-    { $sort: { count: -1 } },
+    { $sort: { count: -1, referralSource: 1 } },
   ]);
 }
 
@@ -352,7 +352,8 @@ export async function getReferralsBySource(tenantId: string, tz: string, from?: 
 
   const settledRows = rollups.flatMap((r) => r.appointments.byReferralSource.map((x) => ({ referralSource: x.source, count: x.count })));
   const tail = split.hasLiveTail ? await liveReferralsBySource(tenantId, split.today, split.today) : [];
-  return sumByKey([...settledRows, ...tail], "referralSource", ["count"]).sort((a, b) => b.count - a.count);
+  return sumByKey([...settledRows, ...tail], "referralSource", ["count"])
+    .sort((a, b) => b.count - a.count || a.referralSource.localeCompare(b.referralSource));
 }
 
 // ══ #13 Referrals by geographical area ════════════════════════════════════════

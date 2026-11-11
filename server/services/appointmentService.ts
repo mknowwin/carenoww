@@ -1,9 +1,19 @@
-import Appointment from "../models/Appointment.js";
+import Appointment, { IAppointment } from "../models/Appointment.js";
 import User from "../models/User.js";
 import ServiceRateMaster from "../models/ServiceRateMaster.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
 import { getNextId } from "../lib/counter.js";
 import { AppError } from "../lib/AppError.js";
+import { refreshSettledDays } from "./rollupService.js";
+
+// Appointment fields the daily rollups are computed from. Status only matters as
+// cancelled vs not, so check-in, call and vitals/SOAP saves never change a rollup.
+const ROLLUP_FIELDS = ["date", "doctor", "department", "referralSource", "area"] as const;
+
+function affectsRollups(before: IAppointment, after: IAppointment) {
+  return ROLLUP_FIELDS.some((f) => before[f] !== after[f])
+    || (before.status === "Cancelled") !== (after.status === "Cancelled");
+}
 
 // Token prefix per department
 const DEPT_PREFIX: Record<string, string> = {
@@ -166,19 +176,21 @@ export async function getSlots(tenantId: string, doctor: string, date: string) {
   return slots;
 }
 
-export async function createAppointment(tenantId: string, body: Record<string, any>) {
+export async function createAppointment(tenantId: string, tz: string, body: Record<string, any>) {
   const aptId = await nextAptId(tenantId);
   const { token: _t, tokenNumber: _tn, ...rest } = body;
 
   const { token, tokenNumber } = await generateToken(tenantId, rest.doctor, rest.department, rest.date);
 
-  return Appointment.create({
+  const appt = await Appointment.create({
     ...rest,
     tenantId,
     aptId,
     token,
     tokenNumber,
   });
+  await refreshSettledDays(tenantId, [appt.date], tz);
+  return appt;
 }
 
 export async function getAppointment(tenantId: string, id: string) {
@@ -187,7 +199,7 @@ export async function getAppointment(tenantId: string, id: string) {
   return appt;
 }
 
-export async function updateAppointment(tenantId: string, userName: string, id: string, body: Record<string, any>) {
+export async function updateAppointment(tenantId: string, tz: string, userName: string, id: string, body: Record<string, any>) {
   const { token: _t, tokenNumber: _tn, ...updates } = body;
 
   const before = await Appointment.findOne({ _id: id, tenantId });
@@ -264,10 +276,15 @@ export async function updateAppointment(tenantId: string, userName: string, id: 
         createdBy:     userName,
       });
       autoBill = { billId: (bill as any).billId };
+      // May have appended to this encounter's older open bill.
+      await refreshSettledDays(tenantId, [bill.date], tz);
     } catch (billErr) {
       console.error("Auto-billing failed for appointment:", billErr);
     }
   }
+
+  // A moved appointment changes the counts of both its old and new day.
+  if (affectsRollups(before, appt)) await refreshSettledDays(tenantId, [before.date, appt.date], tz);
 
   return { ...appt.toObject(), autoBill };
 }
@@ -310,12 +327,12 @@ export async function callPatient(tenantId: string, id: string) {
   return appt;
 }
 
-export async function cancelAppointment(tenantId: string, id: string) {
-  const appt = await Appointment.findOneAndUpdate(
+export async function cancelAppointment(tenantId: string, tz: string, id: string) {
+  const before = await Appointment.findOneAndUpdate(
     { _id: id, tenantId },
-    { status: "Cancelled" },
-    { new: true }
+    { status: "Cancelled" }
   );
-  if (!appt) throw AppError.notFound("Appointment not found");
+  if (!before) throw AppError.notFound("Appointment not found");
+  if (before.status !== "Cancelled") await refreshSettledDays(tenantId, [before.date], tz);
   return { message: "Appointment cancelled" };
 }
