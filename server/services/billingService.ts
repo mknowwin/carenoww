@@ -32,20 +32,46 @@ const FINANCIAL_FIELDS = new Set(["items", "amount", "discount", "discountType",
 type StockShortage = { drugId: string; name?: string; batchNo?: string; required?: number; available: number };
 
 export async function checkPharmacyStock(tenantId: string, pharmacyItems: any[], session?: mongoose.ClientSession) {
-  const shortages: StockShortage[] = [];
+  // Several lines can draw on the same stock (the same drug twice, or the same
+  // pinned batch twice), so availability is checked against the summed quantity
+  // per pool, not line by line: pinned-batch lines per (drug, batch), FEFO lines
+  // per drug — FEFO's pool also has to cover the pinned lines of that drug.
+  const pinned = new Map<string, { item: any; qty: number }>();
+  const byDrug = new Map<string, { item: any; qty: number; pinnedQty: number; hasFefo: boolean }>();
   for (const item of pharmacyItems) {
-    const qty = item.quantity ?? 1;
+    const qty = Number(item.quantity ?? 1);
+    const drugKey = item.drugId.toString();
+    const d = byDrug.get(drugKey) ?? { item, qty: 0, pinnedQty: 0, hasFefo: false };
+    d.qty += qty;
+    if (item.batchId) {
+      d.pinnedQty += qty;
+      const k = `${drugKey}|${item.batchId}`;
+      const p = pinned.get(k) ?? { item, qty: 0 };
+      p.qty += qty;
+      pinned.set(k, p);
+    } else {
+      d.hasFefo = true;
+      if (!d.item || d.item.batchId) d.item = item;
+    }
+    byDrug.set(drugKey, d);
+  }
+
+  const shortages: StockShortage[] = [];
+  const name = (item: any) => item.description || item.name || item.drugName;
+  for (const { item, qty } of pinned.values()) {
     const available = await getAvailableStock(tenantId.toString(), item.drugId, session, item.batchId);
     if (available < qty) {
-      shortages.push({
-        drugId: item.drugId,
-        name: item.description || item.name || item.drugName,
-        // Only a pinned batch limits availability to that batch; under FEFO the
-        // shortage is across all batches, so naming one would be misleading.
-        batchNo: item.batchId ? item.batchNo : undefined,
-        required: qty,
-        available,
-      });
+      shortages.push({ drugId: item.drugId, name: name(item), batchNo: item.batchNo, required: qty, available });
+    }
+  }
+  for (const [drugId, d] of byDrug) {
+    // A drug billed only from pinned batches was fully checked above.
+    if (!d.hasFefo) continue;
+    if (shortages.some((s) => s.drugId?.toString() === drugId)) continue;
+    const available = await getAvailableStock(tenantId.toString(), drugId, session);
+    if (available < d.qty) {
+      // Under FEFO the shortage is across all batches, so no batch is named.
+      shortages.push({ drugId: d.item.drugId, name: name(d.item), required: d.qty, available });
     }
   }
   return shortages;
@@ -135,10 +161,45 @@ export async function deductAndExpandPharmacyItems(tenantId: string, allItems: a
       const ratio = newStock / reorderLevel;
       const status = ratio <= 0.5 ? "Critical" : ratio <= 1 ? "Low" : "OK";
       await DrugInventory.findByIdAndUpdate(item.drugId, { $set: { stock: newStock, status } }, { session });
-      result.push(item);
+      // MRP is set on the drug master (inventory add / GRN), never at billing —
+      // ignore whatever price the client sent, same as the batch branch above.
+      const mrp = drug.mrpPerUnit ?? 0;
+      result.push({ ...item, unitPrice: mrp, total: Number((qty * mrp).toFixed(2)) });
     }
   }
   return result;
+}
+
+// Editing a finalized Pharmacy bill must not change the price of an inventory
+// drug line: a line that was already on the bill keeps its stored price (matched
+// by drugId + batchId), and anything else is priced from the batch / drug
+// master MRP. Lines without a drugId (manual items) are left as sent.
+async function lockPharmacyPrices(tenantId: string, existingItems: any[], nextItems: any[]): Promise<any[]> {
+  const key = (it: any) => `${it.drugId?.toString() ?? ""}|${it.batchId?.toString() ?? ""}`;
+  const stored = new Map<string, number>();
+  for (const it of existingItems) {
+    if (it.category === "Pharmacy" && it.drugId) stored.set(key(it), Number(it.unitPrice) || 0);
+  }
+  const out: any[] = [];
+  for (const it of nextItems) {
+    if (!(it.category === "Pharmacy" && it.drugId)) { out.push(it); continue; }
+    let price = stored.get(key(it));
+    if (price === undefined) {
+      const batch = it.batchId && mongoose.isValidObjectId(it.batchId)
+        ? await DrugBatch.findOne({ _id: it.batchId, tenantId, drugId: it.drugId }).select("mrpPerUnit").lean()
+        : null;
+      if (batch) price = (batch as any).mrpPerUnit ?? 0;
+      else {
+        const drug = mongoose.isValidObjectId(it.drugId)
+          ? await DrugInventory.findOne({ _id: it.drugId, tenantId }).select("mrpPerUnit").lean()
+          : null;
+        price = (drug as any)?.mrpPerUnit ?? Number(it.unitPrice) ?? 0;
+      }
+    }
+    const qty = it.quantity ?? 1;
+    out.push({ ...it, unitPrice: price, total: Number((qty * (price ?? 0)).toFixed(2)) });
+  }
+  return out;
 }
 
 // Reverses the stock impact of Pharmacy line items being cancelled/returned —
@@ -421,12 +482,10 @@ export async function createBill(tenantId: string, user: { name: string; id: str
       let amountForDoc = finalAmount;
       if (pharmacyItems.length) {
         itemsForDoc = await deductAndExpandPharmacyItems(tenantId, items, session);
-        // Only recompute the amount when it was originally derived from
-        // items (not an explicit caller-supplied flat amount) — a batch
-        // split can change the total when per-batch MRPs differ.
-        if (!amount) {
-          amountForDoc = calcAmount(itemsForDoc, discount, discountType, discountPercent);
-        }
+        // Always recompute: inventory drug lines are repriced at the batch /
+        // master MRP, so a client-sent amount built on edited prices (or a
+        // batch split with different per-batch MRPs) can't stand.
+        amountForDoc = calcAmount(itemsForDoc, discount, discountType, discountPercent);
       }
 
       const [created] = await BillingRecord.create([buildDoc(billId, payments, itemsForDoc, amountForDoc)], { session });
@@ -530,7 +589,13 @@ export async function updateBill(
   if (discountType !== undefined) update.discountType = discountType;
   if (discountPercent !== undefined) update.discountPercent = discountPercent;
 
-  const finalItems = items !== undefined ? items : existing.items;
+  // Finalized Pharmacy bills: inventory drug lines keep their MRP (drafts are
+  // repriced when they're finalized, in deductAndExpandPharmacyItems).
+  const finalItems = items === undefined
+    ? existing.items
+    : existing.type === "Pharmacy" && existing.status !== "Draft"
+      ? await lockPharmacyPrices(tenantId, existing.items as any[], items)
+      : items;
   const finalDiscount = discount !== undefined ? discount : existing.discount;
   const finalDiscountType = discountType ?? existing.discountType;
   const finalDiscountPct = discountPercent ?? existing.discountPercent;
@@ -617,7 +682,7 @@ export async function updateBill(
     // progress, so their saves aren't logged.
     if (!wasDraft && !stayingDraft) {
       const changes = describeBillEdit(existing, {
-        items, amount: update.amount, discount: update.discount, payer, paymentMode, status,
+        items: items !== undefined ? finalItems : undefined, amount: update.amount, discount: update.discount, payer, paymentMode, status,
       });
       if (changes.length) {
         const now = new Date();

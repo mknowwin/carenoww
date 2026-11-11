@@ -93,6 +93,8 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
   const [savingNote, setSavingNote] = useState(false);
   const [rateNameFilter, setRateNameFilter] = useState("");
   const [drugSearch, setDrugSearch] = useState("");
+  // Inline notice when a drug that's already on the bill is picked again.
+  const [drugNotice, setDrugNotice] = useState<string | null>(null);
   const [manualPharmacy, setManualPharmacy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -163,6 +165,20 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     } catch {
       // fall back to inventory-level values
     }
+    // Same drug picked again. With a single batch (or no batch tracking) a second
+    // row would just split one stock pool, so send the user to the existing row's
+    // quantity instead. With several batches a second row can be deliberate
+    // (another batch), so allow it but warn.
+    const existing = items.find((it) => it.drugId === drug._id);
+    if (existing && batches.length <= 1) {
+      setDrugSearch("");
+      setDrugNotice(`${drug.name} is already on the bill — change the quantity on that row.`);
+      setJustAddedItem(existing);
+      return;
+    }
+    setDrugNotice(existing
+      ? `${drug.name} is already added — this row will be billed separately. Pick a different batch or change the quantity on the first row.`
+      : null);
     const newItem: BillItem = { description: drug.name, category: "Pharmacy", quantity: 1, unitPrice, total: unitPrice, batchNo, expiryDate, batchId, manualBatch: false, drugId: drug._id, combination: drug.combination || undefined, availableQty, batches, allocations };
     setItems((prev) => [
       ...prev.filter((it) => it.description !== "" || it.unitPrice > 0),
@@ -252,6 +268,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
     setEditingNoteText("");
     setRateNameFilter("");
     setDrugSearch("");
+    setDrugNotice(null);
     setManualPharmacy(false);
     setJustAddedItem(null);
     setSavedBill(null); setError(""); setUhidStatus("idle");
@@ -653,7 +670,7 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                     </div>
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input className="h-8 pl-8 text-sm" placeholder="Type drug name to search…" value={drugSearch} onChange={(e) => setDrugSearch(e.target.value)} />
+                      <Input className="h-8 pl-8 text-sm" placeholder="Type drug name to search…" value={drugSearch} onChange={(e) => { setDrugSearch(e.target.value); setDrugNotice(null); }} />
                     </div>
                     {drugSearch.length >= 1 && drugList.length > 0 && (
                       <div className="border rounded-md divide-y bg-white max-h-40 overflow-y-auto">
@@ -672,6 +689,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                     {drugSearch.length >= 1 && drugList.length === 0 && (
                       <p className="text-xs text-muted-foreground">No drugs found for "{drugSearch}".</p>
                     )}
+                    {drugNotice && (
+                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">{drugNotice}</p>
+                    )}
                   </div>
 
                   {/* Added drugs table */}
@@ -682,12 +702,16 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                       </div>
                       {items.filter((it) => it.description !== "" || it.unitPrice > 0).map((item, idx) => {
                         const limit = stockLimit(item);
+                        const isDuplicate = !!item.drugId && items.filter((it) => it.drugId === item.drugId).length > 1;
                         const overStock = limit != null && item.quantity > limit.qty;
                         return (
                           <div key={idx} className="space-y-0.5">
                             <div className="grid grid-cols-[2fr_72px_88px_70px_32px] gap-1.5 items-center">
                               <span className="text-sm pl-1 leading-tight">
-                                <span className="truncate block">{item.description}</span>
+                                <span className="truncate block">
+                                  {item.description}
+                                  {isDuplicate && <span className="ml-1.5 text-[9px] font-semibold uppercase text-amber-700 bg-amber-100 rounded px-1 py-px align-middle">Duplicate</span>}
+                                </span>
                                 {item.allocations && item.allocations.length <= 1 && item.batchNo && (
                                   <span className="block text-[10px] text-muted-foreground">
                                     Batch: {item.batchNo}{item.expiryDate ? ` · Exp: ${new Date(item.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}` : ""}
@@ -697,6 +721,11 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                               <Input ref={item === justAddedItem ? qtyInputRef : undefined} className={`h-7 text-xs text-center ${overStock ? "border-red-400 focus-visible:ring-red-400" : ""}`} type="number" min={1} step={1} value={item.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateItem(items.indexOf(item), "quantity", parseInt(e.target.value) || 1)} />
                               {item.allocations && item.allocations.length > 1 ? (
                                 <div className="h-7 text-xs text-right flex items-center justify-end pr-1 text-muted-foreground italic">Multiple</div>
+                              ) : item.drugId ? (
+                                // MRP comes from the batch (GRN) or drug master — not editable here; use Discount instead.
+                                <div className="h-7 text-xs text-right flex items-center justify-end pr-1 font-medium" title="MRP from inventory (set at GRN / inventory entry)">
+                                  ₹{(item.unitPrice || 0).toLocaleString()}
+                                </div>
                               ) : (
                                 <Input className="h-7 text-xs text-right" type="number" min={0} step="0.01" value={item.unitPrice || ""} onChange={(e) => updateItem(items.indexOf(item), "unitPrice", parseFloat(e.target.value) || 0)} />
                               )}
@@ -733,6 +762,9 @@ export default function BillingModal({ open, onClose, existing, payOnly = false,
                                   </p>
                                 ))}
                               </div>
+                            )}
+                            {item.drugId && !(item.unitPrice > 0) && (
+                              <p className="text-[10px] text-amber-700 pl-1">MRP not set — update it in Pharmacy → Inventory / batch.</p>
                             )}
                             {overStock && (
                               <p className="text-[10px] text-red-600 pl-1">

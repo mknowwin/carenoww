@@ -15,6 +15,8 @@ npm run build      # client + server bundle + migration scripts → dist/
 
 This release adds the IPD rebuild (ward & bed master, inpatient chart, daily bed/nursing/diet charges, unpaid-balance check at discharge), patient history, ICD-10 codes, per-user rate limiting and auth hardening.
 
+Pharmacy billing: drug MRP is no longer editable on the Billing screen. Inventory drug lines are always billed at the batch MRP (GRN) or the drug master MRP, and the server ignores any client-sent price. Use Discount for price cuts. The same drug can't be added twice when it has a single batch. The GRN item row is wider, so the MRP is fully visible.
+
 It changes existing data (IPD admissions are re-keyed from patient `_id` to UHID), so **take a backup first**. All commands below run on the production host from the `carenoww/` folder. The container is `carenoww-app`.
 
 ### 1. Back up the database
@@ -100,6 +102,7 @@ Use `--year=YYYY` for a newer release. Re-running the import refreshes the catal
 - Open an active admission's chart: vitals, notes, orders and the Bill tab load, and the Bill tab shows the daily charges.
 - OPD Assessment shows ICD-10 suggestions while typing.
 - Patients → View History shows visits and IPD stays.
+- Billing → new Pharmacy bill: MRP is shown read-only, adding the same single-batch drug twice is blocked, and the saved line matches the inventory MRP.
 
 ### Rolling back
 
