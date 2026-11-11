@@ -5,6 +5,7 @@ import Ward from "../models/Ward.js";
 import ServiceRateMaster from "../models/ServiceRateMaster.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
 import { AppError } from "../lib/AppError.js";
+import { refreshSettledDays } from "./rollupService.js";
 
 // ── Bed charges ───────────────────────────────────────────────────────────────
 // Billing rule (hospital policy): CALENDAR DAYS — every date the patient is in a
@@ -124,9 +125,13 @@ export async function syncBedCharges(tenantId: string, admissionDbId: string, tz
   const segments = await bedSegments(tenantId, until ? { ...admission, dischargeDate: until } : admission, tz);
   const admissionId = String(admission._id);
 
+  // Dates of the bills changed, recomputed after commit: the open IPD bill is
+  // usually dated at admission, so topping it up changes that past day's totals.
+  let touchedBillDates: Date[] = [];
   const session = await mongoose.startSession();
   try {
     await session.withTransaction(async () => {
+      touchedBillDates = []; // the callback can be retried
       const bills = await BillingRecord.find({ tenantId, admissionId, status: { $ne: "Cancelled" } }).sort({ createdAt: 1 }).session(session);
 
       // Days already billed per segment, across every bill of this admission
@@ -163,17 +168,20 @@ export async function syncBedCharges(tenantId: string, admissionDbId: string, tz
         open.balance = open.amount - open.paid;
         open.status = statusFor(open.amount, open.paid) as any;
         await open.save({ session });
+        touchedBillDates.push(open.date);
       }
       if (newLines.length) {
-        await createOrAppendBill({
+        const bill = await createOrAppendBill({
           tenantId, patientId: admission.patientId, patientName: admission.patientName,
           admissionId, items: newLines, type: "IPD", createdBy: userName,
         }, session);
+        touchedBillDates.push(bill.date);
       }
     });
   } finally {
     await session.endSession();
   }
+  await refreshSettledDays(tenantId, touchedBillDates, tz);
   return segments;
 }
 

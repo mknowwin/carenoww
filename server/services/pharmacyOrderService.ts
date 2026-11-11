@@ -5,6 +5,7 @@ import { getNextId } from "../lib/counter.js";
 import { createOrAppendBill } from "../lib/autoBilling.js";
 import { checkPharmacyStock, deductAndExpandPharmacyItems, insufficientStockError } from "./billingService.js";
 import { AppError } from "../lib/AppError.js";
+import { refreshSettledDays } from "./rollupService.js";
 
 function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -75,7 +76,7 @@ function buildBillItems(dispensedItems: any[]) {
 // and deducts stock atomically with order creation and auto-billing, exactly
 // like updateOrder's dispense transition below — blocking entirely if any
 // item's requested quantity exceeds available stock.
-export async function createOrder(tenantId: string, userName: string, body: Record<string, any>) {
+export async function createOrder(tenantId: string, tz: string, userName: string, body: Record<string, any>) {
   const {
     patientId, patientName, drug, qty, unit,
     items, type, doctor, time, prescriptionId, admissionId,
@@ -130,6 +131,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
   const session = await mongoose.startSession();
   let order: any;
   let autoBill: { billId: string } | undefined;
+  let billDate: Date | undefined;
   try {
     await session.withTransaction(async () => {
       if (pharmacyItems.length) {
@@ -155,6 +157,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
           createdBy: userName,
         }, session);
         autoBill = { billId: (bill as any).billId };
+        billDate = bill.date;
       }
     });
   } catch (err: any) {
@@ -166,6 +169,8 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
     await session.endSession();
   }
 
+  // An inpatient dispense can append to the admission's older open IPD bill.
+  await refreshSettledDays(tenantId, [billDate, order.dispensedAt], tz);
   return { ...order.toObject(), autoBill };
 }
 
@@ -173,7 +178,7 @@ export async function createOrder(tenantId: string, userName: string, body: Reco
 // auto-bills atomically with the status transition, rejecting (409) if
 // requested quantities exceed available stock — no status change, no stock
 // touched, no bill created on a shortage.
-export async function updateOrder(tenantId: string, userName: string, id: string, body: Record<string, any>) {
+export async function updateOrder(tenantId: string, tz: string, userName: string, id: string, body: Record<string, any>) {
   const order = await PharmacyOrder.findOne({ _id: id, tenantId });
   if (!order) throw AppError.notFound("Order not found");
 
@@ -189,6 +194,11 @@ export async function updateOrder(tenantId: string, userName: string, id: string
       { $set: update },
       { new: true }
     );
+    // Drug sales count Dispensed orders on their dispensedAt day, so editing a
+    // dispensed order (items, date, or un-dispensing it) changes those days.
+    if (order.status === "Dispensed" || updated?.status === "Dispensed") {
+      await refreshSettledDays(tenantId, [order.dispensedAt, updated?.dispensedAt], tz);
+    }
     return { ...(updated?.toObject() ?? {}) };
   }
 
@@ -202,6 +212,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
   const session = await mongoose.startSession();
   let updated: any;
   let autoBill: { billId: string } | undefined;
+  let billDate: Date | undefined;
   try {
     await session.withTransaction(async () => {
       if (pharmacyItems.length) {
@@ -230,6 +241,7 @@ export async function updateOrder(tenantId: string, userName: string, id: string
           createdBy:   userName,
         }, session);
         autoBill = { billId: (bill as any).billId };
+        billDate = bill.date;
       }
     });
   } catch (err: any) {
@@ -241,5 +253,8 @@ export async function updateOrder(tenantId: string, userName: string, id: string
     await session.endSession();
   }
 
+  // An inpatient dispense can append to an older open IPD bill, and a dispense
+  // date sent by the caller can be in the past.
+  await refreshSettledDays(tenantId, [billDate, updated?.dispensedAt], tz);
   return { ...(updated?.toObject() ?? {}), autoBill };
 }

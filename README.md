@@ -41,7 +41,7 @@ The image build also bundles the migration scripts into `dist/scripts/`, which t
 
 ### 4. Run the data migrations (in this order)
 
-Run each one with `--dry-run` first, read the output, then run it for real. Both are safe to re-run.
+Run each one with `--dry-run` first where it has one, read the output, then run it for real. All are safe to re-run.
 
 ```bash
 # a) IPD Phase 1: patientId → UHID, normalise beds, move transfer "rounds" to transfers[],
@@ -53,6 +53,19 @@ docker exec carenoww-app node scripts/run-script.mjs migrate-ipd-phase1
 #    and link those admissions to them (must run after a)
 docker exec carenoww-app node scripts/run-script.mjs migrate-ipd-wards --dry-run
 docker exec carenoww-app node scripts/run-script.mjs migrate-ipd-wards
+
+# c) Referral fields: set referralSource="Doctor" on old doctor referrals that have no
+#    source, so the Doctor count in Insights → By Source matches the Dashboard; trim
+#    spaces around area / referrer names. Changes appointment data.
+docker exec carenoww-app node scripts/run-script.mjs migrate-referral-fields --dry-run
+docker exec carenoww-app node scripts/run-script.mjs migrate-referral-fields
+
+# d) Rebuild the cached daily report totals, once. Late edits to appointments, lab
+#    orders, bills and pharmacy orders now update them as they happen, but changes made
+#    before this release never reached Insights. --from = first day with data,
+#    --to = yesterday (not a future day). Past-day Insights numbers may change: they
+#    are corrected to match the records. No dry run; only cached totals are rewritten.
+docker exec carenoww-app node scripts/run-script.mjs refresh-rollups --from=YYYY-MM-DD --to=YYYY-MM-DD
 ```
 
 If `migrate-ipd-phase1` reports **duplicate active admissions** (same bed or same patient twice), it skips creating the unique indexes. Discharge or fix the duplicates it lists, then run it again.
