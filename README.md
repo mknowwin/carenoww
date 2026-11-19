@@ -109,6 +109,7 @@ Use `--year=YYYY` for a newer release. Re-running the import refreshes the catal
 - OPD Assessment shows ICD-10 suggestions while typing.
 - Patients → View History shows visits and IPD stays.
 - Billing → new Pharmacy bill: MRP is shown read-only, adding the same single-batch drug twice is blocked, and the saved line matches the inventory MRP.
+- Pharmacy → Drug Tracking (admin/pharmacist): pick a drug; the Stock check tile says OK (or shows the unexplained difference) and the GRN / Bill entries tabs list its receipts and sales.
 
 ### Rolling back
 
@@ -133,3 +134,4 @@ All scripts are safe to re-run. In the container: `docker exec carenoww-app node
 | `migrate:masters` | `migrate-backfill-masters` | Backfill referral doctor, area/VHN and supplier masters |
 | `rollup:backfill` | `refresh-rollups` | Recompute cached daily report totals: `--from=YYYY-MM-DD --to=YYYY-MM-DD` |
 | `rollup:refresh` | `refresh-rollups` | Recompute one day: `--date=YYYY-MM-DD` |
+| `drug:ledger` | `drug-ledger` | **Read-only.** Explain one drug's stock: `--tenant=<slug\|id\|name> --drug="<name\|id>" [--from= --to=] [--full]` — GRNs, bills, cancels, returns, adjustments, bill edits, batches, running balance and findings (same data as Pharmacy → Drug Tracking) |
