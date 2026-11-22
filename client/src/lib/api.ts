@@ -325,6 +325,8 @@ export const pharmacy = {
     drugSales: (date?: string) => get<{ rows: any[]; totalQuantity: number; totalAmount: number }>(`/pharmacy/reports/drug-sales${date ? `?date=${date}` : ""}`),
     nonMoving: (sinceDays?: string) => get<any[]>(`/pharmacy/reports/non-moving${sinceDays ? `?sinceDays=${sinceDays}` : ""}`),
   },
+  drugTracking: (drugId: string, from: string, to: string) =>
+    get<any>(`/pharmacy/drug-tracking/${encodeURIComponent(drugId)}?${new URLSearchParams({ from, to }).toString()}`),
 };
 
 // ── Billing ───────────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearch as useWouterSearch } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { DRUG_UNITS } from "@/lib/constants";
 import {
   Pill, Search, Plus, AlertTriangle, CheckCircle2,
   Clock, Package, RefreshCw, FileText, History, ShoppingCart, SlidersHorizontal, Pencil, Trash2,
-  BarChart3, Printer, Upload, ChevronLeft, ChevronRight, Layers,
+  BarChart3, Printer, Upload, ChevronLeft, ChevronRight, Layers, Activity,
 } from "lucide-react";
 import { printExpiryReport, printCurrentStockReport, printDrugSalesReport, printNonMovingDrugs } from "@/lib/print";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,6 +28,7 @@ import BulkUploadInventoryModal from "@/components/modals/BulkUploadInventoryMod
 import HistoryModal from "@/components/modals/HistoryModal";
 import DrugBatchesModal from "@/components/modals/DrugBatchesModal";
 import AdmittedBadge, { useActiveAdmissions } from "@/components/AdmittedBadge";
+import DrugTrackingTab from "@/components/pharmacy/DrugTrackingTab";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -201,6 +203,7 @@ export default function PharmacyPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const canManageInventory = user?.role === "admin" || user?.role === "pharmacy_admin";
+  const canTrackDrugs = user?.role === "admin" || user?.role === "pharmacist" || user?.role === "pharmacy_admin";
 
   // Orders tab
   const [orderSearch, setOrderSearch]   = useState("");
@@ -236,6 +239,22 @@ export default function PharmacyPage() {
 
   // Reports tab
   const [activeTab, setActiveTab]           = useState("prescriptions");
+  // Drug Tracking tab — `?tab=tracking&drug=<id>` deep-links straight to a drug
+  const [trackDrugId, setTrackDrugId]       = useState<string | null>(null);
+  const wouterSearch = useWouterSearch();
+  useEffect(() => {
+    const params = new URLSearchParams(wouterSearch);
+    const tab = params.get("tab");
+    if (tab === "tracking" && canTrackDrugs) {
+      setActiveTab("tracking");
+      const drug = params.get("drug");
+      if (drug) setTrackDrugId(drug);
+    } else if (tab && ["prescriptions", "inventory", "grn", "movements", "reports"].includes(tab)) {
+      setActiveTab(tab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wouterSearch]);
+  const trackDrug = (id: string) => { setTrackDrugId(id); setActiveTab("tracking"); };
   const [stockStatusFilter, setStockStatusFilter] = useState<"All" | "OK" | "Low" | "Critical">("All");
   const [stockSearch, setStockSearch]       = useState("");
   const [expiryWithin, setExpiryWithin]     = useState("90");
@@ -488,13 +507,16 @@ export default function PharmacyPage() {
       </div>
 
       {/* Main Tabs */}
-      <Tabs defaultValue="prescriptions" onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-4">
           <TabsTrigger value="prescriptions" className="gap-1.5"><Pill className="h-3.5 w-3.5" />Orders</TabsTrigger>
           <TabsTrigger value="inventory"     className="gap-1.5"><Package className="h-3.5 w-3.5" />Inventory</TabsTrigger>
           <TabsTrigger value="grn"           className="gap-1.5"><FileText className="h-3.5 w-3.5" />GRN</TabsTrigger>
           <TabsTrigger value="movements"     className="gap-1.5"><History className="h-3.5 w-3.5" />Stock Movements</TabsTrigger>
           <TabsTrigger value="reports"       className="gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Reports</TabsTrigger>
+          {canTrackDrugs && (
+            <TabsTrigger value="tracking"    className="gap-1.5"><Activity className="h-3.5 w-3.5" />Drug Tracking</TabsTrigger>
+          )}
         </TabsList>
 
         {/* ── Tab 1: Orders ───────────────────────────────────────────────── */}
@@ -668,6 +690,11 @@ export default function PharmacyPage() {
                     <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setHistoryDrug(drug)} title="History">
                       <History className="h-3.5 w-3.5" />
                     </Button>
+                    {canTrackDrugs && (
+                      <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => trackDrug(drug._id)} title="Track — GRNs, bills, stock reconciliation">
+                        <Activity className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     {drug.isBatchTracked && (
                       <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setBatchesDrug(drug)} title="Batches">
                         <Layers className="h-3.5 w-3.5" />
@@ -1189,6 +1216,18 @@ export default function PharmacyPage() {
           </div>
 
         </TabsContent>
+
+        {/* ── Tab 6: Drug Tracking ────────────────────────────────────────── */}
+        {canTrackDrugs && (
+          <TabsContent value="tracking">
+            <DrugTrackingTab
+              drugs={inventory}
+              drugId={trackDrugId}
+              onDrugChange={setTrackDrugId}
+              timezone={user?.timezone ?? "Asia/Kolkata"}
+            />
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}

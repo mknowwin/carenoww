@@ -7,6 +7,7 @@ import * as drugBatchService from "../services/drugBatchService.js";
 import * as grnService from "../services/grnService.js";
 import * as stockAdjustmentService from "../services/stockAdjustmentService.js";
 import * as pharmacyReportService from "../services/pharmacyReportService.js";
+import * as drugTrackingService from "../services/drugTrackingService.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -153,6 +154,14 @@ router.get("/reports/drug-sales", requireRole("admin", "pharmacist", "pharmacy_a
 router.get("/reports/non-moving", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
   const { sinceDays } = req.query as Record<string, string>;
   const data = await pharmacyReportService.getNonMovingDrugs(req.user!.tenantId, parseInt(sinceDays) || 90);
+  res.json({ success: true, data });
+}));
+
+// GET /api/pharmacy/drug-tracking/:drugId?from=YYYY-MM-DD&to=YYYY-MM-DD — one drug's GRNs,
+// bills, returns, adjustments, batch status and a reconciliation of its stock (read-only)
+router.get("/drug-tracking/:drugId", requireRole("admin", "pharmacist", "pharmacy_admin"), asyncHandler(async (req: AuthRequest, res) => {
+  const { from, to } = req.query as Record<string, string>;
+  const data = await drugTrackingService.getDrugTracking(req.user!.tenantId, req.params.drugId, { from, to, tz: req.user!.timezone });
   res.json({ success: true, data });
 }));
 
