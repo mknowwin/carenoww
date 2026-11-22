@@ -2007,3 +2007,107 @@ function openA5(title: string, body: string) {
     popupBlockedToast();
   }
 }
+
+// ── printDrugLedger — Pharmacy → Drug Tracking ────────────────────────────────
+// Same print window and clinic header as bills. Summary, findings and the period
+// ledger oldest first, with opening/closing balance (mirrors lib/drugLedgerPdf.ts).
+export function printDrugLedger(t: any, clinicOverride?: ClinicInfo) {
+  const clinic = clinicOverride ?? getStoredClinic();
+  const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+  const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const dt = (v: any) => new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
+  const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "long", timeStyle: "short" } as any);
+  const s = t.summary;
+  const unit = esc(t.drug.unit || "units");
+  const typeLabel: Record<string, string> = { BillEdit: "Bill edit", Manual: "Manual edit" };
+
+  const rows = (t.ledger ?? []).filter((r: any) => r.inPeriod);
+  const totIn = Math.round(rows.filter((r: any) => r.qty > 0).reduce((a: number, r: any) => a + r.qty, 0) * 100) / 100;
+  const totOut = Math.round(rows.filter((r: any) => r.qty < 0).reduce((a: number, r: any) => a - r.qty, 0) * 100) / 100;
+  const ok = Math.abs(s.unexplained) < 0.01;
+
+  const summaryCells: [string, string][] = [
+    ["Opening", String(s.opening)],
+    ["Received", signed(s.received)],
+    ["Sold", s.sold ? `-${s.sold}` : "0"],
+    ["Cancelled", signed(s.cancelled)],
+    ["Returned", signed(s.returned)],
+    ["Adjusted", signed(s.adjusted)],
+    ["Bill edits", signed(s.billEdited)],
+    ["Closing", String(s.closing)],
+    ["On hand", `${s.actualStock}${s.held ? ` (+${s.held} held)` : ""}`],
+    ["Unexplained", ok ? "0 (OK)" : signed(s.unexplained)],
+  ];
+
+  const findingsHtml = (t.findings ?? []).map((f: any) => {
+    const color = f.level === "critical" ? "#dc2626" : f.level === "warning" ? "#b45309" : "#1d4ed8";
+    return `<div style="margin-bottom:6px;"><div style="font-weight:700;color:${color};font-size:12px;">${esc(f.title)}</div><div style="font-size:11px;color:#444;">${esc(f.detail)}</div></div>`;
+  }).join("");
+
+  const rowHtml = rows.map((r: any) => `
+    <tr>
+      <td class="nw">${esc(dt(r.at))}</td>
+      <td class="nw">${esc(typeLabel[r.type] ?? r.type)}</td>
+      <td class="nw">${esc(r.ref)}</td>
+      <td>${esc(r.party)}</td>
+      <td class="nw">${esc(r.batchNo)}</td>
+      <td class="tr" style="color:#15803d;">${r.qty > 0 ? `+${r.qty}` : ""}</td>
+      <td class="tr" style="color:#dc2626;">${r.qty < 0 ? -r.qty : ""}</td>
+      <td class="tr"><strong>${r.balance}</strong></td>
+      <td style="font-size:10px;color:#555;">${esc(r.note)}</td>
+    </tr>`).join("");
+
+  // Landscape: the ledger has nine columns. Override base()'s portrait page width.
+  const body = `
+    <style>
+      @page{size:A4 landscape;margin:12mm 10mm;}
+      .page{max-width:1080px;}
+      .ledger td,.ledger th{padding:4px 6px;}
+      .ledger .nw{white-space:nowrap;}
+    </style>
+    ${clinicHeader(clinic, "Drug Ledger")}
+
+    <div class="doc-row">
+      <div>
+        <div class="doc-title">${esc(t.drug.name)}</div>
+        <div style="font-size:12px;color:#555;margin-top:4px;">Period: ${day(t.period.from)} — ${day(t.period.to)}</div>
+      </div>
+      <div class="doc-id">
+        <div>Stock on hand: <strong>${t.drug.stock} ${unit}</strong></div>
+        <div style="font-size:11px;color:#888;">Reorder level ${t.drug.reorderLevel} · ${t.drug.isBatchTracked ? "Batch-tracked" : "Not batch-tracked"}</div>
+        <div style="font-size:11px;color:#888;">Generated: ${generatedAt}</div>
+      </div>
+    </div>
+
+    <table class="no-break" style="table-layout:fixed;">
+      <thead><tr>${summaryCells.map(([k]) => `<th class="tc" style="font-size:9px;padding:4px;">${k}</th>`).join("")}</tr></thead>
+      <tbody><tr>${summaryCells.map(([k, v]) => `<td class="tc" style="font-weight:700;${k === "Unexplained" ? `color:${ok ? "#15803d" : "#dc2626"};` : ""}">${esc(v)}</td>`).join("")}</tr></tbody>
+    </table>
+
+    ${findingsHtml ? `<div class="notes no-break" style="background:#f8fafc;border-color:#e2e8f0;"><strong style="color:#111;">Why is stock ${t.drug.stock}?</strong>${findingsHtml}</div>` : ""}
+
+    <table class="ledger" style="font-size:11px;">
+      <thead>
+        <tr>
+          <th class="nw">Date</th><th>Type</th><th>Ref</th><th style="width:170px;">Party</th>
+          <th>Batch</th><th class="tr">In</th><th class="tr">Out</th>
+          <th class="tr">Balance</th><th style="width:300px;">Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>${day(t.period.from)}</td><td>Opening</td><td></td><td></td><td></td><td></td><td></td><td class="tr"><strong>${s.opening}</strong></td><td style="font-size:10px;color:#555;">Balance brought forward</td></tr>
+        ${rowHtml || `<tr><td colspan="9" style="text-align:center;color:#888;padding:16px;">No stock movement in this period</td></tr>`}
+        <tr class="tot-row">
+          <td colspan="5" class="tr">TOTAL</td><td class="tr">+${totIn}</td><td class="tr">${totOut}</td><td class="tr">${s.closing}</td><td>Closing balance</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="sig-wrap"><div class="sig">Pharmacist</div></div>
+
+    <div class="footer">
+      <p>Drug Ledger — ${esc(t.drug.name)} — ${esc(clinic.name)} &nbsp;·&nbsp; ${generatedAt}</p>
+    </div>`;
+  open(`Drug Ledger — ${t.drug.name}`, body);
+}

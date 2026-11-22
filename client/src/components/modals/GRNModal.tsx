@@ -30,6 +30,12 @@ interface Props {
   existing?: any;
 }
 
+// Item row columns: Drug, Unit, Batch, Expiry, Qty, Purchase, MRP, GST, delete.
+// Number columns get fixed minimums so prices like 12345.50 fit; header and rows share this.
+const GRN_COLS = "grid-cols-[minmax(180px,2fr)_84px_minmax(100px,1.2fr)_136px_72px_minmax(96px,1fr)_minmax(96px,1fr)_64px_32px] gap-2";
+// Hide number spinners so the digits get the full input width.
+const NUM_INPUT = "tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
 function F({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
 }
@@ -259,7 +265,7 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit GRN" : "Receive Stock (GRN)"}</DialogTitle>
         </DialogHeader>
@@ -345,9 +351,9 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
               </div>
 
               {/* Column headers */}
-              <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_0.6fr_32px] gap-1.5 text-xs font-medium text-muted-foreground px-1">
+              <div className={`grid ${GRN_COLS} text-xs font-medium text-muted-foreground px-1`}>
                 <span>Drug</span><span>Unit</span><span>Batch No</span><span>Expiry</span>
-                <span>Qty</span><span>Purchase ₹</span><span>MRP ₹</span><span>GST %</span><span></span>
+                <span>Qty</span><span className="text-right pr-2">Purchase ₹</span><span className="text-right pr-2">MRP ₹</span><span>GST %</span><span></span>
               </div>
 
               {items.map((item, idx) => {
@@ -359,7 +365,7 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                 const showOpeningExpiry = needsOpeningExpiry(selectedDrug);
                 return (
                 <div key={idx} className="space-y-1.5">
-                <div className="grid grid-cols-[2fr_0.9fr_1.5fr_1fr_0.7fr_0.8fr_0.8fr_0.6fr_32px] gap-1.5 items-center">
+                <div className={`grid ${GRN_COLS} items-center`}>
                   {item.drugId ? (
                     <div className="flex items-center gap-1.5 h-8 border rounded-md px-2 bg-background text-xs">
                       <span className="flex-1 truncate">{item.drugName}</span>
@@ -406,10 +412,10 @@ export default function GRNModal({ open, onClose, inventory, existing }: Props) 
                   </Select>
                   <Input className="h-8 text-xs" placeholder="BT-001" value={item.batchNo} onChange={(e) => setItem(idx, "batchNo", e.target.value)} />
                   <Input type="date" className="h-8 text-xs" value={item.expiryDate} onChange={(e) => setItem(idx, "expiryDate", e.target.value)} />
-                  <Input type="number" min={1} className="h-8 text-xs" placeholder="0" value={item.quantityReceived || ""} onChange={(e) => setItem(idx, "quantityReceived", Number(e.target.value))} />
-                  <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.purchasePricePerUnit || ""} onChange={(e) => setItem(idx, "purchasePricePerUnit", Number(e.target.value))} />
-                  <Input type="number" min={0} step="0.01" className="h-8 text-xs" placeholder="0.00" value={item.mrpPerUnit || ""} onChange={(e) => setItem(idx, "mrpPerUnit", Number(e.target.value))} />
-                  <Input type="number" min={0} max={100} step="0.01" className="h-8 text-xs" placeholder="0" value={item.gstPercent || ""} onChange={(e) => setItem(idx, "gstPercent", Number(e.target.value))} />
+                  <Input type="number" min={1} className={`h-8 text-xs ${NUM_INPUT}`} placeholder="0" value={item.quantityReceived || ""} onChange={(e) => setItem(idx, "quantityReceived", Number(e.target.value))} />
+                  <Input type="number" min={0} step="0.01" className={`h-8 text-xs text-right ${NUM_INPUT}`} placeholder="0.00" value={item.purchasePricePerUnit || ""} onChange={(e) => setItem(idx, "purchasePricePerUnit", Number(e.target.value))} />
+                  <Input type="number" min={0} step="0.01" className={`h-8 text-xs text-right ${NUM_INPUT}`} placeholder="0.00" value={item.mrpPerUnit || ""} onChange={(e) => setItem(idx, "mrpPerUnit", Number(e.target.value))} />
+                  <Input type="number" min={0} max={100} step="0.01" className={`h-8 text-xs ${NUM_INPUT}`} placeholder="0" value={item.gstPercent || ""} onChange={(e) => setItem(idx, "gstPercent", Number(e.target.value))} />
                   <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600" disabled={items.length === 1} onClick={() => removeRow(idx)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>

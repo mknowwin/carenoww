@@ -15,6 +15,8 @@ npm run build      # client + server bundle + migration scripts → dist/
 
 This release adds the IPD rebuild (ward & bed master, inpatient chart, daily bed/nursing/diet charges, unpaid-balance check at discharge), patient history, ICD-10 codes, per-user rate limiting and auth hardening.
 
+Pharmacy billing: drug MRP is no longer editable on the Billing screen. Inventory drug lines are always billed at the batch MRP (GRN) or the drug master MRP, and the server ignores any client-sent price. Use Discount for price cuts. The same drug can't be added twice when it has a single batch. The GRN item row is wider, so the MRP is fully visible.
+
 It changes existing data (IPD admissions are re-keyed from patient `_id` to UHID), so **take a backup first**. All commands below run on the production host from the `carenoww/` folder. The container is `carenoww-app`.
 
 ### 1. Back up the database
@@ -66,6 +68,12 @@ docker exec carenoww-app node scripts/run-script.mjs migrate-referral-fields
 #    --to = yesterday (not a future day). Past-day Insights numbers may change: they
 #    are corrected to match the records. No dry run; only cached totals are rewritten.
 docker exec carenoww-app node scripts/run-script.mjs refresh-rollups --from=YYYY-MM-DD --to=YYYY-MM-DD
+
+# e) Bill line ids: finalizing a draft whose drug quantity split across batches gave
+#    both batch lines the same id, so Return selected both rows. Gives each line its
+#    own id; past returns stay on the line they were made against.
+docker exec carenoww-app node scripts/run-script.mjs migrate-bill-item-ids --dry-run
+docker exec carenoww-app node scripts/run-script.mjs migrate-bill-item-ids
 ```
 
 If `migrate-ipd-phase1` reports **duplicate active admissions** (same bed or same patient twice), it skips creating the unique indexes. Discharge or fix the duplicates it lists, then run it again.
@@ -100,6 +108,8 @@ Use `--year=YYYY` for a newer release. Re-running the import refreshes the catal
 - Open an active admission's chart: vitals, notes, orders and the Bill tab load, and the Bill tab shows the daily charges.
 - OPD Assessment shows ICD-10 suggestions while typing.
 - Patients → View History shows visits and IPD stays.
+- Billing → new Pharmacy bill: MRP is shown read-only, adding the same single-batch drug twice is blocked, and the saved line matches the inventory MRP.
+- Pharmacy → Drug Tracking (admin/pharmacist): pick a drug; the Stock check tile says OK (or shows the unexplained difference) and the GRN / Bill entries tabs list its receipts and sales.
 
 ### Rolling back
 
@@ -124,3 +134,4 @@ All scripts are safe to re-run. In the container: `docker exec carenoww-app node
 | `migrate:masters` | `migrate-backfill-masters` | Backfill referral doctor, area/VHN and supplier masters |
 | `rollup:backfill` | `refresh-rollups` | Recompute cached daily report totals: `--from=YYYY-MM-DD --to=YYYY-MM-DD` |
 | `rollup:refresh` | `refresh-rollups` | Recompute one day: `--date=YYYY-MM-DD` |
+| `drug:ledger` | `drug-ledger` | **Read-only.** Explain one drug's stock: `--tenant=<slug\|id\|name> --drug="<name\|id>" [--from= --to=] [--full]` — GRNs, bills, cancels, returns, adjustments, bill edits, batches, running balance and findings (same data as Pharmacy → Drug Tracking) |
